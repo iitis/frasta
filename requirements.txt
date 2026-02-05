@@ -1,0 +1,14 @@
+h5py
+matplotlib
+pandas
+PyOpenGL
+PyOpenGL-accelerate
+PyQt5
+pyqtgraph
+scikit-image
+scikit-learn
+trimesh
+coverage
+pytest
+pytest-cov
+pytest-mock
