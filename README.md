@@ -6,6 +6,24 @@ The toolbox provides tools for masking, interpolation-based hole filling, manual
 
 FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intended for use in materials science, fracture mechanics, tribology, biomedical engineering, and related research domains.
 
+## Input data format
+
+FRASTA-toolbox currently supports structured grid data exported as text-based XYZ files, where each row corresponds to a single grid point (X, Y, Z). Additional internal formats (NPZ, HDF5) are supported for faster reload and reproducible workflows.
+
+## Typical workflow (GUI)
+
+1. Import one or more fracture-surface scans in CSV (XYZ grid) format.
+2. Apply basic preprocessing:
+   - define region of interest (ROI),
+   - adjust value range using histogram thresholding,
+   - fill missing data if necessary.
+3. Align two opposing fracture surfaces using interactive translation and rotation.
+4. Place cross-sectional profiles to inspect local deviations and contacts.
+<!---
+5. Export aligned data, profiles, and measurements for further analysis or documentation.
+-->
+
+
 ## Configuration
 
 ### Windows
@@ -43,4 +61,5 @@ FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intend
 
 * running tests:
 `./.venv/bin/python -m pytest -v -s`
+
 
