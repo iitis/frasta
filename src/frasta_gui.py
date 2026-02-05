@@ -1,3 +1,15 @@
+"""Main GUI module for FRASTA-toolbox application.
+
+This module provides the main window and core functionality for loading, viewing,
+processing, and analyzing 2D scan data. It includes features for:
+- Loading scan data from various formats (CSV, NPZ, H5)
+- Multi-tab interface for managing multiple scans
+- ROI-based masking (circular and rectangular)
+- Data processing (hole filling, Gaussian smoothing, offset/tilt correction)
+- 3D visualization and profile analysis
+- Scan comparison and overlay views
+"""
+
 import h5py
 import numpy as np
 import pandas as pd
@@ -20,21 +32,50 @@ import logging
 logger = logging.getLogger(__name__)
 
 def resource_path(relative_path):
-    """Zwraca prawidłową ścieżkę do plików zarówno w exe, jak i w .py"""
+    """Returns the correct path to resource files in both .exe and .py environments.
+    
+    Args:
+        relative_path (str): Relative path to the resource file.
+        
+    Returns:
+        str: Absolute path to the resource file.
+    """
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
 class GridWorker(QtCore.QObject):
+    """Background worker for loading and gridding CSV scan data.
+    
+    Loads large CSV files in chunks, automatically detects coordinate units (mm vs μm),
+    grids the point cloud data onto a regular 2D array, and emits progress updates.
+    
+    Signals:
+        progress (int): Progress percentage (0-100).
+        finished (object, object, object, float, float): Emitted when processing completes,
+            returning grid, xi, yi, px_x, px_y.
+    """
+    
     progress = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(object, object, object, float, float) # grid, xi, yi, px_x, px_y
 
     def __init__(self, fname):
+        """Initialize the grid worker.
+        
+        Args:
+            fname (str): Path to the CSV file to load.
+        """
         super().__init__()
         self.fname = fname
 
     @QtCore.pyqtSlot()
     def process(self):
+        """Process the CSV file and generate a gridded representation.
+        
+        Reads CSV data in chunks, detects coordinate units, calculates pixel sizes,
+        grids the point cloud, and averages duplicate points. Emits progress signals
+        during processing and finished signal with results.
+        """
         chunk_size = 100_000
         total = sum(1 for _ in open(self.fname, encoding="utf-8"))
         chunks = []

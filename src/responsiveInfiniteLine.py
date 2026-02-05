@@ -1,3 +1,9 @@
+"""PyQtGraph InfiniteLine with throttled update callbacks.
+
+This module provides a responsive infinite line widget that throttles update
+callbacks during dragging to improve performance.
+"""
+
 from PyQt5 import QtCore
 import pyqtgraph as pg
 
@@ -21,7 +27,7 @@ class ResponsiveInfiniteLine(pg.InfiniteLine):
 
         self.setCursor(QtCore.Qt.SizeHorCursor if self.angle == 90 else QtCore.Qt.SizeVerCursor)
 
-        # Timer do throttlowania update'ów
+        # Timer for throttling updates
         self._update_callback = update_callback
         self._update_timer = QtCore.QTimer()
         self._update_timer.setSingleShot(True)
@@ -32,7 +38,7 @@ class ResponsiveInfiniteLine(pg.InfiniteLine):
 
         self.sigPositionChanged.connect(self._on_position_changed)
 
-        # Dodatkowy sygnał po zakończeniu przeciągania (jeśli dostępny)
+        # Additional signal after drag completion (if available)
         if hasattr(self, "sigPositionChangeFinished"):
             self.sigPositionChangeFinished.connect(self._on_change_finished)
 

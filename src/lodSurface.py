@@ -1,3 +1,10 @@
+"""Level-of-detail (LOD) surface rendering for 3D visualization.
+
+This module provides automatic level-of-detail management for large 3D surface
+meshes, dynamically switching between different mesh densities based on camera
+distance and viewport size to maintain performance.
+"""
+
 import numpy as np
 import pyqtgraph.opengl as gl
 from pyqtgraph.Qt import QtWidgets, QtGui, QtCore
@@ -5,10 +12,33 @@ import pyqtgraph as pg
 
 
 class LODSurface:
-    """Zarządza kilkoma GLMeshItem o różnych gęstościach (krokach) i
-    przełącza widoczny poziom LOD w zależności od zoomu/kamery."""
+    """Manages multiple mesh representations with automatic LOD switching.
+    
+    Creates and manages several GLMeshItem instances at different densities
+    (steps) and automatically switches the visible level based on camera zoom
+    to balance visual quality and rendering performance.
+    
+    Attributes:
+        view: OpenGL view widget containing the meshes.
+        steps (tuple): Available LOD steps (1, 2, 4, 8, etc.).
+        target_px (float): Target pixels per grid cell for LOD selection.
+        hysteresis (float): Hysteresis factor to prevent LOD flickering.
+        data (tuple): Current mesh data (xs, ys, Z).
+        visible (bool): Overall visibility flag.
+    """
     def __init__(self, view, steps=(1,2,4,8,16), shader=None,
                  target_px=1.5, hysteresis=0.25, base_cell=None, thresholds=None):
+        """Initialize LOD surface manager.
+        
+        Args:
+            view: OpenGL view widget to contain the meshes.
+            steps (tuple, optional): LOD step sizes. Defaults to (1,2,4,8,16).
+            shader: Optional shader program for rendering.
+            target_px (float, optional): Target pixels per cell. Defaults to 1.5.
+            hysteresis (float, optional): LOD switching hysteresis (0-1). Defaults to 0.25.
+            base_cell (float, optional): Base cell size in scene units. Auto-detected if None.
+            thresholds (dict, optional): Explicit LOD thresholds {step: (px_lo, px_hi)}.
+        """
         self.view = view
         self.steps = tuple(sorted(set(steps)))
         self.shader = shader
@@ -33,6 +63,7 @@ class LODSurface:
 
 
     def destroy(self):
+        """Clean up all mesh items and stop update timer."""
         for it in self.items.values():
             try: self.view.removeItem(it)
             except Exception: pass
@@ -40,11 +71,23 @@ class LODSurface:
         self._timer.stop()
 
     def set_visible(self, on: bool):
+        """Set visibility of the LOD surface.
+        
+        Args:
+            on (bool): True to show, False to hide.
+        """
         self.visible = bool(on)
         for it in self.items.values():
             it.setVisible(self.visible and (it is self._current_item()))
 
     def set_data(self, xs, ys, Z):
+        """Set surface data and rebuild meshes.
+        
+        Args:
+            xs (np.ndarray): X-coordinates (1D array).
+            ys (np.ndarray): Y-coordinates (1D array).
+            Z (np.ndarray): Height values (2D array).
+        """
         self.data = (xs, ys, Z.astype(np.float32, copy=False))
 
         # autodetekcja rozmiaru komórki (użyj mediany, odporna na outliery)
@@ -60,6 +103,15 @@ class LODSurface:
         self._restyle_all_existing()
 
     def set_lod_params(self, *, target_px=None, hysteresis=None, steps=None, thresholds=None, base_cell=None):
+        """Update LOD parameters.
+        
+        Args:
+            target_px (float, optional): New target pixels per cell.
+            hysteresis (float, optional): New hysteresis factor.
+            steps (tuple, optional): New LOD step sizes.
+            thresholds (dict, optional): New explicit thresholds.
+            base_cell (float, optional): New base cell size.
+        """
         if target_px is not None:  self.target_px  = float(target_px)
         if hysteresis is not None: self.hysteresis = float(hysteresis)
         if steps is not None:      self.steps      = tuple(sorted(set(steps)))
@@ -67,6 +119,15 @@ class LODSurface:
         if base_cell is not None:  self.base_cell  = float(base_cell)
 
     def update_style(self, mode, colormap, base_color, lo, hi):
+        """Update visual style of all mesh items.
+        
+        Args:
+            mode (str): Rendering mode ('surface', 'wireframe', 'mesh').
+            colormap (str): Colormap name or None for solid color.
+            base_color (tuple): Base RGBA color (0-1 range).
+            lo (float): Minimum value for colormap.
+            hi (float): Maximum value for colormap.
+        """
         self.mode = mode
         self.colormap = colormap
         self.color = base_color
@@ -281,6 +342,11 @@ class LODSurface:
         return s
 
     def update_lod(self):
+        """Update LOD level based on current camera parameters.
+        
+        Picks appropriate LOD step based on viewport size and distance,
+        creates missing mesh items if needed, and switches visibility.
+        """
         if self.data is None or not self.visible:
             return
         s = self._pick_step()

@@ -1,3 +1,10 @@
+"""Overlay viewer for aligning and comparing two scan datasets.
+
+This module provides an interactive viewer for overlaying two scans, allowing
+manual alignment through translation and rotation controls, and displaying
+the difference map between aligned scans.
+"""
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
@@ -5,7 +12,30 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 from .gridData import GridData        
 
 class OverlayViewer(QtWidgets.QWidget):
+    """Interactive widget for overlaying and aligning two scan datasets.
+    
+    Provides side-by-side views of overlaid scans and their difference map,
+    with interactive controls for translation, rotation, and visual comparison
+    modes (blinking, transparency).
+    
+    Attributes:
+        scan1_data (GridData): First scan dataset.
+        scan2_data (GridData): Second scan dataset.
+        img1 (pg.ImageItem): Image item for first scan.
+        img2 (pg.ImageItem): Image item for second scan (transformable).
+        diff_view (pg.ImageView): View displaying the difference map.
+        on_accept (callable, optional): Callback when alignment is accepted.
+    """
+    
     def __init__(self, scan1_data: GridData, scan2_data: GridData, on_accept=None, parent=None):
+        """Initialize the overlay viewer.
+        
+        Args:
+            scan1_data (GridData): First scan to display (reference).
+            scan2_data (GridData): Second scan to display (adjustable).
+            on_accept (callable, optional): Callback function called when accepting alignment.
+            parent (QWidget, optional): Parent widget. Defaults to None.
+        """
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.Window)
 
@@ -23,9 +53,9 @@ class OverlayViewer(QtWidgets.QWidget):
         self._orig_scan2 = self.scan2.copy()
 
 
-        self._last_diff_image = None   # oryginalna różnica (przed maskowaniem)
+        self._last_diff_image = None   # original difference (before masking)
 
-        # Obrazy
+        # Images
         self.img1 = pg.ImageItem(self.scan1)
         self.img2 = pg.ImageItem(self.scan2)
         self.img2.setOpacity(0.5)
@@ -35,7 +65,7 @@ class OverlayViewer(QtWidgets.QWidget):
         self.viewbox.autoRange()
 
         def safe_minmax(arr):
-            arr = arr[np.isfinite(arr)]  # odrzuca NaN, +inf, -inf
+            arr = arr[np.isfinite(arr)]  # discard NaN, +inf, -inf
             return (0.0, 1.0) if arr.size == 0 else (np.min(arr), np.max(arr))
             # if arr.size == 0:
             #     return 0.0, 1.0  # domyślne wartości, jeśli wszystko było złe
@@ -52,11 +82,11 @@ class OverlayViewer(QtWidgets.QWidget):
         self.img1.setLevels((self.vmin1, self.vmax1))
         self.img2.setLevels((self.vmin2, self.vmax2))
 
-        # zapamiętaj siatki jako atrybuty
+        # remember grids as attributes
         self.original_scan1 = self.scan1
         self.original_scan2 = self.scan2
 
-        # Połączenia
+        # Connections
         self.slider_tx.valueChanged.connect(self.updateTransform)
         self.slider_ty.valueChanged.connect(self.updateTransform)
         self.slider_angle.valueChanged.connect(self.updateTransform)
@@ -70,22 +100,22 @@ class OverlayViewer(QtWidgets.QWidget):
         super().closeEvent(event)
 
     def create_gui(self):
-        # Layout główny
+        # Main layout
         layout = QtWidgets.QVBoxLayout(self)
 
-        # Główne okno i scena
+        # Main window and scene
         self.view = pg.GraphicsLayoutWidget()
         self.viewbox = self.view.addViewBox()
         self.viewbox.setAspectLocked(True)
 
-        # Obraz różnicy
+        # Difference image
         self.diff_view = pg.ImageView(view=pg.PlotItem())
         #self.diff_view.ui.histogram.hide()
         self.diff_view.ui.roiBtn.hide()
         self.diff_view.ui.menuBtn.hide()
         self.diff_view.setMinimumWidth(500)
 
-        # Układ poziomy: widok główny + widok różnic
+        # Horizontal layout: main view + diff view
         split = QtWidgets.QHBoxLayout()
         split.addWidget(self.view)
         split.addWidget(self.diff_view)
@@ -95,7 +125,7 @@ class OverlayViewer(QtWidgets.QWidget):
 
         south_layout.addLayout(self.sliders_layout())
 
-        # Przełączniki
+        # Switches
         self.checkbox_visible = QtWidgets.QCheckBox("scan2 is visible")
         self.checkbox_visible.setChecked(True)
         self.checkbox_visible.stateChanged.connect(self.toggleVisibility)
@@ -114,7 +144,7 @@ class OverlayViewer(QtWidgets.QWidget):
         tool2_layout.addWidget(self.checkbox_trans)
         tool2_layout.addWidget(self.checkbox_blink)
 
-        # Timer migotania
+        # Blink timer
         self.blink_timer = QtCore.QTimer()
         self.blink_timer.setInterval(500)
         self.blink_timer.timeout.connect(self.blinkToggle)

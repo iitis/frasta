@@ -1,8 +1,19 @@
+"""3D visualization widget for displaying scan surface data.
+
+This module provides interactive 3D visualization of scan surfaces with support for:
+- Multiple rendering modes (surface, wireframe, mesh)
+- Level-of-detail (LOD) rendering for performance
+- Customizable colormaps and value ranges
+- Profile line overlay and cross-section planes
+- Side-by-side comparison of two scans
+- Export to image files
+"""
+
 from pyqtgraph.Qt import QtWidgets, QtGui, QtCore
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-import matplotlib.pyplot as plt  # jeśli chcesz użyć colormap matplotlib
+import matplotlib.pyplot as plt  # if you want to use matplotlib colormap
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,7 +50,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         layout.addWidget(self.view)
         self.view.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout.setStretch(0, 0)  # controls_panel
-        layout.setStretch(1, 1)  # view - niech rośnie
+        layout.setStretch(1, 1)  # view - let it grow
 
         self.view.setCameraPosition(distance=200)
         self.surface_ref_item = None
@@ -47,11 +58,11 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.ref_profile_line_item = None
         self.adj_profile_line_item = None
         self.cross_plane_item = None
-        self.show_controls = True  # domyślnie
+        self.show_controls = True  # default
         self.colormap_ref = 'RG'
         self.colormap_adj = 'RG'
 
-        # NEW: ustawienia zakresów
+        # NEW: range settings
         self.range_linked = False
         self.range_ref_auto = True
         self.range_adj_auto = True
@@ -63,16 +74,16 @@ class Grid3DViewer(QtWidgets.QWidget):
 
         # --- LOD settings ---
         self.use_lod = True
-        self.lod_steps = (1, 2, 4, 8, 16, 32)  # można skrócić
+        self.lod_steps = (1, 2, 4, 8, 16, 32)  # can be shortened
         self.lod_ref = None
         self.lod_adj = None
 
         self.lod_target_px = 1.8
         self.lod_hysteresis = 0.3
-        self.lod_thresholds = None      # albo słownik progów {step: (px_lo, px_hi)}
-        self.lod_base_cell = None       # zwykle None -> auto z xs/ys
+        self.lod_thresholds = None      # or dictionary of thresholds {step: (px_lo, px_hi)}
+        self.lod_base_cell = None       # usually None -> auto from xs/ys
 
-        # timer do auto-przełączania LOD
+        # timer for auto-switching LOD
         self._lod_timer = QtCore.QTimer(self)
         self._lod_timer.timeout.connect(self._update_lod_tick)
         self._lod_timer.start(33)  # ~30 FPS
@@ -85,10 +96,10 @@ class Grid3DViewer(QtWidgets.QWidget):
     def _ensure_lod(self, which, steps=(1,2,4,8,16)):
         key = 'ref' if which == 'ref' else 'adj'
         if self._lod[key] is None:
-            shader = None  # albo: shader = self._make_headlight_shader()
+            shader = None  # or: shader = self._make_headlight_shader()
             s = steps or self.lod_steps
             lod = LODSurface(self.view, steps=s, shader=shader)
-            # TU ustaw politykę:
+            # HERE set policy:
             lod.set_lod_params(
                 target_px=self.lod_target_px,
                 hysteresis=self.lod_hysteresis,
@@ -120,7 +131,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.combo_mode_a.addItem("Surface (shaded)", userData='surface')
         self.combo_mode_a.addItem("Wireframe",        userData='wireframe')
         self.combo_mode_a.addItem("Mesh",             userData='mesh')
-        # ustaw wartość startową wg konstruktora
+        # set starting value according to constructor
         idx = self.combo_mode_a.findData(self.adj_surface_mode)
         if idx >= 0: self.combo_mode_a.setCurrentIndex(idx)
 
@@ -169,7 +180,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.combo_mode_r.addItem("Surface (shaded)", userData='surface')
         self.combo_mode_r.addItem("Wireframe",        userData='wireframe')
         self.combo_mode_r.addItem("Mesh",             userData='mesh')
-        # ustaw wartość startową wg konstruktora
+        # set starting value according to constructor
         idx = self.combo_mode_r.findData(self.ref_surface_mode)
         if idx >= 0: self.combo_mode_r.setCurrentIndex(idx)
 
@@ -197,6 +208,15 @@ class Grid3DViewer(QtWidgets.QWidget):
         mode_bar_r.addStretch(1)
     
     def init_controls(self, layout):
+        """Initialize and add all UI control widgets to the layout.
+        
+        Creates control panels for both reference and adjusted surfaces,
+        including visibility toggles, rendering mode selectors, colormap
+        choosers, and range controls.
+        
+        Args:
+            layout (QLayout): Layout to add controls to.
+        """
         """Initializes the control checkboxes for toggling 3D view elements.
 
         Adds checkboxes for reference surface, adjusted surface, profile line, and section plane to the layout.
@@ -265,7 +285,15 @@ class Grid3DViewer(QtWidgets.QWidget):
 
 
     def _compute_auto_lo_hi(self, Z, p=(2, 98)):
-        # robustne percentyle, fallback na min/max
+        """Compute robust automatic min/max values using percentiles.
+        
+        Args:
+            Z (np.ndarray): Height data array.
+            p (tuple, optional): Percentile range (lo, hi). Defaults to (2, 98).
+            
+        Returns:
+            tuple: (lo, hi) values for colormap range.
+        """
         lo, hi = np.nanpercentile(Z, p)
         if not np.isfinite(hi - lo) or hi <= lo:
             lo, hi = np.nanmin(Z), np.nanmax(Z)
@@ -296,9 +324,9 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.spin_hi_adj.setEnabled(not (linked or self.chk_auto_adj.isChecked()))
 
     def _get_lo_hi_for(self, which, Z):
-        # zwraca (lo, hi) biorąc pod uwagę link/auto/manual
+        # returns (lo, hi) considering link/auto/manual
         if which == 'adj' and self.range_linked:
-            which = 'ref'   # użyj ref-owych ustawień
+            which = 'ref'   # use ref settings
 
         auto = (self.range_ref_auto if which == 'ref' else self.range_adj_auto)
         if auto:
@@ -310,7 +338,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         return float(lo), float(hi)
 
     def _init_busy_ui(self):
-        # półprzezroczysty overlay z paskiem
+        # semi-transparent overlay with progress bar
         self._busy_wrap = QtWidgets.QWidget(self)
         self._busy_wrap.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
         self._busy_wrap.setAttribute(QtCore.Qt.WA_NoSystemBackground)
@@ -338,7 +366,7 @@ class Grid3DViewer(QtWidgets.QWidget):
 
 
     def _begin_redraw(self):
-        # licznik zagnieżdżeń; można wołać wielokrotnie
+        # nesting counter; can be called multiple times
         if not hasattr(self, "_busyDepth"): self._busyDepth = 0
         self._busyDepth += 1
         if self._busyDepth == 1:
@@ -355,8 +383,8 @@ class Grid3DViewer(QtWidgets.QWidget):
             self._busyDepth = d - 1
 
     def _await_next_frame_then_end(self):
-        """Zdejmij WAIT dopiero, gdy ramka będzie na ekranie."""
-        # uniknij wielokrotnych podłączeń
+        """Remove WAIT cursor only when frame is on screen."""
+        # avoid multiple connections
         if getattr(self, "_awaitingSwap", False):
             return
         self._awaitingSwap = True
@@ -367,21 +395,26 @@ class Grid3DViewer(QtWidgets.QWidget):
             except Exception: pass
             self._end_redraw_now()
 
-        # preferuj prawdziwy sygnał QOpenGLWidget:
+        # prefer real QOpenGLWidget signal:
         if hasattr(self.view, "frameSwapped"):
             try:
                 self.view.frameSwapped.connect(_done)
             except Exception:
                 QtCore.QTimer.singleShot(0, _done)
         else:
-            # bardzo stary Qt/QGLWidget – fallback
+            # very old Qt/QGLWidget - fallback
             QtCore.QTimer.singleShot(0, _done)
 
-        # upewnij się, że rzeczywiście będzie repaint
+        # ensure there will be a repaint
         self.view.update()
 
 
     def remove_existing_items(self):
+        """Remove all existing 3D items from the view.
+        
+        Cleans up surface items, profile lines, and cross-section planes,
+        and destroys any LOD surface managers.
+        """
         # stare pojedyncze itemy
         for item in [self.surface_ref_item, self.surface_adj_item,
                     self.ref_profile_line_item, self.adj_profile_line_item,
@@ -421,13 +454,13 @@ class Grid3DViewer(QtWidgets.QWidget):
         else:
             Z_adj = None
 
-        # tuż po wyznaczeniu xs, ys, Z_ref i Z_adj:
+        # right after determining xs, ys, Z_ref and Z_adj:
         self._ref_last = (xs, ys, Z_ref)
         
         if adjusted_grid is not None:
             self._adj_last = (xs, ys, Z_adj)
 
-        # NEW: ustaw spinboksy wg auto obliczeń (nie nadpisuje manualnych wartości)
+        # NEW: set spinboxes according to auto calculations (doesn't overwrite manual values)
         if self.range_ref_auto and np.any(np.isfinite(Z_ref)):
             lo, hi = self._compute_auto_lo_hi(Z_ref)
             self._update_range_widgets('ref', lo, hi, auto=True)
@@ -522,24 +555,24 @@ class Grid3DViewer(QtWidgets.QWidget):
         ys_idx = np.arange(0, h0, step, dtype=np.int32)
         xs_idx = np.arange(0, w0, step, dtype=np.int32)
 
-        # siatka w docelowej rozdzielczości
+        # grid at target resolution
         Z = reference_grid[np.ix_(ys_idx, xs_idx)].astype(np.float32, copy=True)
 
-        # maskowanie NaN / outliers (jedna maska = szybciej)
+        # mask NaN / outliers (single mask = faster)
         mask = ~np.isfinite(Z) | (np.abs(Z) > clip_abs)
         if mask.any():
             Z[mask] = np.nan
 
-        # osie w jednostkach (FLOAT) – do GLSurfacePlotItem (opcjonalnie)
+        # axes in units (FLOAT) - for GLSurfacePlotItem (optional)
         xs = x0 + dx * xs_idx.astype(np.float32)
         ys = y0 + dy * ys_idx.astype(np.float32)
 
         logger.debug("_prepare_reference_surface() - end")
-        # ZWRACAMY TAKŻE INDEKSY, bo _prepare_adjusted_surface ich potrzebuje
+        # ALSO RETURN INDICES, because _prepare_adjusted_surface needs them
         return xs, ys, Z, xs_idx, ys_idx
 
     def _prepare_adjusted_surface(self, adjusted_grid, ys_idx, xs_idx, separation, Z_ref, clip_abs=1e6):
-        """Zwraca Z_adj o tym samym kształcie co Z_ref."""
+        """Returns Z_adj with the same shape as Z_ref."""
         if adjusted_grid is not None:
             Z_adj = adjusted_grid[np.ix_(ys_idx, xs_idx)].astype(np.float32) + separation
             mask = ~np.isfinite(Z_adj) | (np.abs(Z_adj) > clip_abs)
@@ -971,12 +1004,10 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.view.setCameraPosition(pos=QtGui.QVector3D(xc, yc, zc))
 
     def set_controls_visible(self, visible):
-        """Shows or hides the control checkboxes in the 3D viewer.
-
-        Sets the visibility of all control checkboxes and updates the widget.
-
+        """Show or hide the control panel.
+        
         Args:
-            visible (bool): Whether the controls should be visible.
+            visible (bool): True to show, False to hide.
         """
         self.two_scans_mode = visible
         self.show_controls = visible
@@ -1157,6 +1188,11 @@ class Grid3DViewer(QtWidgets.QWidget):
     #         self.surface_adj_item.setVisible(bool(state))
 
     def toggle_surface_ref(self, state):
+        """Toggle visibility of reference surface.
+        
+        Args:
+            state: Checkbox state (Qt.Checked or Qt.Unchecked).
+        """
         obj = self.surface_ref_item
         if isinstance(obj, LODSurface):
             obj.set_visible(bool(state))
@@ -1164,6 +1200,11 @@ class Grid3DViewer(QtWidgets.QWidget):
             obj.setVisible(bool(state))
 
     def toggle_surface_adj(self, state):
+        """Toggle visibility of adjusted surface.
+        
+        Args:
+            state: Checkbox state (Qt.Checked or Qt.Unchecked).
+        """
         obj = self.surface_adj_item
         if isinstance(obj, LODSurface):
             obj.set_visible(bool(state))
@@ -1172,12 +1213,22 @@ class Grid3DViewer(QtWidgets.QWidget):
 
 
     def toggle_profile_line(self, state):
+        """Toggle visibility of profile lines.
+        
+        Args:
+            state: Checkbox state (Qt.Checked or Qt.Unchecked).
+        """
         if self.ref_profile_line_item:
             self.ref_profile_line_item.setVisible(bool(state))
         if self.adj_profile_line_item:
             self.adj_profile_line_item.setVisible(bool(state))
 
     def toggle_cross_plane(self, state):
+        """Toggle visibility of cross-section plane.
+        
+        Args:
+            state: Checkbox state (Qt.Checked or Qt.Unchecked).
+        """
         if self.cross_plane_item:
             self.cross_plane_item.setVisible(bool(state))
 

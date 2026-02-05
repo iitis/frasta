@@ -1,5 +1,37 @@
+"""Data structure for storing gridded scan data.
+
+This module provides the GridData class for encapsulating 2D scan data along with
+its metadata, including coordinate arrays, pixel sizes, and value ranges.
+"""
+
 class GridData:
+    """Container for 2D gridded scan data with associated metadata.
+    
+    Stores a 2D array of scan data along with coordinate arrays, pixel sizes,
+    and optional value ranges for display purposes.
+    
+    Attributes:
+        grid (np.ndarray): 2D array containing scan height/depth values.
+        xi (np.ndarray): 1D array of x-coordinates.
+        yi (np.ndarray): 1D array of y-coordinates.
+        px_x (float): Pixel size in x-direction.
+        px_y (float): Pixel size in y-direction.
+        vmin (float, optional): Minimum display value.
+        vmax (float, optional): Maximum display value.
+    """
+    
     def __init__(self, grid, xi, yi, px_x, px_y, vmin=None, vmax=None):
+        """Initialize GridData with scan data and metadata.
+        
+        Args:
+            grid (np.ndarray): 2D array of scan values.
+            xi (np.ndarray): 1D array of x-coordinates.
+            yi (np.ndarray): 1D array of y-coordinates.
+            px_x (float): Pixel size in x-direction.
+            px_y (float): Pixel size in y-direction.
+            vmin (float, optional): Minimum display value. Defaults to None.
+            vmax (float, optional): Maximum display value. Defaults to None.
+        """
         self.grid = grid
         self.xi = xi
         self.yi = yi
@@ -9,7 +41,15 @@ class GridData:
         self.vmax = vmax
 
     def crop(self, h, w):
-        """Zwraca nowy GridData przycięty do wymiarów h x w"""
+        """Returns a new GridData cropped to the specified dimensions.
+        
+        Args:
+            h (int): Height (number of rows) to crop to.
+            w (int): Width (number of columns) to crop to.
+            
+        Returns:
+            GridData: New GridData instance with cropped data.
+        """
         return GridData(
             self.grid[:h, :w],
             self.xi[:w],
@@ -21,7 +61,11 @@ class GridData:
         )
 
     def copy(self):
-        """Pełna kopia"""
+        """Creates a deep copy of the GridData object.
+        
+        Returns:
+            GridData: New GridData instance with copied arrays and metadata.
+        """
         return GridData(
             self.grid.copy(),
             self.xi.copy(),
