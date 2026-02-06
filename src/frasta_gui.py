@@ -47,7 +47,7 @@ def resource_path(relative_path):
 class GridWorker(QtCore.QObject):
     """Background worker for loading and gridding CSV scan data.
     
-    Loads large CSV files in chunks, automatically detects coordinate units (mm vs μm),
+    Loads large CSV files in chunks, uses specified coordinate units (mm vs μm),
     grids the point cloud data onto a regular 2D array, and emits progress updates.
     
     Signals:
@@ -59,14 +59,18 @@ class GridWorker(QtCore.QObject):
     progress = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(object, object, object, float, float) # grid, xi, yi, px_x, px_y
 
-    def __init__(self, fname):
+    def __init__(self, fname, units_xy='um', units_z='um'):
         """Initialize the grid worker.
         
         Args:
             fname (str): Path to the CSV file to load.
+            units_xy (str): Unit for X and Y coordinates: 'mm' or 'um' (micrometers).
+            units_z (str): Unit for Z coordinate: 'mm' or 'um' (micrometers).
         """
         super().__init__()
         self.fname = fname
+        self.units_xy = units_xy
+        self.units_z = units_z
 
     @QtCore.pyqtSlot()
     def process(self):
@@ -100,17 +104,25 @@ class GridWorker(QtCore.QObject):
         px_x_raw = np.median(dx[dx > 0])
         px_y_raw = np.median(dy[dy > 0])
         typical_step = np.median([px_x_raw, px_y_raw])
-        logger.debug(f"typical_step: {typical_step}")
-        # Automatyczna detekcja: jeśli typowy krok > 10, to uznajemy że dane są w mm
-        if typical_step < 0.1:
-            logger.info("Wykryto dane w milimetrach - przeliczam na mikrometry.")
+        logger.debug(f"typical_step XY: {typical_step}")
+        
+        # Konwersja XY na podstawie wybranej przez użytkownika jednostki
+        if self.units_xy == 'mm':
+            logger.info("Przeliczam XY z milimetrów na mikrometry.")
             x *= 1000
             y *= 1000
             # trzeba przeliczyć dx/dy jeszcze raz po skalowaniu
             dx = np.diff(np.sort(np.unique(x)))
             dy = np.diff(np.sort(np.unique(y)))
         else:
-            logger.info("Wykryto dane w mikrometrach - brak konwersji.")
+            logger.info("Używam XY w mikrometrach - brak konwersji.")
+        
+        # Konwersja Z niezależnie od XY
+        if self.units_z == 'mm':
+            logger.info("Przeliczam Z z milimetrów na mikrometry.")
+            z *= 1000
+        else:
+            logger.info("Używam Z w mikrometrach - brak konwersji.")
 
         px_x = np.median(dx[dx > 0]).round(2)
         px_y = np.median(dy[dy > 0]).round(2)
@@ -376,7 +388,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions["rot90"].setIcon(QIcon(resource_path("icons/icons8-rotate-left-50.png")))
         self.actions["inverse"].setIcon(QIcon(resource_path("icons/icons8-invert-50.png")))
         self.actions["zero"].setIcon(QIcon(resource_path("icons/icons8-eyedropper-50.png")))
+        self.actions["tilt"].setIcon(QIcon(resource_path("icons/icons8-tilt-64.png")))
         self.actions["colormap"].setIcon(QIcon(resource_path("icons/icons8-color-palette-50.png")))
+        self.actions["view3d"].setIcon(QIcon(resource_path("icons/icons8-3d-80.png")))
         self.actions["compare"].setIcon(QIcon(resource_path("icons/icons8-compare-50.png")))
         self.actions["profile"].setIcon(QIcon(resource_path("icons/icons8-graph-50.png")))
         self.actions["about"].setIcon(QIcon(resource_path("icons/icons8-about-50.png")))
@@ -526,7 +540,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def view3d(self):
         if tab := self.current_tab():
-            show_3d_viewer(tab.grid, show_controls=False)
+            # Przekaż rozmiary pikseli dla prawidłowych proporcji
+            px_x = getattr(tab, 'px_x', 1.0)
+            px_y = getattr(tab, 'px_y', 1.0)
+            show_3d_viewer(tab.grid, show_controls=False, pixel_size_x=px_x, pixel_size_y=px_y)
 
 
     def toggle_colormap_current_tab(self):
@@ -587,12 +604,20 @@ class MainWindow(QtWidgets.QMainWindow):
         return self.tabs.currentWidget()
 
     def load_csv(self, fname, tab):
+        # Zapytaj użytkownika o jednostki z sugerowanym wyborem
+        units = self._ask_for_units(fname)
+        if units is None:
+            # Użytkownik anulował
+            return
+        
+        units_xy, units_z = units
+        
         dlg = QtWidgets.QProgressDialog("Wczytywanie i gridowanie...", None, 0, 100, self)
         dlg.setWindowModality(QtCore.Qt.ApplicationModal)
         dlg.setAutoClose(True)
         dlg.setCancelButton(None)
         dlg.setValue(0)
-        self.worker = GridWorker(fname)
+        self.worker = GridWorker(fname, units_xy=units_xy, units_z=units_z)
         self.thread = QtCore.QThread()
         self.worker.moveToThread(self.thread)
         self.worker.progress.connect(dlg.setValue)
@@ -601,6 +626,113 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thread.started.connect(self.worker.process)
         self.thread.start()
         dlg.exec_()
+    
+    def _ask_for_units(self, fname):
+        """Ask user about XY and Z coordinate units with suggested choices based on data sample.
+        
+        Args:
+            fname (str): Path to CSV file.
+            
+        Returns:
+            tuple: (units_xy, units_z) where each is 'mm' or 'um', or None if cancelled.
+        """
+        # Wczytaj próbkę danych (pierwsze 5000 wierszy) do heurystyki
+        try:
+            sample = pd.read_csv(
+                fname,
+                sep=r'[;,\t ]+',
+                engine='python',
+                header=None,
+                names=['x', 'y', 'z'],
+                nrows=5000
+            )
+            x, y, z = sample['x'].values, sample['y'].values, sample['z'].values
+            
+            # Heurystyka dla XY
+            dx = np.diff(np.sort(np.unique(x)))
+            dy = np.diff(np.sort(np.unique(y)))
+            px_x_raw = np.median(dx[dx > 0])
+            px_y_raw = np.median(dy[dy > 0])
+            typical_step_xy = np.median([px_x_raw, px_y_raw])
+            
+            # Heurystyka dla Z - sprawdź zakres wartości
+            z_range = np.nanmax(z) - np.nanmin(z)
+            
+            # Jeśli typical_step < 0.1, prawdopodobnie mm dla XY
+            # Jeśli zakres Z < 1, prawdopodobnie mm dla Z
+            suggested_xy = 'mm' if typical_step_xy < 0.1 else 'um'
+            suggested_z = 'mm' if z_range < 1 else 'um'
+            
+            logger.debug(f"Detected typical step XY: {typical_step_xy}, suggesting: {suggested_xy}")
+            logger.debug(f"Detected Z range: {z_range}, suggesting: {suggested_z}")
+        except Exception as e:
+            logger.warning(f"Could not analyze data sample: {e}")
+            suggested_xy = 'um'
+            suggested_z = 'um'
+        
+        # Dialog z pytaniem
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Select coordinate units")
+        layout = QtWidgets.QVBoxLayout()
+        
+        label = QtWidgets.QLabel(
+            "Select the units for X, Y and Z coordinates in the file:\n"
+            "(All coordinates will be converted to micrometers internally)"
+        )
+        layout.addWidget(label)
+        
+        # Grupa dla XY
+        group_xy = QtWidgets.QGroupBox("X and Y coordinates")
+        layout_xy = QtWidgets.QVBoxLayout()
+        radio_xy_mm = QtWidgets.QRadioButton("Millimeters (mm)")
+        radio_xy_um = QtWidgets.QRadioButton("Micrometers (μm)")
+        
+        if suggested_xy == 'mm':
+            radio_xy_mm.setChecked(True)
+            radio_xy_mm.setText("Millimeters (mm) [suggested]")
+        else:
+            radio_xy_um.setChecked(True)
+            radio_xy_um.setText("Micrometers (μm) [suggested]")
+        
+        layout_xy.addWidget(radio_xy_mm)
+        layout_xy.addWidget(radio_xy_um)
+        group_xy.setLayout(layout_xy)
+        layout.addWidget(group_xy)
+        
+        # Grupa dla Z
+        group_z = QtWidgets.QGroupBox("Z coordinate (height)")
+        layout_z = QtWidgets.QVBoxLayout()
+        radio_z_mm = QtWidgets.QRadioButton("Millimeters (mm)")
+        radio_z_um = QtWidgets.QRadioButton("Micrometers (μm)")
+        
+        if suggested_z == 'mm':
+            radio_z_mm.setChecked(True)
+            radio_z_mm.setText("Millimeters (mm) [suggested]")
+        else:
+            radio_z_um.setChecked(True)
+            radio_z_um.setText("Micrometers (μm) [suggested]")
+        
+        layout_z.addWidget(radio_z_mm)
+        layout_z.addWidget(radio_z_um)
+        group_z.setLayout(layout_z)
+        layout.addWidget(group_z)
+        
+        # Przyciski OK/Cancel
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            units_xy = 'mm' if radio_xy_mm.isChecked() else 'um'
+            units_z = 'mm' if radio_z_mm.isChecked() else 'um'
+            return (units_xy, units_z)
+        else:
+            return None
 
     def load_npz(self, fname):
         data = np.load(fname)

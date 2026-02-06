@@ -112,6 +112,32 @@ class Grid3DViewer(QtWidgets.QWidget):
     def _update_lod_tick(self):
         if self.lod_ref: self.lod_ref.update_visible()
         if self.lod_adj: self.lod_adj.update_visible()
+        
+        # Upewnij się, że płaszczyzna i linie są rysowane jako ostatnie (po powierzchniach)
+        # Po aktualizacji LOD kolejność renderowania może się zmienić
+        
+        # Płaszczyzna przekroju
+        if self.cross_plane_item is not None:
+            try:
+                self.view.removeItem(self.cross_plane_item)
+                self.view.addItem(self.cross_plane_item)
+            except Exception:
+                pass
+        
+        # Linie profili (mogą być pojedynczymi obiektami lub listami segmentów)
+        for profile_item in [self.ref_profile_line_item, self.adj_profile_line_item]:
+            if profile_item is None:
+                continue
+            try:
+                if isinstance(profile_item, list):
+                    for item in profile_item:
+                        self.view.removeItem(item)
+                        self.view.addItem(item)
+                else:
+                    self.view.removeItem(profile_item)
+                    self.view.addItem(profile_item)
+            except Exception:
+                pass
 
     def create_a_tools(self):
         self.a_tools = QtWidgets.QWidget(self)
@@ -415,12 +441,22 @@ class Grid3DViewer(QtWidgets.QWidget):
         Cleans up surface items, profile lines, and cross-section planes,
         and destroys any LOD surface managers.
         """
-        # stare pojedyncze itemy
-        for item in [self.surface_ref_item, self.surface_adj_item,
-                    self.ref_profile_line_item, self.adj_profile_line_item,
-                    self.cross_plane_item]:
+        # stare pojedyncze itemy lub listy item\u00f3w
+        for item in [self.surface_ref_item, self.surface_adj_item, self.cross_plane_item]:
             if item and not isinstance(item, LODSurface):
                 try: self.view.removeItem(item)
+                except Exception: pass
+        
+        # profile line items mog\u0105 by\u0107 pojedynczymi obiektami lub listami
+        for item_attr in [self.ref_profile_line_item, self.adj_profile_line_item]:
+            if item_attr is None:
+                continue
+            if isinstance(item_attr, list):
+                for it in item_attr:
+                    try: self.view.removeItem(it)
+                    except Exception: pass
+            else:
+                try: self.view.removeItem(item_attr)
                 except Exception: pass
 
         # LOD-y
@@ -435,7 +471,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         self.adj_profile_line_item = None
         self.cross_plane_item = None
 
-    def update_data(self, reference_grid, adjusted_grid=None, line_points=None, separation=0):
+    def update_data(self, reference_grid, adjusted_grid=None, line_points=None, separation=0, pixel_size_x=1.0, pixel_size_y=1.0):
         """Updates the 3D view with new grid data and profile lines.
 
         Removes existing items, prepares and adds new surfaces and profile lines, and recenters the camera.
@@ -445,10 +481,12 @@ class Grid3DViewer(QtWidgets.QWidget):
             adjusted_grid (np.ndarray, optional): The adjusted grid data.
             line_points (list or np.ndarray, optional): Points for the profile line.
             separation (float, optional): Vertical separation between surfaces.
+            pixel_size_x (float, optional): Physical size of pixel in X direction (micrometers). Defaults to 1.0.
+            pixel_size_y (float, optional): Physical size of pixel in Y direction (micrometers). Defaults to 1.0.
         """
         self.remove_existing_items()
 
-        xs, ys, Z_ref, xs_idx, ys_idx = self._prepare_reference_surface(reference_grid)
+        xs, ys, Z_ref, xs_idx, ys_idx = self._prepare_reference_surface(reference_grid, dx=pixel_size_x, dy=pixel_size_y)
         if adjusted_grid is not None:
             Z_adj = self._prepare_adjusted_surface(adjusted_grid, ys_idx, xs_idx, separation, Z_ref)
         else:
@@ -482,9 +520,9 @@ class Grid3DViewer(QtWidgets.QWidget):
         z_min -= margin
         z_max += margin
 
-        self._add_profile_and_plane(reference_grid, adjusted_grid, line_points, separation, z_min, z_max)
+        self._add_profile_and_plane(reference_grid, adjusted_grid, line_points, separation, z_min, z_max, pixel_size_x, pixel_size_y)
 
-        self._center_camera(xs, ys, Z_ref, Z_adj, line_points)
+        self._center_camera(xs, ys, Z_ref, Z_adj, line_points, pixel_size_x, pixel_size_y)
 
     # def _prepare_reference_surface(self, reference_grid):
     #     """Prepares the reference surface for 3D visualization.
@@ -932,7 +970,7 @@ class Grid3DViewer(QtWidgets.QWidget):
             z_max = np.nanmax(Z_ref)
         return z_min, z_max
 
-    def _add_profile_and_plane(self, reference_grid, adjusted_grid, line_points, separation, z_min, z_max):
+    def _add_profile_and_plane(self, reference_grid, adjusted_grid, line_points, separation, z_min, z_max, pixel_size_x=1.0, pixel_size_y=1.0):
         """Adds a cross-section plane and profile lines to the 3D view if line points are provided.
 
         Draws the cross-section plane and profile lines for both reference and adjusted grids, if available.
@@ -940,14 +978,15 @@ class Grid3DViewer(QtWidgets.QWidget):
         Args:
             reference_grid (np.ndarray): The reference grid data.
             adjusted_grid (np.ndarray or None): The adjusted grid data.
-            line_points (list or np.ndarray): Points for the profile line.
+            line_points (list or np.ndarray): Points for the profile line (in pixel indices).
             separation (float): Vertical separation between surfaces.
             z_min (float): Minimum Z value for the plane.
             z_max (float): Maximum Z value for the plane.
+            pixel_size_x (float): Physical size of pixel in X direction (micrometers).
+            pixel_size_y (float): Physical size of pixel in Y direction (micrometers).
         """
         if line_points is not None and len(line_points) > 1:
             pts = np.array(line_points)
-            self.cross_plane_item = self.add_cross_section_plane(pts, z_min, z_max)
             h, w = reference_grid.shape
             valid_mask = (
                 (pts[:, 1] >= 0) & (pts[:, 1] < h) &
@@ -958,32 +997,104 @@ class Grid3DViewer(QtWidgets.QWidget):
                 pts = pts[valid_mask]
                 if len(pts) < 2:
                     return  # not enough points to plot a line
+            
+            # Konwersja punktów z indeksów pikseli na jednostki fizyczne (mikrometry)
+            pts_physical = pts.copy().astype(np.float32)
+            pts_physical[:, 0] *= pixel_size_x  # X w mikrometrach
+            pts_physical[:, 1] *= pixel_size_y  # Y w mikrometrach
+            
             try:
+                # Użyj oryginalnych indeksów do pobierania danych z siatki
                 ref_prof = reference_grid[pts[:,1], pts[:,0]]
-                self.ref_profile_line_item = gl.GLLinePlotItem(
-                    pos=np.column_stack((pts[:,0], pts[:,1], ref_prof)),
-                    color=(0,0.4,0,1), width=2)
-                self.view.addItem(self.ref_profile_line_item)
+                adj_prof = adjusted_grid[pts[:,1], pts[:,0]] + separation if adjusted_grid is not None else None
+                
+                # Oblicz zakres Z na podstawie rzeczywistych wartości profili
+                z_values = [ref_prof]
+                if adj_prof is not None:
+                    z_values.append(adj_prof)
+                z_all = np.concatenate(z_values)
+                z_valid = z_all[np.isfinite(z_all)]
+                
+                if len(z_valid) > 0:
+                    profile_z_min = np.min(z_valid)
+                    profile_z_max = np.max(z_valid)
+                    # Dodaj margines 10%
+                    z_range = profile_z_max - profile_z_min
+                    margin = max(0.1 * z_range, 1.0)  # minimum 1 mikrometr marginesu
+                    profile_z_min -= margin
+                    profile_z_max += margin
+                else:
+                    # Fallback gdyby nie było żadnych danych
+                    profile_z_min = z_min
+                    profile_z_max = z_max
+                
+                # Użyj punktów fizycznych do rysowania płaszczyzny z dopasowanym zakresem
+                self.cross_plane_item = self.add_cross_section_plane(pts_physical, profile_z_min, profile_z_max)
+                
+                # Znajdź segmenty ciągłe (bez NaN) i narysuj je osobno
+                self._add_profile_line_segments(pts_physical, ref_prof, color=(0,0.4,0,1))
+                
                 if adjusted_grid is not None:
-                    adj_prof = adjusted_grid[pts[:,1], pts[:,0]] + separation
-                    self.adj_profile_line_item = gl.GLLinePlotItem(
-                        pos=np.column_stack((pts[:,0], pts[:,1], adj_prof)),
-                        color=(0,0,1,1), width=2)
-                    self.view.addItem(self.adj_profile_line_item)
+                    self._add_profile_line_segments(pts_physical, adj_prof, color=(0,0,1,1), is_adjusted=True)
             except Exception as e:
                 logger.critical("[Grid3DViewer] Failed to plot profile lines:", e)
+    
+    def _add_profile_line_segments(self, pts_physical, z_values, color, is_adjusted=False):
+        """Add profile line as separate segments, breaking at NaN values.
+        
+        Args:
+            pts_physical (np.ndarray): XY coordinates in physical units.
+            z_values (np.ndarray): Z values for the profile.
+            color (tuple): RGB color for the line.
+            is_adjusted (bool): If True, stores in adj_profile_line_item.
+        """
+        # Znajdź segmenty ciągłe (bez NaN)
+        valid = np.isfinite(z_values)
+        
+        # Znajdź początki i końce segmentów
+        segments = []
+        start = None
+        for i in range(len(valid)):
+            if valid[i] and start is None:
+                start = i
+            elif not valid[i] and start is not None:
+                if i - start > 1:  # Przynajmniej 2 punkty
+                    segments.append((start, i))
+                start = None
+        # Dodaj ostatni segment jeśli jest
+        if start is not None and len(valid) - start > 1:
+            segments.append((start, len(valid)))
+        
+        # Rysuj każdy segment osobno
+        items = []
+        for start, end in segments:
+            pos = np.column_stack((pts_physical[start:end, 0], 
+                                  pts_physical[start:end, 1], 
+                                  z_values[start:end]))
+            line_item = gl.GLLinePlotItem(pos=pos, color=color, width=2)
+            self.view.addItem(line_item)
+            items.append(line_item)
+        
+        # Zachowaj referencje (dla pierwszego segmentu lub wszystkich)
+        if items:
+            if is_adjusted:
+                self.adj_profile_line_item = items[0] if len(items) == 1 else items
+            else:
+                self.ref_profile_line_item = items[0] if len(items) == 1 else items
 
-    def _center_camera(self, xs, ys, Z_ref, Z_adj, line_points):
+    def _center_camera(self, xs, ys, Z_ref, Z_adj, line_points, pixel_size_x=1.0, pixel_size_y=1.0):
         """Recenters the 3D camera based on the current data bounds.
 
         Calculates the center of all displayed data and sets the camera position accordingly.
 
         Args:
-            xs (np.ndarray): X-axis indices.
-            ys (np.ndarray): Y-axis indices.
+            xs (np.ndarray): X-axis coordinates in physical units.
+            ys (np.ndarray): Y-axis coordinates in physical units.
             Z_ref (np.ndarray): Processed reference grid.
             Z_adj (np.ndarray): Processed adjusted grid.
-            line_points (list or np.ndarray): Points for the profile line.
+            line_points (list or np.ndarray): Points for the profile line (in pixel indices).
+            pixel_size_x (float): Physical size of pixel in X direction (micrometers).
+            pixel_size_y (float): Physical size of pixel in Y direction (micrometers).
         """
         all_x = list(xs)
         all_y = list(ys)
@@ -995,13 +1106,22 @@ class Grid3DViewer(QtWidgets.QWidget):
         
         if line_points is not None:
             pts = np.array(line_points)
-            all_x += list(pts[:,0])
-            all_y += list(pts[:,1])
+            # Konwertuj punkty z indeksów pikseli na jednostki fizyczne
+            all_x += list(pts[:,0] * pixel_size_x)
+            all_y += list(pts[:,1] * pixel_size_y)
 
         xc = (min(all_x) + max(all_x)) / 2
         yc = (min(all_y) + max(all_y)) / 2
         zc = (min(all_z) + max(all_z)) / 2 if all_z else 0
-        self.view.setCameraPosition(pos=QtGui.QVector3D(xc, yc, zc))
+        
+        # Oblicz odpowiedni dystans kamery na podstawie rozmiaru sceny
+        dx = max(all_x) - min(all_x)
+        dy = max(all_y) - min(all_y)
+        dz = max(all_z) - min(all_z) if all_z else 0
+        max_dimension = max(dx, dy, dz)
+        distance = max_dimension * 1.8  # Mnożnik zapewnia widoczność całej sceny
+        
+        self.view.setCameraPosition(pos=QtGui.QVector3D(xc, yc, zc), distance=distance)
 
     def set_controls_visible(self, visible):
         """Show or hide the control panel.
@@ -1173,9 +1293,11 @@ class Grid3DViewer(QtWidgets.QWidget):
             [p0[0], p0[1], z_max],
         ])
         faces = np.array([[0, 1, 2], [0, 2, 3]])
-        color = np.array([0.5, 0.5, 0.7, 0.7])
+        # Przezroczystość z depth testingiem
+        color = np.array([0.5, 0.5, 0.7, 0.25])
         mesh = gl.GLMeshItem(vertexes=rect, faces=faces, faceColors=np.tile(color, (2,1)),
                              glOptions='translucent', smooth=False, drawEdges=False)
+        # Ważne: nie używaj setDepthValue, pozwól depth testingowi działać naturalnie
         self.view.addItem(mesh)
         return mesh
 
@@ -1218,10 +1340,17 @@ class Grid3DViewer(QtWidgets.QWidget):
         Args:
             state: Checkbox state (Qt.Checked or Qt.Unchecked).
         """
-        if self.ref_profile_line_item:
-            self.ref_profile_line_item.setVisible(bool(state))
-        if self.adj_profile_line_item:
-            self.adj_profile_line_item.setVisible(bool(state))
+        visible = bool(state)
+        
+        # Obsługa pojedynczych obiektów lub list
+        for item_attr in [self.ref_profile_line_item, self.adj_profile_line_item]:
+            if item_attr is None:
+                continue
+            if isinstance(item_attr, list):
+                for it in item_attr:
+                    it.setVisible(visible)
+            else:
+                item_attr.setVisible(visible)
 
     def toggle_cross_plane(self, state):
         """Toggle visibility of cross-section plane.
@@ -1242,7 +1371,7 @@ class Grid3DViewer(QtWidgets.QWidget):
 
 _global_3d_viewer = None
 
-def show_3d_viewer(reference_grid, adjusted_grid=None, line_points=None, separation=0, show_controls=True):
+def show_3d_viewer(reference_grid, adjusted_grid=None, line_points=None, separation=0, show_controls=True, pixel_size_x=1.0, pixel_size_y=1.0):
     """Displays the 3D grid viewer window with the provided data.
 
     Initializes the viewer if needed, sets control visibility, updates the 3D view with new data, and brings the window to the front.
@@ -1253,6 +1382,8 @@ def show_3d_viewer(reference_grid, adjusted_grid=None, line_points=None, separat
         line_points (list or np.ndarray, optional): Points for the profile line.
         separation (float, optional): Vertical separation between surfaces.
         show_controls (bool, optional): Whether to show UI controls.
+        pixel_size_x (float, optional): Physical size of pixel in X direction (micrometers). Defaults to 1.0.
+        pixel_size_y (float, optional): Physical size of pixel in Y direction (micrometers). Defaults to 1.0.
     """
     global _global_3d_viewer
     if _global_3d_viewer is None:
@@ -1263,7 +1394,9 @@ def show_3d_viewer(reference_grid, adjusted_grid=None, line_points=None, separat
         reference_grid=reference_grid,
         adjusted_grid=adjusted_grid,
         line_points=line_points,
-        separation=separation
+        separation=separation,
+        pixel_size_x=pixel_size_x,
+        pixel_size_y=pixel_size_y
     )
 
     logger.debug("_global_3d_viewer.show()")

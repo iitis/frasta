@@ -144,7 +144,8 @@ class LODSurface:
         if not self.items: return None
         # znajdź jedyny widoczny
         for s,it in self.items.items():
-            if it.isVisible(): return it
+            # GLMeshItem ma atrybut 'visible' zamiast metody isVisible()
+            if getattr(it, 'visible', False): return it
         # albo zwróć ostatni tworzony
         return next(iter(self.items.values()))
 

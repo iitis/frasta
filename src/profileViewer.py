@@ -196,8 +196,10 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.image_view.getView().sigRangeChanged.connect(self.on_range_changed)
 
         sep_layout = QtWidgets.QHBoxLayout()
-        self.spinbox_separation = QtWidgets.QSpinBox()
-        self.spinbox_separation.setRange(-1000, 1000)
+        self.spinbox_separation = QtWidgets.QDoubleSpinBox()
+        self.spinbox_separation.setRange(-1000.0, 1000.0)
+        self.spinbox_separation.setDecimals(2)
+        self.spinbox_separation.setSingleStep(0.1)
         self.spinbox_separation.setValue(self.separation)
         self.spinbox_separation.valueChanged.connect(self.update_plot)
         sep_layout.addWidget(QtWidgets.QLabel("Separation:"))
@@ -489,7 +491,7 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.binary_contact = npz_data['binary_contact']
         
         # Ustaw metadane
-        self.separation = int(npz_data['separation'])
+        self.separation = float(npz_data['separation'])
         px_x = float(npz_data['pixel_size_um_x'])
         px_y = float(npz_data['pixel_size_um_y'])
         self.ref_pixel_um = QPointF(px_x, px_y)
@@ -710,7 +712,7 @@ class ProfileViewer(QtWidgets.QMainWindow):
                 }
             },
             "settings": {
-                "separation": int(self.separation),
+                "separation": float(self.separation),
                 "sigma": float(self.sigma),
                 "tilt_correction_enabled": bool(self.checkbox_tilt.isChecked()),
                 "snap_to_plot_enabled": bool(self.checkbox_snap.isChecked()),
@@ -837,10 +839,11 @@ class ProfileViewer(QtWidgets.QMainWindow):
         logger.debug(f"adj NaN count: {np.isnan(adj).sum()}")
 
         # Wyznacz linię profilu (ograniczoną do wycinka)
-        if hasattr(self, 'rr') and hasattr(self, 'cc'):
+        # Użyj PEŁNYCH współrzędnych linii (z NaN-ami) aby 3D mógł przerwać linię
+        if hasattr(self, 'rr_full') and hasattr(self, 'cc_full'):
             line_points = [
                 (int(col - x_min), int(row - y_min))
-                for col, row in zip(self.cc, self.rr)
+                for col, row in zip(self.cc_full, self.rr_full)
                 if x_min <= col <= x_max and y_min <= row <= y_max
             ]
             if len(line_points) < 2:
@@ -852,7 +855,9 @@ class ProfileViewer(QtWidgets.QMainWindow):
             adjusted_grid=adj,
             line_points=line_points,
             separation=self.separation,
-            show_controls=True)
+            show_controls=True,
+            pixel_size_x=self.ref_pixel_um.x(),
+            pixel_size_y=self.ref_pixel_um.y())
 
 
     def get_viewbox_ranges_int(self, shape=None, overflow=False):
@@ -1037,24 +1042,37 @@ class ProfileViewer(QtWidgets.QMainWindow):
         rr = np.clip(rr, 0, self.reference_grid_smooth.shape[0] - 1)
         cc = np.clip(cc, 0, self.reference_grid_smooth.shape[1] - 1)
         
+        # ZACHOWAJ PEŁNE współrzędne linii (przed filtrowaniem) - potrzebne dla widoku 3D
+        self.rr_full = rr
+        self.cc_full = cc
+        
         profile_ref = self.reference_grid_smooth[rr, cc]
         profile_adj = (self.adjusted_grid_corrected + self.separation)[rr, cc]
+        
+        # Zamiast usuwać punkty z NaN, zachowaj je - PyQtGraph przerwie linię na NaN
         valid_profile_mask = ~np.isnan(profile_ref) & ~np.isnan(profile_adj)
         
+        # Dla celów zapisywania i analizy zachowaj tylko ważne punkty
         self.rr = rr[valid_profile_mask]
         self.cc = cc[valid_profile_mask]
-        profile_ref = profile_ref[valid_profile_mask]
-        profile_adj = profile_adj[valid_profile_mask]
         
-        positions_line = np.arange(len(rr))[valid_profile_mask] * self.ref_pixel_um.x() / 1000.0
+        # Ale dla rysowania zachowaj wszystkie punkty z NaN-ami
+        positions_line = np.arange(len(rr)) * self.ref_pixel_um.x() / 1000.0
         
-        self.positions_line = positions_line
-        self.reference_profile = profile_ref
-        self.adjusted_profile = profile_adj
+        # Ustaw NaN w profilu tam gdzie dane są nieprawidłowe
+        profile_ref_plot = profile_ref.copy()
+        profile_adj_plot = profile_adj.copy()
+        profile_ref_plot[~valid_profile_mask] = np.nan
+        profile_adj_plot[~valid_profile_mask] = np.nan
+        
+        self.positions_line = positions_line[valid_profile_mask]
+        self.reference_profile = profile_ref[valid_profile_mask]
+        self.adjusted_profile = profile_adj[valid_profile_mask]
         
         self.plot_widget.clear()
-        self.plot_widget.plot(positions_line, self.reference_profile, pen=pg.mkPen('g', width=2))
-        self.plot_widget.plot(positions_line, self.adjusted_profile, pen=pg.mkPen('b', width=2))
+        # PyQtGraph automatycznie przerwie linię na NaN
+        self.plot_widget.plot(positions_line, profile_ref_plot, pen=pg.mkPen('g', width=2), connect='finite')
+        self.plot_widget.plot(positions_line, profile_adj_plot, pen=pg.mkPen('b', width=2), connect='finite')
 
     def print_saved_points(self):
         for i, pt in enumerate(self.saved_points):
