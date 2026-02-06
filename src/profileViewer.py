@@ -1,3 +1,10 @@
+"""Profile viewer for cross-sectional analysis of aligned scans.
+
+This module provides tools for interactive cross-sectional analysis of two
+aligned scan datasets, including profile plotting, contact point detection,
+and 3D visualization of profile locations.
+"""
+
 import sys
 import os
 import numpy as np
@@ -18,6 +25,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_image_view():
+    """Creates a simplified ImageView without histogram and ROI controls.
+    
+    Returns:
+        pg.ImageView: Configured image view widget.
+    """
     view = pg.ImageView()
     view.ui.histogram.hide()
     view.ui.roiBtn.hide()
@@ -28,15 +40,36 @@ def create_image_view():
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class ProfileWorker(QThread):
+    """Background worker for loading and preprocessing scan data from HDF5.
+    
+    Loads reference and adjusted grids from an HDF5 file, applies optional
+    smoothing, and computes offset correction in a separate thread.
+    
+    Signals:
+        finished (dict): Emitted with processed data dictionary.
+        error (str): Emitted if an error occurs during processing.
+    """
+    
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
     def __init__(self, filepath, sigma):
+        """Initialize the profile worker.
+        
+        Args:
+            filepath (str): Path to HDF5 file containing scan data.
+            sigma (float): Gaussian smoothing parameter (currently unused).
+        """
         super().__init__()
         self.filepath = filepath
         self.sigma = sigma
 
     def run(self):
+        """Load and process scan data from HDF5 file.
+        
+        Loads both scans, computes offset correction, and emits results.
+        Emits error signal if loading fails.
+        """
         try:
             with h5py.File(self.filepath, "r") as f:
                 reference_grid = f["scan1"][:]
@@ -50,7 +83,7 @@ class ProfileWorker(QThread):
             valid_mask = ~np.isnan(reference_grid_smooth) & ~np.isnan(adjusted_grid_smooth)
             offset_correction = np.nanmean(reference_grid_smooth - adjusted_grid_smooth)
             adjusted_grid_corrected = adjusted_grid_smooth + offset_correction
-            # Gotowe, zwróć wszystko w dict
+            # Done, return everything in dict
             result = {
                 "reference_grid": reference_grid,
                 "adjusted_grid": adjusted_grid,
@@ -67,14 +100,37 @@ class ProfileWorker(QThread):
 
 
 class ProfileViewer(QtWidgets.QMainWindow):
+    """Main window for interactive cross-sectional profile analysis.
+    
+    Provides tools for:
+    - Loading aligned scan pairs from HDF5
+    - Interactive profile line placement and adjustment
+    - Real-time profile plotting with offset correction
+    - Contact point detection and separation analysis
+    - 3D visualization of profile locations
+    
+    Attributes:
+        ref_pixel_um (QPointF): Reference scan pixel size in micrometers.
+        adj_pixel_um (QPointF): Adjusted scan pixel size in micrometers.
+        sigma (float): Smoothing parameter.
+        separation (int): Vertical separation between profiles.
+        reference_grid (np.ndarray): Reference scan data.
+        adjusted_grid (np.ndarray): Adjusted scan data.
+    """
+    
     def __init__(self, parent=None):
+        """Initialize the profile viewer window.
+        
+        Args:
+            parent (QWidget, optional): Parent widget. Defaults to None.
+        """
         super().__init__(parent)
         self.setWindowTitle("Interactive cross-sectional analysis")
         self.setGeometry(100, 100, 1000, 600)
 
-        # --- PARAMETRY, metadane i domyślna ścieżka ---
+        # --- PARAMETERS, metadata and default path ---
 
-        # domyslnie w mikrometrach
+        # default in micrometers
         self.ref_pixel_um = QPointF(1.0, 1.0)
         self.adj_pixel_um = QPointF(1.0, 1.0)
 
@@ -104,7 +160,7 @@ class ProfileViewer(QtWidgets.QMainWindow):
         layout = QtWidgets.QHBoxLayout()
         central_widget.setLayout(layout)
 
-        # Środkowa kolumna – wykres i suwaki
+        # Middle column – plot and sliders
         center_layout = QtWidgets.QVBoxLayout()
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.getPlotItem().getViewBox().setRange(xRange=(0, 1))

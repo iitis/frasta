@@ -19,7 +19,7 @@ def test_about_dialog_layout_and_widgets(dlg):
     label = layout.itemAt(0).widget()
     assert isinstance(label, QtWidgets.QLabel)
     assert label.openExternalLinks() is True
-    assert "FRASTA - converter" in label.text()
+    assert "FRASTA-toolbox" in label.text()
     assert "Author: Dariusz Pojda" in label.text()
     assert "Version: 1.0.0" in label.text()
     assert "https://icons8.com/icons/set/eyedropper" in label.text()

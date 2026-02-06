@@ -1,8 +1,25 @@
+"""About dialog for FRASTA-toolbox application.
+
+This module provides a simple about dialog displaying application information,
+version, author, and licensing details.
+"""
+
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
 class AboutDialog(QtWidgets.QDialog):
+    """Dialog window displaying application information and credits.
+    
+    Shows application name, version, author, copyright, and third-party
+    attribution information in a modal dialog.
+    """
+    
     def __init__(self, parent=None):
+        """Initialize the about dialog.
+        
+        Args:
+            parent (QWidget, optional): Parent widget for the dialog. Defaults to None.
+        """
         super().__init__(parent)
         self.setWindowTitle("About")
         self.setMinimumWidth(350)

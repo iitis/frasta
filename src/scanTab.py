@@ -1,3 +1,10 @@
+"""Scan tab widget for displaying and editing 2D scan data.
+
+This module provides the ScanTab widget which displays scan data with interactive
+histogram controls, supports various editing operations (masking, hole filling,
+rotation, flipping), and provides tools for setting zero points and removing tilt.
+"""
+
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
@@ -16,7 +23,29 @@ logger = logging.getLogger(__name__)
 
 
 class ScanTab(QtWidgets.QWidget):
+    """Widget for displaying and interacting with a single scan dataset.
+    
+    Provides an image view with histogram-based contrast adjustment, interactive
+    tools for zero point selection, tilt removal, hole filling, and various
+    geometric transformations.
+    
+    Attributes:
+        image_view (pg.ImageView): Main image display widget.
+        hist_widget (pg.PlotWidget): Histogram display for contrast adjustment.
+        grid (np.ndarray): Current 2D scan data.
+        xi (np.ndarray): X-coordinate array.
+        yi (np.ndarray): Y-coordinate array.
+        px_x (float): Pixel size in x-direction.
+        px_y (float): Pixel size in y-direction.
+        zero_point_mode (bool): Flag for zero point selection mode.
+        tilt_mode (bool): Flag for tilt correction mode.
+    """
     def __init__(self, parent=None):
+        """Initialize the scan tab widget.
+        
+        Args:
+            parent (QWidget, optional): Parent widget. Defaults to None.
+        """
         super().__init__(parent)
         self.image_view = pg.ImageView()
         self.image_view.ui.roiBtn.hide()
@@ -25,7 +54,7 @@ class ScanTab(QtWidgets.QWidget):
         self.image_view.getView().setMenuEnabled(False)
 
         self.hist_widget = pg.PlotWidget()
-        self.hist_widget.setMaximumHeight(120)  # Wąski pasek
+        self.hist_widget.setMaximumHeight(120)  # Narrow strip
         self.hist_widget.setMenuEnabled(False)
         self.hist_widget.setMouseEnabled(x=False, y=False)
 
@@ -47,10 +76,10 @@ class ScanTab(QtWidgets.QWidget):
         self.px_y = None
 
         self.is_colormap = False
-        self.current_colormap = 'gray'  # lub None
+        self.current_colormap = 'gray'  # or None
 
-        self.zero_window_size = 15  # lub inna liczba nieparzysta
-        self.zero_sigma = 2.0       # ile odchyleń przyjmujesz jako "nie odstające"
+        self.zero_window_size = 15  # or another odd number
+        self.zero_sigma = 2.0       # how many deviations to accept as "not outliers"
 
         self.image_view.getView().scene().sigMouseClicked.connect(self.mouse_clicked)
 
@@ -63,7 +92,7 @@ class ScanTab(QtWidgets.QWidget):
             self.hist_widget.clear()
             return
 
-        # Zapamiętaj stare pozycje (jeśli istnieją)
+        # Remember old positions (if they exist)
         vmin = float(np.min(data))
         vmax = float(np.max(data))
 
@@ -101,11 +130,11 @@ class ScanTab(QtWidgets.QWidget):
 
     def set_zero_point_mode(self):
         self.zero_point_mode = True
-        # QtWidgets.QMessageBox.information(self, "Wybierz punkt", "Kliknij na widoku skanu punkt, który ma być nowym zerem.")
+        # QtWidgets.QMessageBox.information(self, "Select point", "Click on scan view point to be new zero.")
 
     def set_tilt_mode(self):
         self.tilt_mode = True
-        # QtWidgets.QMessageBox.information(self, "Wybierz punkt", "Kliknij na widoku skanu punkt, który ma być nowym zerem.")
+        # QtWidgets.QMessageBox.information(self, "Select point", "Click on scan view point to be new zero.")
 
     def delete_unmasked(self, mask):
         if self.grid is not None:
@@ -156,42 +185,42 @@ class ScanTab(QtWidgets.QWidget):
     def grid_to_mesh_vectorized(self, grid, pixel_size_x=1.0, pixel_size_y=1.0):
         h, w = grid.shape
 
-        # Siatka XY
+        # XY grid
         y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
         x_coords = x_indices * pixel_size_x
         y_coords = y_indices * pixel_size_y
         z_coords = grid
 
-        # Wszystkie wierzchołki
+        # All vertices
         vertices = np.stack([x_coords, y_coords, z_coords], axis=-1).reshape(-1, 3)
 
-        # Maska ważnych punktów (nie NaN)
+        # Mask of valid points (not NaN)
         valid_mask = ~np.isnan(vertices[:, 2])
         index_map = -np.ones(h * w, dtype=int)
         index_map[valid_mask] = np.arange(np.count_nonzero(valid_mask))
 
-        # Indeksy trójkątów
+        # Triangle indices
         idx_tl = np.ravel_multi_index((np.arange(h - 1)[:, None], np.arange(w - 1)[None, :]), dims=(h, w))
         idx_tr = idx_tl + 1
         idx_bl = idx_tl + w
         idx_br = idx_bl + 1
 
-        # Spłaszczone i połączone
+        # Flattened and combined
         idx_tl = idx_tl.ravel()
         idx_tr = idx_tr.ravel()
         idx_bl = idx_bl.ravel()
         idx_br = idx_br.ravel()
 
-        # Tylko tam, gdzie wszystkie 4 są ważne
+        # Only where all 4 are valid
         valid_quad = (index_map[idx_tl] >= 0) & (index_map[idx_tr] >= 0) & \
                     (index_map[idx_bl] >= 0) & (index_map[idx_br] >= 0)
 
-        # Dwa trójkąty na każdy kwadrat
+        # Two triangles per square
         faces_a = np.stack([index_map[idx_tl], index_map[idx_tr], index_map[idx_br]], axis=1)[valid_quad]
         faces_b = np.stack([index_map[idx_tl], index_map[idx_br], index_map[idx_bl]], axis=1)[valid_quad]
         faces = np.vstack([faces_a, faces_b])
 
-        # Przefiltrowane wierzchołki
+        # Filtered vertices
         vertices = vertices[valid_mask]
 
         return vertices.astype(np.float32), faces.astype(np.int32)
@@ -342,17 +371,17 @@ class ScanTab(QtWidgets.QWidget):
         ymax = min(h, y + s + 1)
         window = grid[ymin:ymax, xmin:xmax]
 
-        # Wartości bez NaN
+        # Values without NaN
         vals = window[~np.isnan(window)]
         if len(vals) == 0:
             return np.nan
 
-        # Odrzuć odstające (np. 2 sigma od mediany)
+        # Reject outliers (e.g. 2 sigma from median)
         median = np.median(vals)
         std = np.std(vals)
         non_outliers = vals[np.abs(vals - median) < self.zero_sigma * std]
 
-        # Jeżeli po odrzuceniu nie ma wartości – bierz medianę
+        # If no values remain after rejection - take median
         return median if len(non_outliers) == 0 else np.mean(non_outliers)
         # if len(non_outliers) == 0:
         #     return median
@@ -386,7 +415,7 @@ class ScanTab(QtWidgets.QWidget):
         yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
         zz = window
 
-        # Zamień na 1D i odrzuć NaN
+        # Convert to 1D and reject NaN
         X = xx.flatten()
         Y = yy.flatten()
         Z = zz.flatten()
@@ -447,7 +476,7 @@ class ScanTab(QtWidgets.QWidget):
 
         A = np.vstack((X, Y)).T
 
-        # Tu używamy RANSAC, żeby być odpornym na odstające wartości
+        # Here we use RANSAC to be robust against outliers
         from sklearn.linear_model import RANSACRegressor, LinearRegression
         base_model = LinearRegression()
         model = RANSACRegressor(base_model, min_samples=min(10, len(Z)), residual_threshold=200.0, random_state=42)
@@ -551,11 +580,11 @@ class ScanTab(QtWidgets.QWidget):
                     QtWidgets.QMessageBox.warning(self, "No data available", "The selected point contains no value (NaN).")
                     self.zero_point_mode = False
                     return
-                # Przesuwamy cały skan w osi Z
+                # Shift entire scan in Z axis
                 self.grid = self.grid - value
                 self.update_image()
                 self.zero_point_mode = False
-                # QtWidgets.QMessageBox.information(self, "Sukces", f"Ustawiono nowy punkt zerowy na ({x},{y}) o wysokości {value:.2f}.")
+                # QtWidgets.QMessageBox.information(self, "Success", f"Set new zero point at ({x},{y}) with height {value:.2f}.")
 
                 min_val = self.hist_min_line.value()-value
                 max_val = self.hist_max_line.value()-value
@@ -569,12 +598,12 @@ class ScanTab(QtWidgets.QWidget):
                 self.tilt_mode = False
                 # a, b, c = self.fit_plane_to_grid_robust(self.grid, x, y, s=100)
                 a, b, c = self.fit_plane_to_grid_median_filter(self.grid, x, y, s=500, outlier_thresh=300.0)
-                # Możesz teraz utworzyć macierz tej samej wielkości co grid:
+                # Create matrix of same size as grid:
                 rows, cols = self.grid.shape
                 yy, xx = np.mgrid[0:rows, 0:cols]
                 plane = a * xx + b * yy + c
 
-                # Korekta:
+                # Correction:
                 self.grid = self.grid + plane
                 self.update_image()
                 self.update_histogram()
@@ -638,7 +667,7 @@ class ScanTab(QtWidgets.QWidget):
             self.masked = data.copy()
             self.masked[(self.masked < vmin) | (self.masked > vmax)] = np.nan
 
-            # Specjalna wartość powyżej vmax
+            # Special value above vmax
             special = vmax + max(1.0, (vmax - vmin) * 0.01)
             masked_for_vis = self.masked.copy()
             masked_for_vis[np.isnan(masked_for_vis)] = special
@@ -646,12 +675,12 @@ class ScanTab(QtWidgets.QWidget):
             image_item = self.image_view.getImageItem()
             if self.is_colormap:
                 lut = pg.colormap.get('turbo').getLookupTable(0.0, 1.0, 256)
-                lut = np.vstack([lut, [255, 0, 0, 255]])  # czerwony na końcu
+                lut = np.vstack([lut, [255, 0, 0, 255]])  # red at the end
                 image_item.setLookupTable(lut)
-                # Kluczowe: levels od vmin do special
+                # Key: levels from vmin to special
                 self.image_view.setImage(masked_for_vis, autoLevels=False, levels=(vmin, special), autoRange=False)
             else:
-                # W wersji gray nie podświetlisz, ale możesz np. zrobić specjalny kolor: 255
+                # In gray version you can't highlight, but you can e.g. make special color: 255
                 masked_for_vis_gray = self.masked.copy()
                 masked_for_vis_gray[np.isnan(masked_for_vis_gray)] = 255
                 self.image_view.setImage(masked_for_vis_gray, autoLevels=True, autoRange=False)
