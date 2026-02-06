@@ -22,8 +22,8 @@ def test_about_dialog_layout_and_widgets(dlg):
     assert "FRASTA-toolbox" in label.text()
     assert "Author: Dariusz Pojda" in label.text()
     assert "Version: 1.0.0" in label.text()
-    assert "https://icons8.com/icons/set/eyedropper" in label.text()
-    assert "<a href='https://icons8.com/icons/set/eyedropper'>" in label.text()
+    assert "https://icons8.com/icons" in label.text()
+    assert "<a href='https://icons8.com/icons'>" in label.text()
 
     btn = layout.itemAt(1).widget()
     assert isinstance(btn, QtWidgets.QPushButton)
