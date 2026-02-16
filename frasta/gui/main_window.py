@@ -18,7 +18,8 @@ from functools import partial
 import sys
 import os
 
-from .dialogs import ProfileViewer, OverlayViewer, AboutDialog
+from .dialogs import (ProfileViewer, OverlayViewer, AboutDialog,
+                      FilterDialog, MorphologyDialog, TransformDialog, RegistrationDialog)
 from .scan_tab import ScanTab
 from ..core import GridData
 from .viewers import show_3d_viewer
@@ -243,6 +244,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "profile": QtWidgets.QAction("Profile analysis...", self),
             "about": QtWidgets.QAction("About...", self),
             "exit": QtWidgets.QAction("Exit", self),
+            # Advanced processing actions
+            "filter": QtWidgets.QAction("Advanced Filtering...", self),
+            "morphology": QtWidgets.QAction("Morphology && Leveling...", self),
+            "transform": QtWidgets.QAction("Geometric Transforms...", self),
+            "register": QtWidgets.QAction("Auto-Register Surfaces...", self),
         }
 
         # create_actions
@@ -272,6 +278,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.actions["colormap"].setCheckable(True)
         self.actions["colormap"].setChecked(False)
+        
+        # Set tooltips for advanced processing actions
+        self.actions["filter"].setToolTip("Apply advanced filtering (bilateral, median, morphological)")
+        self.actions["morphology"].setToolTip("Level surface and remove polynomial forms")
+        self.actions["transform"].setToolTip("Rotate, rescale, or crop grid")
+        self.actions["register"].setToolTip("Automatically align two surfaces")
 
     def connect_actions(self):
         self.actions["open"].triggered.connect(self.open_file)
@@ -297,6 +309,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions["del_inside"].triggered.connect(self.del_inside_mask)
         self.actions["show_mask"].triggered.connect(self.show_circle_roi)
         self.actions["show_rmask"].triggered.connect(self.show_rectangle_roi)
+        
+        # Advanced processing connections
+        self.actions["filter"].triggered.connect(self.apply_advanced_filter)
+        self.actions["morphology"].triggered.connect(self.apply_morphology)
+        self.actions["transform"].triggered.connect(self.apply_transform)
+        self.actions["register"].triggered.connect(self.auto_register_surfaces)
 
     def create_menubar(self):
         menubar = self.menuBar()
@@ -319,6 +337,9 @@ class MainWindow(QtWidgets.QMainWindow):
             ]),
             ("Scan &Actions", [
                 "fill", "repair", "flipUD", "flipLR", "rot90", "inverse", "zero", "colormap"
+            ]),
+            ("&Processing", [
+                "filter", "morphology", "transform", "separator", "register"
             ]),
             ("&Tools", [
                 "compare", "profile"
@@ -366,6 +387,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toolbar.addAction(self.actions["zero"])
         self.toolbar.addAction(self.actions["tilt"])
         self.toolbar.addAction(self.actions["colormap"])
+        self.toolbar.addSeparator()
+        # Advanced processing toolbar
+        self.toolbar.addAction(self.actions["filter"])
+        self.toolbar.addAction(self.actions["morphology"])
+        self.toolbar.addAction(self.actions["transform"])
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.actions["view3d"])
         self.toolbar.addAction(self.actions["compare"])
@@ -905,3 +931,317 @@ class MainWindow(QtWidgets.QMainWindow):
         self._profile_viewer.show()
         self._profile_viewer.raise_()
         self._profile_viewer.activateWindow()
+
+
+    # ========== Advanced Processing Methods ==========
+    
+    def apply_advanced_filter(self):
+        """Apply advanced filtering to current scan."""
+        tab = self.current_tab()
+        if tab is None or tab.grid is None:
+            QtWidgets.QMessageBox.warning(self, "No data", "Please load a scan first!")
+            return
+        
+        dialog = FilterDialog(self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        
+        filter_type, params = dialog.get_filter_config()
+        
+        # Import processing functions
+        from ..processing import (
+            bilateral_filter, median_filter_nan_aware,
+            morphological_opening, morphological_closing,
+            robust_gaussian_filter
+        )
+        
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            
+            if filter_type == "bilateral":
+                result = bilateral_filter(
+                    tab.grid, 
+                    sigma_spatial=params['sigma_spatial'],
+                    sigma_range=params['sigma_range'],
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0
+                )
+            elif filter_type == "median":
+                result = median_filter_nan_aware(
+                    tab.grid, 
+                    size=params['size'],
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0
+                )
+            elif filter_type == "opening":
+                result = morphological_opening(
+                    tab.grid, 
+                    size=params['size'],
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0
+                )
+            elif filter_type == "closing":
+                result = morphological_closing(
+                    tab.grid, 
+                    size=params['size'],
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0
+                )
+            elif filter_type == "robust_gaussian":
+                result = robust_gaussian_filter(
+                    tab.grid,
+                    sigma=params['sigma'],
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0,
+                    iterations=params['max_iterations'],
+                    threshold=params['outlier_threshold']
+                )
+            
+            tab.grid = result
+            tab.masked = result.copy()
+            tab.update_histogram()
+            
+            QtWidgets.QMessageBox.information(
+                self, "Success", 
+                f"Filter applied successfully!\nShape: {result.shape}"
+            )
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error", 
+                f"Failed to apply filter:\n{str(e)}"
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+    
+    
+    def apply_morphology(self):
+        """Apply morphology/leveling operations to current scan."""
+        tab = self.current_tab()
+        if tab is None or tab.grid is None:
+            QtWidgets.QMessageBox.warning(self, "No data", "Please load a scan first!")
+            return
+        
+        dialog = MorphologyDialog(self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        
+        op_type, params = dialog.get_operation_config()
+        
+        from ..processing import (
+            level_by_plane, remove_polynomial_form, threshold_grid
+        )
+        
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            
+            if op_type == "level_ls":
+                result = level_by_plane(tab.grid, method='least_squares')
+            elif op_type == "level_robust":
+                # Call fit_plane_robust directly to use residual_threshold
+                from ..processing.morphology import fit_plane_robust
+                plane, coeffs, inliers = fit_plane_robust(
+                    tab.grid,
+                    residual_threshold=params.get('residual_threshold', 10.0)
+                )
+                result = tab.grid - plane
+            elif op_type == "polynomial":
+                result = remove_polynomial_form(tab.grid, order=params['order'])
+            elif op_type == "threshold":
+                result = threshold_grid(
+                    tab.grid,
+                    low=params['lower'],
+                    high=params['upper']
+                )
+            
+            tab.grid = result
+            tab.masked = result.copy()
+            tab.update_histogram()
+            
+            QtWidgets.QMessageBox.information(
+                self, "Success", 
+                f"Operation applied successfully!"
+            )
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error", 
+                f"Failed to apply operation:\n{str(e)}"
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+    
+    
+    def apply_transform(self):
+        """Apply geometric transform to current scan."""
+        tab = self.current_tab()
+        if tab is None or tab.grid is None:
+            QtWidgets.QMessageBox.warning(self, "No data", "Please load a scan first!")
+            return
+        
+        dialog = TransformDialog(self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        
+        transform_type, params = dialog.get_transform_config()
+        
+        from ..processing import rotate_grid, rescale_grid, crop_to_valid_region
+        
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            
+            # Ensure coordinate arrays exist
+            if not hasattr(tab, 'xi') or tab.xi is None:
+                h, w = tab.grid.shape
+                tab.xi = np.arange(w) * (tab.px_x or 1.0)
+                tab.yi = np.arange(h) * (tab.px_y or 1.0)
+            
+            if transform_type == "rotate":
+                result, new_xi, new_yi, new_px_x, new_px_y = rotate_grid(
+                    tab.grid,
+                    angle_degrees=params['angle'],
+                    xi=tab.xi,
+                    yi=tab.yi,
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0,
+                    order=params.get('order', 3)
+                )
+                tab.xi = new_xi
+                tab.yi = new_yi
+                tab.px_x = new_px_x
+                tab.px_y = new_px_y
+            elif transform_type == "rescale":
+                result, new_xi, new_yi, new_px_x, new_px_y = rescale_grid(
+                    tab.grid,
+                    scale_factor=params['scale'],
+                    xi=tab.xi,
+                    yi=tab.yi,
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0,
+                    order=params.get('order', 3)
+                )
+                tab.xi = new_xi
+                tab.yi = new_yi
+                tab.px_x = new_px_x
+                tab.px_y = new_px_y
+            elif transform_type == "crop":
+                result, new_xi, new_yi, new_px_x, new_px_y = crop_to_valid_region(
+                    tab.grid,
+                    xi=tab.xi,
+                    yi=tab.yi,
+                    px_x=tab.px_x or 1.0,
+                    px_y=tab.px_y or 1.0,
+                    margin=params.get('margin', 0)
+                )
+                tab.xi = new_xi
+                tab.yi = new_yi
+                tab.px_x = new_px_x
+                tab.px_y = new_px_y
+            
+            tab.grid = result
+            tab.masked = result.copy()
+            tab.update_histogram()
+            
+            QtWidgets.QMessageBox.information(
+                self, "Success", 
+                f"Transform applied successfully!\n"
+                f"New shape: {result.shape}\n"
+                f"Pixel size: {tab.px_x:.3f} x {tab.px_y:.3f}"
+            )
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error", 
+                f"Failed to apply transform:\n{str(e)}"
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+    
+    
+    def auto_register_surfaces(self):
+        """Automatically register two surfaces."""
+        if self.tabs.count() < 2:
+            QtWidgets.QMessageBox.warning(
+                self, "Not enough scans", 
+                "You need at least two scans for registration!"
+            )
+            return
+        
+        # Get scan names
+        names = [self.tabs.tabText(i) for i in range(self.tabs.count())]
+        
+        dialog = RegistrationDialog(names, self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        
+        ref_idx, mov_idx, method = dialog.get_registration_config()
+        
+        if ref_idx == mov_idx:
+            QtWidgets.QMessageBox.warning(
+                self, "Error", 
+                "Please select two different surfaces!"
+            )
+            return
+        
+        ref_tab = self.tabs.widget(ref_idx)
+        mov_tab = self.tabs.widget(mov_idx)
+        
+        from ..processing import auto_register_surfaces, apply_registration
+        
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            
+            # Perform registration
+            params = auto_register_surfaces(
+                ref_tab.grid, 
+                mov_tab.grid,
+                method=method
+            )
+            
+            # Auto-generate coordinate arrays if missing
+            h, w = mov_tab.grid.shape
+            if not hasattr(mov_tab, 'xi') or mov_tab.xi is None:
+                mov_tab.xi = np.arange(w) * (mov_tab.px_x or 1.0)
+            if not hasattr(mov_tab, 'yi') or mov_tab.yi is None:
+                mov_tab.yi = np.arange(h) * (mov_tab.px_y or 1.0)
+            
+            # Apply registration to moving surface
+            registered, new_xi, new_yi, new_px_x, new_px_y = apply_registration(
+                mov_tab.grid,
+                mov_tab.xi,
+                mov_tab.yi,
+                mov_tab.px_x or 1.0,
+                mov_tab.px_y or 1.0,
+                params['translation'],
+                params.get('rotation', 0.0)
+            )
+            
+            # Update moving tab
+            mov_tab.grid = registered
+            mov_tab.xi = new_xi
+            mov_tab.yi = new_yi
+            mov_tab.px_x = new_px_x
+            mov_tab.px_y = new_px_y
+            mov_tab.masked = registered.copy()
+            mov_tab.update_histogram()
+            
+            # Show results
+            msg = f"Registration completed!\n\n"
+            msg += f"Method: {method.upper()}\n"
+            if 'translation' in params:
+                tx, ty = params['translation']
+                msg += f"Translation: ({tx:.1f}, {ty:.1f}) pixels\n"
+            if 'rotation' in params:
+                msg += f"Rotation: {params['rotation']:.2f}°\n"
+            if 'rmse' in params:
+                msg += f"RMSE: {params['rmse']:.4f}\n"
+            
+            QtWidgets.QMessageBox.information(self, "Success", msg)
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error", 
+                f"Registration failed:\n{str(e)}"
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()

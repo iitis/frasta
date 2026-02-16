@@ -25,10 +25,70 @@ FRASTA-toolbox currently supports structured grid data exported as text-based XY
    - define region of interest (ROI),
    - adjust value range using histogram thresholding,
    - fill missing data if necessary.
-3. Align two opposing fracture surfaces using interactive translation and rotation.
-4. Place cross-sectional profiles to inspect local deviations and contacts.
-5. Export aligned data, profiles, and measurements for further analysis or documentation.
+3. **Apply advanced processing** (NEW!):
+   - Use **Processing** menu for filtering, leveling, transforms
+   - Interactive dialogs guide parameter selection
+   - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
+4. Align two opposing fracture surfaces using interactive translation and rotation.
+5. Place cross-sectional profiles to inspect local deviations and contacts.
+6. Export aligned data, profiles, and measurements for further analysis or documentation.
 
+## Advanced Processing (NEW!)
+
+FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-toolbox project:
+
+### 🔹 Advanced Filtering
+- **Bilateral filter** - edge-preserving smoothing (preserves fracture edges)
+- **Median filter** - robust outlier removal (removes measurement spikes)
+- **Morphological operations** - opening/closing for structural processing
+- **Robust Gaussian** - smoothing with iterative outlier rejection
+
+### 🔹 Morphology & Leveling
+- **Plane leveling** - remove tilt (least-squares or RANSAC-robust)
+- **Polynomial form removal** - remove bending, warping, curvature (order 1-5)
+- **Three-point leveling** - level by reference points
+- **Thresholding** - value-based masking
+
+### 🔹 Geometric Transformations
+- **Rotation** - rotate surfaces with interpolation
+- **Rescaling** - change resolution (upsampling/downsampling)
+- **Cropping** - automatic crop to valid regions
+- **Auto-registration** - automatic surface alignment (ICP, cross-correlation)
+
+**Documentation:** 
+- 📖 [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
+- �️ [GUI Integration Guide](docs/GUI_INTEGRATION.md) - using advanced processing in the GUI
+- �📋 [Quick Reference](docs/QUICK_REFERENCE.md) - cheat sheet for all functions
+- 💡 [Examples](examples/) - interactive demos and visualizations
+
+**Quick Example:**
+```python
+from frasta.processing import bilateral_filter, level_by_plane, auto_register_surfaces
+
+# Edge-preserving smoothing
+smoothed = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, px_x=1.0, px_y=1.0)
+
+# Remove tilt
+leveled = level_by_plane(grid, method='robust')
+
+# Automatic surface alignment
+params = auto_register_surfaces(surface1, surface2, method='icp')
+```
+
+## Examples
+
+The [`examples/`](examples/) directory contains ready-to-run demonstration scripts:
+
+- **`advanced_processing.py`** - Interactive examples for all 16 processing functions
+- **`visualization.py`** - Generate publication-quality comparison plots
+
+**Run examples:**
+```bash
+python examples/advanced_processing.py    # Interactive demos
+python examples/visualization.py          # Generate visualizations (saved to examples/output/)
+```
+
+See [examples/README.md](examples/README.md) for details.
 
 ## Configuration
 
