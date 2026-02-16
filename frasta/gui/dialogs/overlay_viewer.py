@@ -9,7 +9,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from .gridData import GridData        
+from ...core import GridData        
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.

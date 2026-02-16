@@ -1,4 +1,4 @@
-"""3D view widget with constrained camera rotation.
+﻿"""3D view widget with constrained camera rotation.
 
 This module provides a GLViewWidget subclass that restricts camera movement
 to specified azimuth and elevation ranges, useful for limiting user interaction
@@ -89,3 +89,4 @@ class LimitedGLView(GLViewWidget):
             self.el_range = elevation_range
         if wrap_azimuth is not None:
             self.wrap_az = wrap_azimuth
+

@@ -1,4 +1,4 @@
-"""Level-of-detail (LOD) surface rendering for 3D visualization.
+﻿"""Level-of-detail (LOD) surface rendering for 3D visualization.
 
 This module provides automatic level-of-detail management for large 3D surface
 meshes, dynamically switching between different mesh densities based on camera
@@ -51,9 +51,9 @@ class LODSurface:
         self.visible = True
 
         # NOWE:
-        self.target_px = float(target_px)     # docelowe px na "komórkę" siatki (step=1)
-        self.hysteresis = float(hysteresis)   # np. 0.25 => ±25% strefa nieczułości
-        self.base_cell = base_cell            # rozmiar komórki w jednostkach sceny; auto z xs/ys, jeśli None
+        self.target_px = float(target_px)     # docelowe px na "komĂłrkÄ™" siatki (step=1)
+        self.hysteresis = float(hysteresis)   # np. 0.25 => Â±25% strefa nieczuĹ‚oĹ›ci
+        self.base_cell = base_cell            # rozmiar komĂłrki w jednostkach sceny; auto z xs/ys, jeĹ›li None
         self.thresholds = thresholds          # alternatywnie: jawne progi {step: (px_lo, px_hi)}
         self._last_step = None
 
@@ -90,7 +90,7 @@ class LODSurface:
         """
         self.data = (xs, ys, Z.astype(np.float32, copy=False))
 
-        # autodetekcja rozmiaru komórki (użyj mediany, odporna na outliery)
+        # autodetekcja rozmiaru komĂłrki (uĹĽyj mediany, odporna na outliery)
         if self.base_cell is None and xs is not None and ys is not None:
             try:
                 dx = float(np.median(np.abs(np.diff(xs)))) if len(xs) > 1 else 1.0
@@ -134,7 +134,7 @@ class LODSurface:
         self.lohi = (float(lo), float(hi))
         self._restyle_all_existing()
 
-    # ---------- wewnętrzne ----------
+    # ---------- wewnÄ™trzne ----------
     def _ensure_current_exists(self):
         s = self._pick_step()
         if s not in self.items:
@@ -142,11 +142,11 @@ class LODSurface:
 
     def _current_item(self):
         if not self.items: return None
-        # znajdź jedyny widoczny
+        # znajdĹş jedyny widoczny
         for s,it in self.items.items():
             # GLMeshItem ma atrybut 'visible' zamiast metody isVisible()
             if getattr(it, 'visible', False): return it
-        # albo zwróć ostatni tworzony
+        # albo zwrĂłÄ‡ ostatni tworzony
         return next(iter(self.items.values()))
 
     def _restyle_all_existing(self):
@@ -162,7 +162,7 @@ class LODSurface:
         H = Z[::step, ::step]
         h, w = H.shape
 
-        # wierzchołki i trójkąty
+        # wierzchoĹ‚ki i trĂłjkÄ…ty
         V = np.c_[X.ravel(), Y.ravel(), H.ravel()].astype(np.float32)
         idx = np.arange(h*w, dtype=np.uint32).reshape(h, w)
         f1 = np.c_[idx[:-1,:-1].ravel(), idx[1:,:-1].ravel(), idx[1:,1:].ravel()]
@@ -178,7 +178,7 @@ class LODSurface:
 
         self.view.addItem(it)
         it.setVisible(False)
-        # kolory/tryb będą nałożone w _apply_style
+        # kolory/tryb bÄ™dÄ… naĹ‚oĹĽone w _apply_style
         return it
 
     def _apply_style(self, it, step):
@@ -191,20 +191,20 @@ class LODSurface:
             it.opts['drawFaces'] = True
             it.opts['drawEdges'] = False
 
-        # dostęp do MeshData (kompatybilnie wstecz)
+        # dostÄ™p do MeshData (kompatybilnie wstecz)
         md = getattr(it, '_mesh', None)
         if md is None:
             try:
-                md = it.meshData()  # może istnieć w Twojej wersji
+                md = it.meshData()  # moĹĽe istnieÄ‡ w Twojej wersji
             except Exception:
                 return  # bez MeshData nie pokolorujemy
 
-        # wierzchołki i wysokości
-        V = md.vertexes()                  # stare API: bez argumentów
+        # wierzchoĹ‚ki i wysokoĹ›ci
+        V = md.vertexes()                  # stare API: bez argumentĂłw
         z = V[:, 2].astype(np.float32, copy=False)
         finite = np.isfinite(z)
 
-        # kolory: kolormap None => stały kolor; w przeciwnym razie mapowanie po z
+        # kolory: kolormap None => staĹ‚y kolor; w przeciwnym razie mapowanie po z
         if self.colormap is None:
             C = np.tile(np.asarray(self.color, dtype=np.float32), (V.shape[0], 1))
         else:
@@ -233,59 +233,20 @@ class LODSurface:
                 cmap = pg.colormap.get(self.colormap)
                 C = cmap.map(t, mode='float').astype(np.float32)
 
-            # przezroczyste wierzchołki dla NaN
+            # przezroczyste wierzchoĹ‚ki dla NaN
             if (~finite).any():
                 C[~finite, 3] = 0.0
 
-        # push kolorów do GPU (często samo setVertexColors nie wystarcza)
+        # push kolorĂłw do GPU (czÄ™sto samo setVertexColors nie wystarcza)
         C = np.ascontiguousarray(C, dtype=np.float32)
         md.setVertexColors(C)
         it.setMeshData(meshdata=md)
 
-        from pyqtgraph.opengl import shaders
-
-        prog = shaders.ShaderProgram(
-            'headlight_color',
-            [
-                shaders.VertexShader("""
-                    // Wersja "legacy": używa gl_* i działa w starszych pyqtgraph
-                    varying vec3 vN;
-                    varying vec4 vColor;
-                    void main() {
-                        gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
-                        vN     = normalize(gl_NormalMatrix * gl_Normal); // normal w przestrzeni oka
-                        vColor = gl_Color;                               // z colors=... albo setColor(...)
-                    }
-                """),
-                shaders.FragmentShader("""
-                    varying vec3 vN;
-                    varying vec4 vColor;
-                    void main() {
-                        // "Headlight" - światło przyspawane do widza (w przestrzeni oka)
-                        vec3 L = normalize(vec3(0.0, 0.0, 1.0));
-
-                        // Dwustronne: odwróć normalną dla tylnej ściany
-                        vec3 N = normalize(vN);
-                        if (!gl_FrontFacing) N = -N;
-
-                        // Diffuse + lekki ambient
-                        float diff = max(dot(N, L), 0.0);
-                        vec3 base = vColor.rgb;
-                        vec3 rgb  = base * (0.15 + 0.85*diff);
-
-                        // (opcjonalnie lekki połysk)
-                        // vec3 R = reflect(-L, N);
-                        // vec3 V = vec3(0.0, 0.0, 1.0);
-                        // float spec = pow(max(dot(R, V), 0.0), 16.0);
-                        // rgb += 0.12 * spec;
-
-                        gl_FragColor = vec4(rgb, vColor.a);
-                    }
-                """)
-            ]
-        )
-
-        it.setShader(prog)
+        # Only set custom shader if one was provided during initialization
+        # Otherwise, let GLMeshItem use its default 'shaded' shader
+        if self.shader is not None:
+            it.setShader(self.shader)
+        
         it.update()
 
     def _pick_step(self):
@@ -296,11 +257,11 @@ class LODSurface:
         px_per_unit = px_h / (2.0*np.tan(fov/2.0)*max(dist, 1e-6))
 
         cell = self.base_cell if (self.base_cell is not None and self.base_cell > 0) else 1.0
-        px = px_per_unit * cell               # px przypadające na "komórkę" siatki dla step=1
+        px = px_per_unit * cell               # px przypadajÄ…ce na "komĂłrkÄ™" siatki dla step=1
 
         # 4a) Jawne progi: thresholds = {step: (px_lo, px_hi)} dla px_per_cell_step = px * step
         if self.thresholds:
-            # Histereza: rozszerz zakres bieżącego kroku
+            # Histereza: rozszerz zakres bieĹĽÄ…cego kroku
             if self._last_step in self.thresholds:
                 lo, hi = self.thresholds[self._last_step]
                 k = self.hysteresis
@@ -309,21 +270,21 @@ class LODSurface:
                 if lo <= px * self._last_step < hi:
                     return self._last_step
 
-            # wybierz pierwszy step, dla którego px*step wpada w przedział
+            # wybierz pierwszy step, dla ktĂłrego px*step wpada w przedziaĹ‚
             for s in sorted(self.thresholds.keys()):
                 lo, hi = self.thresholds[s]
                 if lo <= px * s < hi:
                     self._last_step = s
                     return s
-            # fallback: najbliższy step względem target_px
+            # fallback: najbliĹĽszy step wzglÄ™dem target_px
             desired = max(1, int(np.ceil(self.target_px / max(px,1e-6))))
             s = min(self.steps, key=lambda st: abs(st - desired))
             self._last_step = s
             return s
 
-        # 4b) Polityka "target_px" (prosta): dąż do px_per_cell_step ~ target_px
+        # 4b) Polityka "target_px" (prosta): dÄ…ĹĽ do px_per_cell_step ~ target_px
         desired = max(1, int(np.ceil(self.target_px / max(px, 1e-6))))
-        # znajdź najbliższy dostępny step
+        # znajdĹş najbliĹĽszy dostÄ™pny step
         candidates = sorted(self.steps)
         s = None
         for st in candidates:
@@ -332,7 +293,7 @@ class LODSurface:
         if s is None:
             s = candidates[-1]
 
-        # Histereza: trzymaj poprzedni krok dopóki px*s0 jest blisko target_px
+        # Histereza: trzymaj poprzedni krok dopĂłki px*s0 jest blisko target_px
         if self._last_step is not None:
             r = (px * self._last_step) / (self.target_px + 1e-6)  # 1.0 = idealnie
             band = self.hysteresis
@@ -354,6 +315,7 @@ class LODSurface:
         if s not in self.items:
             self.items[s] = self._build_item_for_step(s)
             self._apply_style(self.items[s], s)
-        # przełącz widoczność
+        # przeĹ‚Ä…cz widocznoĹ›Ä‡
         for k,it in self.items.items():
             it.setVisible(self.visible and (k == s))
+

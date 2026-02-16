@@ -10,9 +10,7 @@ processing, and analyzing 2D scan data. It includes features for:
 - Scan comparison and overlay views
 """
 
-import h5py
 import numpy as np
-import pandas as pd
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtGui import QIcon
 from functools import partial
@@ -20,141 +18,17 @@ from functools import partial
 import sys
 import os
 
-from .profileViewer import ProfileViewer
-from .overlayViewer import OverlayViewer
-from .aboutDialog import AboutDialog
-from .scanTab import ScanTab
-from .gridData import GridData
-
-from .grid3DViewer import show_3d_viewer
+from .dialogs import ProfileViewer, OverlayViewer, AboutDialog
+from .scan_tab import ScanTab
+from ..core import GridData
+from .viewers import show_3d_viewer
+from ..utils import resource_path
+from ..io import load_csv_data, load_npz_data, load_h5_data, save_npz, save_h5, suggest_units
+from .workers import GridWorker
 
 import logging
 logger = logging.getLogger(__name__)
 
-def resource_path(relative_path):
-    """Returns the correct path to resource files in both .exe and .py environments.
-    
-    Args:
-        relative_path (str): Relative path to the resource file.
-        
-    Returns:
-        str: Absolute path to the resource file.
-    """
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
-class GridWorker(QtCore.QObject):
-    """Background worker for loading and gridding CSV scan data.
-    
-    Loads large CSV files in chunks, uses specified coordinate units (mm vs μm),
-    grids the point cloud data onto a regular 2D array, and emits progress updates.
-    
-    Signals:
-        progress (int): Progress percentage (0-100).
-        finished (object, object, object, float, float): Emitted when processing completes,
-            returning grid, xi, yi, px_x, px_y.
-    """
-    
-    progress = QtCore.pyqtSignal(int)
-    finished = QtCore.pyqtSignal(object, object, object, float, float) # grid, xi, yi, px_x, px_y
-
-    def __init__(self, fname, units_xy='um', units_z='um'):
-        """Initialize the grid worker.
-        
-        Args:
-            fname (str): Path to the CSV file to load.
-            units_xy (str): Unit for X and Y coordinates: 'mm' or 'um' (micrometers).
-            units_z (str): Unit for Z coordinate: 'mm' or 'um' (micrometers).
-        """
-        super().__init__()
-        self.fname = fname
-        self.units_xy = units_xy
-        self.units_z = units_z
-
-    @QtCore.pyqtSlot()
-    def process(self):
-        """Process the CSV file and generate a gridded representation.
-        
-        Reads CSV data in chunks, detects coordinate units, calculates pixel sizes,
-        grids the point cloud, and averages duplicate points. Emits progress signals
-        during processing and finished signal with results.
-        """
-        chunk_size = 100_000
-        total = sum(1 for _ in open(self.fname, encoding="utf-8"))
-        chunks = []
-
-        for i, chunk in enumerate(pd.read_csv(
-                self.fname,
-                sep=r'[;,\t ]+',
-                engine='python',
-                header=None,
-                names=['x', 'y', 'z'],
-                chunksize=chunk_size)):
-
-            chunks.append(chunk)
-            self.progress.emit(int(20 + 30 * (i * chunk_size / total)))
-
-        df = pd.concat(chunks, ignore_index=True)
-        x, y, z = df['x'].values, df['y'].values, df['z'].values
-
-        # Oblicz typowe kroki w x i y
-        dx = np.diff(np.sort(np.unique(x)))
-        dy = np.diff(np.sort(np.unique(y)))
-        px_x_raw = np.median(dx[dx > 0])
-        px_y_raw = np.median(dy[dy > 0])
-        typical_step = np.median([px_x_raw, px_y_raw])
-        logger.debug(f"typical_step XY: {typical_step}")
-        
-        # Konwersja XY na podstawie wybranej przez użytkownika jednostki
-        if self.units_xy == 'mm':
-            logger.info("Przeliczam XY z milimetrów na mikrometry.")
-            x *= 1000
-            y *= 1000
-            # trzeba przeliczyć dx/dy jeszcze raz po skalowaniu
-            dx = np.diff(np.sort(np.unique(x)))
-            dy = np.diff(np.sort(np.unique(y)))
-        else:
-            logger.info("Używam XY w mikrometrach - brak konwersji.")
-        
-        # Konwersja Z niezależnie od XY
-        if self.units_z == 'mm':
-            logger.info("Przeliczam Z z milimetrów na mikrometry.")
-            z *= 1000
-        else:
-            logger.info("Używam Z w mikrometrach - brak konwersji.")
-
-        px_x = np.median(dx[dx > 0]).round(2)
-        px_y = np.median(dy[dy > 0]).round(2)
-
-        logger.debug(f"px_x: {px_x}, px_y: {px_y}")
-
-        x_min, x_max = x.min(), x.max()
-        y_min, y_max = y.min(), y.max()
-        grid_size_x = int((x_max - x_min) / px_x) + 1
-        grid_size_y = int((y_max - y_min) / px_y) + 1
-
-        grid = np.full((grid_size_y, grid_size_x), np.nan, dtype=np.float64)
-        counts = np.zeros_like(grid, dtype=np.int32)
-        N = len(x)
-        for idx, (xi, yi, zi) in enumerate(zip(x, y, z)):
-            ix = int(round((xi - x_min) / px_x))
-            iy = int(round((yi - y_min) / px_y))
-            if 0 <= ix < grid_size_x and 0 <= iy < grid_size_y:
-                if np.isnan(grid[iy, ix]):
-                    grid[iy, ix] = zi
-                else:
-                    grid[iy, ix] += zi
-                counts[iy, ix] += 1
-            if idx % max(1, N//50) == 0:
-                self.progress.emit(50 + int(49 * idx / N))
-
-        mask_dup = (counts > 1)
-        grid[mask_dup] = grid[mask_dup] / counts[mask_dup]
-        xi_grid = np.linspace(x_min, x_max, grid_size_x)
-        yi_grid = np.linspace(y_min, y_max, grid_size_y)
-        self.progress.emit(100)
-        self.finished.emit(grid, xi_grid, yi_grid, px_x, px_y) #, x, y, z)
 
 class MainWindow(QtWidgets.QMainWindow):
     """Main application window for the scan loader and hole filler tool.
@@ -636,39 +510,8 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             tuple: (units_xy, units_z) where each is 'mm' or 'um', or None if cancelled.
         """
-        # Wczytaj próbkę danych (pierwsze 5000 wierszy) do heurystyki
-        try:
-            sample = pd.read_csv(
-                fname,
-                sep=r'[;,\t ]+',
-                engine='python',
-                header=None,
-                names=['x', 'y', 'z'],
-                nrows=5000
-            )
-            x, y, z = sample['x'].values, sample['y'].values, sample['z'].values
-            
-            # Heurystyka dla XY
-            dx = np.diff(np.sort(np.unique(x)))
-            dy = np.diff(np.sort(np.unique(y)))
-            px_x_raw = np.median(dx[dx > 0])
-            px_y_raw = np.median(dy[dy > 0])
-            typical_step_xy = np.median([px_x_raw, px_y_raw])
-            
-            # Heurystyka dla Z - sprawdź zakres wartości
-            z_range = np.nanmax(z) - np.nanmin(z)
-            
-            # Jeśli typical_step < 0.1, prawdopodobnie mm dla XY
-            # Jeśli zakres Z < 1, prawdopodobnie mm dla Z
-            suggested_xy = 'mm' if typical_step_xy < 0.1 else 'um'
-            suggested_z = 'mm' if z_range < 1 else 'um'
-            
-            logger.debug(f"Detected typical step XY: {typical_step_xy}, suggesting: {suggested_xy}")
-            logger.debug(f"Detected Z range: {z_range}, suggesting: {suggested_z}")
-        except Exception as e:
-            logger.warning(f"Could not analyze data sample: {e}")
-            suggested_xy = 'um'
-            suggested_z = 'um'
+        # Get suggested units from io module
+        suggested_xy, suggested_z = suggest_units(fname)
         
         # Dialog z pytaniem
         dialog = QtWidgets.QDialog(self)
@@ -735,65 +578,35 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
 
     def load_npz(self, fname):
-        data = np.load(fname)
-        if 'frasta_info' in data:
-            cnt = data['frasta_cnt']
-            for i in range(cnt):
-                try:
-                    name = str(data[f"name_{i:02}"])
-                    grid = data[f"grid_{i:02}"]
-                    xi = data[f"xi_{i:02}"]
-                    yi = data[f"yi_{i:02}"]
-                    px_x = data[f"px_{i:02}"]
-                    px_y = data[f"py_{i:02}"]
-
-                    tab = ScanTab()
-                    self.tabs.addTab(tab, name)
-                    self.tabs.setCurrentWidget(tab)
-                    tab.set_data(grid, xi, yi, px_x, px_y)
-                except Exception as e:
-                    QtWidgets.QMessageBox.critical(self, "Error", f"Error while loading:\n{e}")
-
+        try:
+            scans = load_npz_data(fname)
+            for name, grid, xi, yi, px_x, px_y in scans:
+                tab = ScanTab()
+                self.tabs.addTab(tab, name)
+                self.tabs.setCurrentWidget(tab)
+                tab.set_data(grid, xi, yi, px_x, px_y)
             self.add_to_recent_files(fname)
             return True
-        else:
-            QtWidgets.QMessageBox.warning(self, "Format error", "NPZ does not contain a grid data.")
-            # self.tabs.removeTab(self.tabs.indexOf(tab))
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(self, "Format error", str(e))
+            return False
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"Error while loading:\n{e}")
             return False
 
     def load_h5(self, fname):
         try:
-            with h5py.File(fname, 'r') as f:
-                if 'frasta_info' not in f.attrs:
-                    QtWidgets.QMessageBox.warning(self, "Format error", "HDF5 does not contain a grid data.")
-                    return False
-
-                cnt = f.attrs.get('frasta_cnt', 0)
-                for i in range(cnt):
-                    try:
-                        group_name = f"tab_{i:02}"
-                        if group_name not in f:
-                            continue
-
-                        group = f[group_name]
-                        name = group["name"][()].decode("utf-8")
-                        grid = group["grid"][:]
-                        xi = group["xi"][:]
-                        yi = group["yi"][:]
-                        px_x = group["px_x"][:]
-                        px_y = group["px_y"][:]
-
-                        tab = ScanTab()
-                        self.tabs.addTab(tab, str(name))
-                        self.tabs.setCurrentWidget(tab)
-                        tab.set_data(grid, xi, yi, px_x, px_y)
-
-                    except Exception as e:
-                        QtWidgets.QMessageBox.critical(self, "Error", f"Error while loading tab {i}:\n{e}")
-
+            scans = load_h5_data(fname)
+            for name, grid, xi, yi, px_x, px_y in scans:
+                tab = ScanTab()
+                self.tabs.addTab(tab, str(name))
+                self.tabs.setCurrentWidget(tab)
+                tab.set_data(grid, xi, yi, px_x, px_y)
             self.add_to_recent_files(fname)
             return True
-
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(self, "Format error", str(e))
+            return False
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Error while opening HDF5 file:\n{e}")
             return False
@@ -846,37 +659,16 @@ class MainWindow(QtWidgets.QMainWindow):
         elif selected_filter.startswith("HDF5") and not fname.endswith(".h5"):
             fname += ".h5"
 
-        i = 0
         try:
+            # Prepare scans data: list of (name, grid, xi, yi, px_x, px_y)
+            scans = []
+            for name, tab in tabs:
+                scans.append((name, tab.grid, tab.xi, tab.yi, tab.px_x, tab.px_y))
+            
             if fname.endswith(".npz"):
-                to_save = {
-                    'frasta_info': "grid_data",
-                }
-                for name, tab in tabs:
-                    to_save[f"name_{i:02}"] = name
-                    to_save[f"grid_{i:02}"] = tab.grid
-                    to_save[f"xi_{i:02}"] = tab.xi
-                    to_save[f"yi_{i:02}"] = tab.yi
-                    to_save[f"px_{i:02}"] = tab.px_x
-                    to_save[f"py_{i:02}"] = tab.px_y
-                    i += 1
-                to_save['frasta_cnt'] = i
-
-                np.savez_compressed(fname, **to_save)
-
+                save_npz(fname, scans)
             elif fname.endswith(".h5"):
-                with h5py.File(fname, 'w') as f:
-                    f.attrs['frasta_info'] = "grid_data"
-                    for name, tab in tabs:
-                        group = f.create_group(f"tab_{i:02}")
-                        group.create_dataset("name", data=np.bytes_(name))
-                        group.create_dataset("grid", data=tab.grid, compression="gzip", compression_opts=9)
-                        group.create_dataset("xi", data=tab.xi, compression="gzip", compression_opts=9)
-                        group.create_dataset("yi", data=tab.yi, compression="gzip", compression_opts=9)
-                        group.create_dataset("px_x", data=np.atleast_1d(tab.px_x))
-                        group.create_dataset("px_y", data=np.atleast_1d(tab.px_y))
-                        i += 1
-                    f.attrs['frasta_cnt'] = i
+                save_h5(fname, scans)
 
             QtWidgets.QMessageBox.information(self, "Saved", f"Scan saved to: {fname}")
 
