@@ -39,9 +39,7 @@ FRASTA-toolbox currently supports structured grid data exported as text-based XY
    - fill missing data if necessary.
 3. Align two opposing fracture surfaces using interactive translation and rotation.
 4. Place cross-sectional profiles to inspect local deviations and contacts.
-<!---
 5. Export aligned data, profiles, and measurements for further analysis or documentation.
--->
 
 
 ## Configuration
