@@ -8,23 +8,11 @@ FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intend
 
 ## Project Structure (NEW!)
 
-**The project has been refactored into a modular architecture.** See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
-
-### Quick Navigation
 - **Data structures**: `frasta/core/`
 - **Analysis algorithms**: `frasta/processing/`
 - **File I/O**: `frasta/io/`
 - **GUI components**: `frasta/gui/`
 - **Utilities**: `frasta/utils/`
-
-### Import Examples
-```python
-# New modular imports
-from frasta.core import GridData
-from frasta.processing import fill_holes, remove_relative_offset
-from frasta.io import load_csv_data, save_npz
-from frasta.gui import MainWindow
-```
 
 ## Input data format
 
