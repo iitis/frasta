@@ -18,8 +18,9 @@ import matplotlib.pyplot as plt  # if you want to use matplotlib colormap
 import logging
 logger = logging.getLogger(__name__)
 
-from .limitedGLView import LimitedGLView
-from .lodSurface import LODSurface
+from .limited_gl_view import LimitedGLView
+from .lod_surface import LODSurface
+from ..widgets import ControlsPanel
 
 class Grid3DViewer(QtWidgets.QWidget):
     def __init__(self, surface_mode='surface', parent=None):
@@ -139,100 +140,6 @@ class Grid3DViewer(QtWidgets.QWidget):
             except Exception:
                 pass
 
-    def create_a_tools(self):
-        self.a_tools = QtWidgets.QWidget(self)
-
-        mode_bar_a = QtWidgets.QHBoxLayout(self.a_tools)
-        mode_bar_a.setContentsMargins(0,0,0,0)
-        mode_bar_a.setSpacing(6)
-
-        self.checkbox_adj = QtWidgets.QCheckBox("Adj surface:")
-        self.checkbox_adj.setChecked(True)
-        mode_bar_a.addWidget(self.checkbox_adj)
-
-        # mode_bar_a.addWidget(QtWidgets.QLabel("Adj surface: "))
-        mode_bar_a.addSpacing(12)
-
-        self.combo_mode_a = QtWidgets.QComboBox()
-        self.combo_mode_a.addItem("Surface (shaded)", userData='surface')
-        self.combo_mode_a.addItem("Wireframe",        userData='wireframe')
-        self.combo_mode_a.addItem("Mesh",             userData='mesh')
-        # set starting value according to constructor
-        idx = self.combo_mode_a.findData(self.adj_surface_mode)
-        if idx >= 0: self.combo_mode_a.setCurrentIndex(idx)
-
-        self.combo_cmap_adj = QtWidgets.QComboBox()
-        self.combo_cmap_adj.addItems(["None", "RG", "B&W", "viridis", "plasma", "magma"])
-        self.combo_cmap_adj.setCurrentText('RG')
-
-        mode_bar_a.addWidget(QtWidgets.QLabel("mode:"))
-        mode_bar_a.addWidget(self.combo_mode_a)
-        mode_bar_a.addSpacing(12)
-        mode_bar_a.addWidget(QtWidgets.QLabel("colormap:"))
-        mode_bar_a.addWidget(self.combo_cmap_adj)
-        #mode_bar_a.addStretch(1)
-
-        self.chk_auto_adj = QtWidgets.QCheckBox("Auto")
-        self.chk_auto_adj.setChecked(True)
-        self.spin_lo_adj = QtWidgets.QDoubleSpinBox(); self.spin_hi_adj = QtWidgets.QDoubleSpinBox()
-        for sp in (self.spin_lo_adj, self.spin_hi_adj):
-            sp.setDecimals(6); sp.setRange(-1e12, 1e12); sp.setSingleStep(0.1); sp.setEnabled(False)
-
-        mode_bar_a.addWidget(QtWidgets.QLabel("Adj lo/hi:"))
-        mode_bar_a.addWidget(self.spin_lo_adj)
-        mode_bar_a.addWidget(self.spin_hi_adj)
-        mode_bar_a.addWidget(self.chk_auto_adj)
-        mode_bar_a.addStretch(1)
-
-        self.chk_link_ranges = QtWidgets.QCheckBox("Link ranges")
-        self.chk_link_ranges.setChecked(False)
-        mode_bar_a.addWidget(self.chk_link_ranges)
-
-    def create_r_tools(self):
-        self.r_tools = QtWidgets.QWidget(self)
-
-        mode_bar_r = QtWidgets.QHBoxLayout(self.r_tools)
-        mode_bar_r.setContentsMargins(0,0,0,0)
-        mode_bar_r.setSpacing(6)
-
-        self.checkbox_ref = QtWidgets.QCheckBox("Ref surface:")
-        self.checkbox_ref.setChecked(True)
-        mode_bar_r.addWidget(self.checkbox_ref)
-
-        # mode_bar_r.addWidget(QtWidgets.QLabel("Ref surface: "))
-        mode_bar_r.addSpacing(12)
-
-        self.combo_mode_r = QtWidgets.QComboBox()
-        self.combo_mode_r.addItem("Surface (shaded)", userData='surface')
-        self.combo_mode_r.addItem("Wireframe",        userData='wireframe')
-        self.combo_mode_r.addItem("Mesh",             userData='mesh')
-        # set starting value according to constructor
-        idx = self.combo_mode_r.findData(self.ref_surface_mode)
-        if idx >= 0: self.combo_mode_r.setCurrentIndex(idx)
-
-        self.combo_cmap_ref = QtWidgets.QComboBox()
-        self.combo_cmap_ref.addItems(["None", "RG", "B&W", "viridis", "plasma", "magma"])
-        self.combo_cmap_ref.setCurrentText('RG')
-
-        mode_bar_r.addWidget(QtWidgets.QLabel("mode:"))
-        mode_bar_r.addWidget(self.combo_mode_r)
-        mode_bar_r.addSpacing(12)
-        mode_bar_r.addWidget(QtWidgets.QLabel("colormap:"))
-        mode_bar_r.addWidget(self.combo_cmap_ref)
-        #mode_bar_r.addStretch(1)
-
-        self.chk_auto_ref = QtWidgets.QCheckBox("Auto")
-        self.chk_auto_ref.setChecked(True)
-        self.spin_lo_ref = QtWidgets.QDoubleSpinBox(); self.spin_hi_ref = QtWidgets.QDoubleSpinBox()
-        for sp in (self.spin_lo_ref, self.spin_hi_ref):
-            sp.setDecimals(6); sp.setRange(-1e12, 1e12); sp.setSingleStep(0.1); sp.setEnabled(False)
-
-        mode_bar_r.addWidget(QtWidgets.QLabel("Ref lo/hi:"))
-        mode_bar_r.addWidget(self.spin_lo_ref)
-        mode_bar_r.addWidget(self.spin_hi_ref)
-        mode_bar_r.addWidget(self.chk_auto_ref)
-        mode_bar_r.addStretch(1)
-    
     def init_controls(self, layout):
         """Initialize and add all UI control widgets to the layout.
         
@@ -243,71 +150,55 @@ class Grid3DViewer(QtWidgets.QWidget):
         Args:
             layout (QLayout): Layout to add controls to.
         """
-        """Initializes the control checkboxes for toggling 3D view elements.
-
-        Adds checkboxes for reference surface, adjusted surface, profile line, and section plane to the layout.
-
-        Args:
-            layout (QVBoxLayout): The layout to which the controls are added.
-        """
-
-        self.controls_panel = QtWidgets.QWidget(self)
-        self.controls_panel.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                                  QtWidgets.QSizePolicy.Fixed)
-
-        panel = QtWidgets.QVBoxLayout(self.controls_panel)
-        panel.setContentsMargins(0,0,0,0)
-        panel.setSpacing(6)
-
-        self.create_r_tools()
-        for w in (self.r_tools,):
-            w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            w.setMaximumHeight(w.sizeHint().height())
-
-        self.create_a_tools()
-        for w in (self.a_tools,):
-            w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            w.setMaximumHeight(w.sizeHint().height())
-
-        panel.addWidget(self.r_tools)
-        panel.addWidget(self.a_tools)
-
-        ctrl_layout = QtWidgets.QHBoxLayout()
-        self.checkbox_line = QtWidgets.QCheckBox("Show Profile Line")
-        self.checkbox_line.setChecked(True)
-        self.checkbox_plane = QtWidgets.QCheckBox("Show Section Plane")
-        self.checkbox_plane.setChecked(True)
-        for cb in [self.checkbox_line, self.checkbox_plane]:
-            ctrl_layout.addWidget(cb)
-
-        panel.addLayout(ctrl_layout)
-
+        self.controls_panel = ControlsPanel(self)
         layout.addWidget(self.controls_panel)
+        
+        # Create aliases for backward compatibility
+        self.checkbox_ref = self.controls_panel.ref_controls.checkbox
+        self.checkbox_adj = self.controls_panel.adj_controls.checkbox
+        self.checkbox_line = self.controls_panel.checkbox_line
+        self.checkbox_plane = self.controls_panel.checkbox_plane
+        
+        self.combo_mode_r = self.controls_panel.ref_controls.combo_mode
+        self.combo_mode_a = self.controls_panel.adj_controls.combo_mode
+        self.combo_cmap_ref = self.controls_panel.ref_controls.combo_colormap
+        self.combo_cmap_adj = self.controls_panel.adj_controls.combo_colormap
+        
+        self.chk_auto_ref = self.controls_panel.ref_controls.chk_auto
+        self.chk_auto_adj = self.controls_panel.adj_controls.chk_auto
+        self.spin_lo_ref = self.controls_panel.ref_controls.spin_lo
+        self.spin_hi_ref = self.controls_panel.ref_controls.spin_hi
+        self.spin_lo_adj = self.controls_panel.adj_controls.spin_lo
+        self.spin_hi_adj = self.controls_panel.adj_controls.spin_hi
+        
+        self.chk_link_ranges = self.controls_panel.chk_link_ranges
 
     def connect_controls(self):
-        """Connects the control checkboxes to their respective toggle methods.
+        """Connects the control panel signals to their respective methods.
 
-        Sets up signal-slot connections so that toggling each checkbox shows or hides the corresponding 3D view element.
+        Sets up signal-slot connections so that control changes trigger appropriate updates.
         """
-        self.checkbox_ref.stateChanged.connect(self.toggle_surface_ref)
-        self.checkbox_adj.stateChanged.connect(self.toggle_surface_adj)
+        # Visibility toggles
+        self.controls_panel.ref_controls.visibility_changed.connect(self.toggle_surface_ref)
+        self.controls_panel.adj_controls.visibility_changed.connect(self.toggle_surface_adj)
         self.checkbox_line.stateChanged.connect(self.toggle_profile_line)
         self.checkbox_plane.stateChanged.connect(self.toggle_cross_plane)
 
-        self.combo_mode_r.currentIndexChanged.connect(self._ui_mode_changed_r)
-        self.combo_cmap_ref.currentIndexChanged.connect(self._ui_cmap_ref_changed)
+        # Mode and colormap changes
+        self.controls_panel.ref_controls.mode_changed.connect(self._ui_mode_changed_r)
+        self.controls_panel.ref_controls.colormap_changed.connect(self._ui_cmap_ref_changed)
+        self.controls_panel.adj_controls.mode_changed.connect(self._ui_mode_changed_a)
+        self.controls_panel.adj_controls.colormap_changed.connect(self._ui_cmap_adj_changed)
 
-        self.combo_mode_a.currentIndexChanged.connect(self._ui_mode_changed_a)
-        self.combo_cmap_adj.currentIndexChanged.connect(self._ui_cmap_adj_changed)
-
+        # Range controls
         self.chk_link_ranges.toggled.connect(self._ui_link_toggled)
-        self.chk_auto_ref.toggled.connect(self._ui_auto_ref_toggled)
-        self.chk_auto_adj.toggled.connect(self._ui_auto_adj_toggled)
-
-        self.spin_lo_ref.valueChanged.connect(lambda _: self._ui_lohi_changed('ref'))
-        self.spin_hi_ref.valueChanged.connect(lambda _: self._ui_lohi_changed('ref'))
-        self.spin_lo_adj.valueChanged.connect(lambda _: self._ui_lohi_changed('adj'))
-        self.spin_hi_adj.valueChanged.connect(lambda _: self._ui_lohi_changed('adj'))
+        self.controls_panel.ref_controls.auto_range_toggled.connect(self._ui_auto_ref_toggled)
+        self.controls_panel.adj_controls.auto_range_toggled.connect(self._ui_auto_adj_toggled)
+        
+        self.controls_panel.ref_controls.range_lo_changed.connect(lambda _: self._ui_lohi_changed('ref'))
+        self.controls_panel.ref_controls.range_hi_changed.connect(lambda _: self._ui_lohi_changed('ref'))
+        self.controls_panel.adj_controls.range_lo_changed.connect(lambda _: self._ui_lohi_changed('adj'))
+        self.controls_panel.adj_controls.range_hi_changed.connect(lambda _: self._ui_lohi_changed('adj'))
 
 
     def _compute_auto_lo_hi(self, Z, p=(2, 98)):

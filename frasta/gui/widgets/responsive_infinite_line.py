@@ -1,4 +1,4 @@
-"""PyQtGraph InfiniteLine with throttled update callbacks.
+﻿"""PyQtGraph InfiniteLine with throttled update callbacks.
 
 This module provides a responsive infinite line widget that throttles update
 callbacks during dragging to improve performance.
@@ -62,3 +62,4 @@ class ResponsiveInfiniteLine(pg.InfiniteLine):
         self._last_value = value
         if self._update_callback:
             self._update_callback(value)
+

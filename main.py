@@ -1,6 +1,6 @@
 import sys
 from PyQt5 import QtWidgets
-from src.frasta_gui import MainWindow
+from frasta.gui import MainWindow
 
 def set_logger():
     import logging
@@ -8,7 +8,7 @@ def set_logger():
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    logging.getLogger("src").setLevel(logging.DEBUG)
+    logging.getLogger("frasta").setLevel(logging.DEBUG)
 
 def run():
     set_logger()

@@ -1,4 +1,4 @@
-"""About dialog for FRASTA-toolbox application.
+﻿"""About dialog for FRASTA-toolbox application.
 
 This module provides a simple about dialog displaying application information,
 version, author, and licensing details.
@@ -27,7 +27,7 @@ class AboutDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
-        # Treść okna
+        # TreĹ›Ä‡ okna
         label = QtWidgets.QLabel("""
         <b>FRASTA-toolbox</b><br>
         <br>
@@ -51,3 +51,4 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     dlg = AboutDialog()
     dlg.exec_()
+

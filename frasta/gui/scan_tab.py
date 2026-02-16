@@ -12,9 +12,9 @@ from skimage.segmentation import flood
 from scipy.interpolate import griddata
 import trimesh
 
-from .responsiveInfiniteLine import ResponsiveInfiniteLine
-from .gridData import GridData
-from .helpers import fill_holes, remove_outliers, nan_aware_gaussian
+from ..core import GridData
+from ..processing import fill_holes, remove_outliers, nan_aware_gaussian
+from .widgets import ResponsiveInfiniteLine
 from scipy.ndimage import gaussian_filter
 
 import logging
