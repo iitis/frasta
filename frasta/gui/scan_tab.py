@@ -85,10 +85,14 @@ class ScanTab(QtWidgets.QWidget):
 
 
     def update_histogram(self, was_data_negated=False):
+        logger.debug(f"update_histogram called: grid is None? {self.grid is None}")
         if self.grid is None:
+            logger.warning("update_histogram: self.grid is None!")
             return
+        
         data = self.grid[~np.isnan(self.grid)]
         if data.size == 0:
+            logger.warning("update_histogram: no valid data (all NaN)")
             self.hist_widget.clear()
             return
 
@@ -103,19 +107,40 @@ class ScanTab(QtWidgets.QWidget):
             min_val = np.clip(-old_max_line.value(), vmin, vmax) if old_max_line else vmin
             max_val = np.clip(-old_min_line.value(), vmin, vmax) if old_min_line else vmax
         else:
-            min_val = np.clip(old_min_line.value(), vmin, vmax) if old_min_line else vmin
-            max_val = np.clip(old_max_line.value(), vmin, vmax) if old_max_line else vmax
+            # Try to preserve old line positions, but only if they make sense for new data
+            if old_min_line is not None and old_max_line is not None:
+                old_min = old_min_line.value()
+                old_max = old_max_line.value()
+                # Check if old values are reasonable for new data range
+                if vmin <= old_min <= vmax and vmin <= old_max <= vmax:
+                    min_val = old_min
+                    max_val = old_max
+                else:
+                    # Old values don't make sense for new data, use full range
+                    min_val = vmin
+                    max_val = vmax
+                    logger.warning(f"update_histogram: old threshold outside new data range, resetting")
+            else:
+                min_val = vmin
+                max_val = vmax
 
         y, x = np.histogram(data, bins=1024)
         self.hist_widget.clear()
         self.hist_plot = self.hist_widget.plot(x, y, stepMode="center", fillLevel=0, brush=(150, 150, 150, 150))
 
+        # Block callbacks while setting up histogram lines to avoid recursive calls
+        self._updating_histogram = True
+        
         self.hist_min_line = ResponsiveInfiniteLine(update_callback=self.update_histogram_threshold, angle=90, movable=True, pen=pg.mkPen('b', width=2), hoverPen=pg.mkPen('y', width=2))
         self.hist_max_line = ResponsiveInfiniteLine(update_callback=self.update_histogram_threshold, angle=90, movable=True, pen=pg.mkPen('r', width=2), hoverPen=pg.mkPen('y', width=2))
         self.hist_widget.addItem(self.hist_min_line)
         self.hist_widget.addItem(self.hist_max_line)
         self.hist_min_line.setValue(min_val)
         self.hist_max_line.setValue(max_val)
+        
+        self._updating_histogram = False
+        
+        logger.debug(f"update_histogram: final histogram lines set to [{min_val:.2f}, {max_val:.2f}]")
 
     def on_hist_line_changed(self):
         vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
@@ -123,6 +148,11 @@ class ScanTab(QtWidgets.QWidget):
         self.update_image(vmin, vmax)
 
     def update_histogram_threshold(self, value):
+        # Block recursive calls during histogram setup
+        if getattr(self, '_updating_histogram', False):
+            logger.debug(f"Threshold update blocked during histogram setup: {value}")
+            return
+            
         logger.debug(f"Threshold updated: {value}" )
         vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
         vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
@@ -143,14 +173,24 @@ class ScanTab(QtWidgets.QWidget):
             self.update_histogram()
 
     def getGridData(self):
+        # Handle grid that might contain NaN
+        valid_data = self.grid[~np.isnan(self.grid)]
+        if valid_data.size > 0:
+            grid_min = float(np.min(valid_data))
+            grid_max = float(np.max(valid_data))
+        else:
+            # All NaN, use dummy values
+            grid_min = 0.0
+            grid_max = 1.0
+        
         data = GridData(
             self.grid,
             self.xi,
             self.yi,
             self.px_x,
             self.px_y,
-            float(np.min(self.grid)),
-            float(np.max(self.grid))
+            grid_min,
+            grid_max
         )
         if hasattr(self, 'hist_min_line') and hasattr(self, 'hist_max_line'):
             data.vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
@@ -163,23 +203,27 @@ class ScanTab(QtWidgets.QWidget):
         self.yi = data.yi
         self.px_x = data.px_x
         self.px_y = data.px_y
-        self.update_image()
+        # Update histogram first to set hist_min_line and hist_max_line
         self.update_histogram()
-        self.hist_min_line.setValue(data.vmin)
-        self.hist_max_line.setValue(data.vmax)
+        self.update_image()
+        # Then set the histogram line values if provided
+        if hasattr(self, 'hist_min_line') and hasattr(self, 'hist_max_line'):
+            self.hist_min_line.setValue(data.vmin)
+            self.hist_max_line.setValue(data.vmax)
 
 
 
     def set_data(self, grid, xi, yi, px_x, px_y):
         self.grid = grid
-        self.masked = grid.copy()
         self.xi = xi
         self.yi = yi
         self.px_x = px_x
         self.px_y = px_y
         logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.px_x}, px_y: {self.px_y}")
-        self.update_image()
+        # Update histogram first to set hist_min_line and hist_max_line
+        # Then update_image() will use those values
         self.update_histogram()
+        self.update_image()
 
 
     def grid_to_mesh_vectorized(self, grid, pixel_size_x=1.0, pixel_size_y=1.0):
@@ -629,6 +673,11 @@ class ScanTab(QtWidgets.QWidget):
             vmin (float, optional): The minimum value for display range. If None, uses histogram limits or grid minimum.
             vmax (float, optional): The maximum value for display range. If None, uses histogram limits or grid maximum.
         """
+        logger.debug(f"update_image called: grid is None? {self.grid is None}")
+        if self.grid is None:
+            logger.warning("update_image: self.grid is None!")
+            return
+        
         if self.grid is not None:
             
             if vmin is None or vmax is None:
@@ -636,14 +685,48 @@ class ScanTab(QtWidgets.QWidget):
                     vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
                     vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
                 else:
-                    vmin = float(np.min(self.grid))
-                    vmax = float(np.max(self.grid))
+                    # Handle case where grid might be all NaN
+                    valid_data = self.grid[~np.isnan(self.grid)]
+                    if valid_data.size > 0:
+                        vmin = float(np.min(valid_data))
+                        vmax = float(np.max(valid_data))
+                    else:
+                        # Grid is all NaN, use dummy range
+                        logger.warning(f"update_image: grid is all NaN! shape={self.grid.shape}")
+                        vmin = 0.0
+                        vmax = 1.0
 
-            data = self.grid.T
-            self.masked = data.copy()
+            logger.debug(f"update_image: grid.shape={self.grid.shape}, vmin={vmin}, vmax={vmax}")
+            
+            # Debug: check actual data range before masking
+            valid_grid_data = self.grid[~np.isnan(self.grid)]
+            if valid_grid_data.size > 0:
+                actual_min = float(np.min(valid_grid_data))
+                actual_max = float(np.max(valid_grid_data))
+                logger.debug(f"update_image: grid actual range: [{actual_min:.2f}, {actual_max:.2f}]")
+                logger.debug(f"update_image: threshold range: [{vmin:.2f}, {vmax:.2f}]")
+                
+                # Check if threshold range makes sense
+                if vmin > actual_max or vmax < actual_min:
+                    logger.error(f"update_image: threshold range [{vmin:.2f}, {vmax:.2f}] is outside data range [{actual_min:.2f}, {actual_max:.2f}]!")
+                    # Use actual data range instead
+                    vmin = actual_min
+                    vmax = actual_max
+                    logger.warning(f"update_image: using actual data range instead")
+            
+            # IMPORTANT: grid.T creates a VIEW, not a copy!
+            # Make a copy immediately to avoid accidentally modifying self.grid
+            self.masked = self.grid.T.copy()
             self.masked[(self.masked < vmin) | (self.masked > vmax)] = np.nan
+            
+            nan_count = np.isnan(self.masked).sum()
+            total_count = self.masked.size
+            logger.debug(f"update_image: masked has {nan_count}/{total_count} NaN values")
+            
             if np.isnan(self.masked).all():
+                logger.warning("update_image: masked is all NaN, using zeros")
                 self.masked = np.zeros_like(self.masked)
+                
             image_item = self.image_view.getImageItem()
             if self.is_colormap:
                 lut = pg.colormap.get('turbo').getLookupTable(0.0, 1.0, 256)
@@ -663,8 +746,9 @@ class ScanTab(QtWidgets.QWidget):
                     vmin = float(np.min(self.grid))
                     vmax = float(np.max(self.grid))
 
-            data = self.grid.T
-            self.masked = data.copy()
+            # IMPORTANT: grid.T creates a VIEW, not a copy!
+            # Make a copy immediately to avoid accidentally modifying self.grid
+            self.masked = self.grid.T.copy()
             self.masked[(self.masked < vmin) | (self.masked > vmax)] = np.nan
 
             # Special value above vmax

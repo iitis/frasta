@@ -257,11 +257,45 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.adjusted_grid_smooth = grid2
 
         self.valid_mask = ~np.isnan(self.reference_grid_smooth) & ~np.isnan(self.adjusted_grid_smooth)
+        
+        # Check if there is any valid overlapping data
+        num_valid_points = np.sum(self.valid_mask)
+        if num_valid_points == 0:
+            self.progress_bar.setVisible(False)
+            self.statusBar().showMessage("Error: No valid overlapping data")
+            QtWidgets.QMessageBox.critical(
+                self, 
+                "No Valid Data", 
+                "There is no valid overlapping data between the reference and adjusted grids.\n\n"
+                "This can happen if:\n"
+                "- The scans don't overlap spatially\n"
+                "- Both scans contain only NaN values in the overlapping region\n"
+                "- The alignment/registration failed\n\n"
+                "Please check your data and alignment parameters."
+            )
+            return
+        
+        # Warn if very few valid points
+        total_points = self.valid_mask.size
+        valid_percentage = (num_valid_points / total_points) * 100
+        if valid_percentage < 5:
+            logger.warning(f"Only {valid_percentage:.1f}% of data points are valid for analysis")
+            self.statusBar().showMessage(f"Warning: Low data overlap ({valid_percentage:.1f}%)")
 
         self.adjusted_grid_corrected = self.adjusted_grid_smooth + np.nanmean(self.reference_grid_smooth - self.adjusted_grid_smooth)
 
         if self.checkbox_tilt.isChecked():
-            self.adjusted_grid_corrected = remove_relative_tilt(self.reference_grid_smooth, self.adjusted_grid_corrected, self.valid_mask)
+            try:
+                self.adjusted_grid_corrected = remove_relative_tilt(self.reference_grid_smooth, self.adjusted_grid_corrected, self.valid_mask)
+            except ValueError as e:
+                logger.error(f"Tilt correction failed: {e}")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Tilt Correction Failed",
+                    f"Could not apply tilt correction: {e}\n\nContinuing without tilt correction."
+                )
+                # Uncheck the tilt checkbox
+                self.checkbox_tilt.setChecked(False)
 
         self.adjusted_grid_corrected = remove_relative_offset(self.reference_grid_smooth, self.adjusted_grid_corrected, self.valid_mask)
 

@@ -1,5 +1,6 @@
 """Test registration functions with correct parameters."""
 import numpy as np
+from scipy.ndimage import shift as ndimage_shift
 from frasta.processing import auto_register_surfaces, apply_registration
 
 print("="*60)
@@ -11,9 +12,18 @@ print("\n1. Creating test grids (same size)...")
 reference = np.random.randn(128, 128) * 10
 target = reference.copy()
 
-# Add known translation
+# Add known translation using proper shift (matching the implementation)
 shift_y, shift_x = 10, 15
-target = np.roll(np.roll(target, shift_y, axis=0), shift_x, axis=1)
+target = ndimage_shift(target, (shift_y, shift_x), order=3, mode='nearest')
+
+# Mark shifted regions as NaN (matching implementation)
+valid_mask = np.ones_like(target, dtype=bool)
+if shift_y > 0:
+    valid_mask[:int(np.ceil(shift_y)), :] = False
+if shift_x > 0:
+    valid_mask[:, :int(np.ceil(shift_x))] = False
+target[~valid_mask] = np.nan
+
 print(f"   ✓ Reference: {reference.shape}")
 print(f"   ✓ Target (shifted by {shift_y}, {shift_x}): {target.shape}")
 

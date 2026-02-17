@@ -68,6 +68,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker = None
         self.thread = None
 
+    def _is_roi_valid_and_visible(self, roi):
+        """Safely checks if a Qt ROI object is valid and visible.
+        
+        Args:
+            roi: ROI object to check (CircleROI or RectROI)
+            
+        Returns:
+            bool: True if ROI exists and is visible, False otherwise
+        """
+        if roi is None:
+            return False
+        try:
+            return roi.isVisible()
+        except RuntimeError:
+            # Object has been deleted by Qt
+            return False
+
+    def _is_roi_deleted(self, roi):
+        """Checks if a Qt ROI object has been deleted.
+        
+        Args:
+            roi: ROI object to check
+            
+        Returns:
+            bool: True if ROI has been deleted, False otherwise
+        """
+        if roi is None:
+            return True
+        try:
+            # Try to access any property to check if object is valid
+            _ = roi.isVisible()
+            return False
+        except RuntimeError:
+            # Object has been deleted by Qt
+            return True
+
         self._global_3d_viewer = None
 
         self.tabs.currentChanged.connect(self.move_roi_to_current_tab)
@@ -85,8 +121,8 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             np.ndarray or None: Boolean mask with True inside the ROI, or None if no ROI is active.
         """
-        circle_visible = self.shared_circle_roi is not None and self.shared_circle_roi.isVisible()
-        rect_visible = self.shared_rectangle_roi is not None and self.shared_rectangle_roi.isVisible()
+        circle_visible = self._is_roi_valid_and_visible(self.shared_circle_roi)
+        rect_visible = self._is_roi_valid_and_visible(self.shared_rectangle_roi)
 
         mask = None
         if circle_visible:
@@ -145,7 +181,7 @@ class MainWindow(QtWidgets.QMainWindow):
             idx (int): Index of the newly selected tab.
         """
         # Move circle ROI if it exists and is visible
-        if self.shared_circle_roi is not None and self.shared_circle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_circle_roi):
             for i in range(self.tabs.count()):
                 tab = self.tabs.widget(i)
                 tab.image_view.getView().removeItem(self.shared_circle_roi)
@@ -154,7 +190,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.shared_circle_roi.show()
 
         # Move rectangle ROI if it exists and is visible
-        if self.shared_rectangle_roi is not None and self.shared_rectangle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_rectangle_roi):
             for i in range(self.tabs.count()):
                 tab = self.tabs.widget(i)
                 tab.image_view.getView().removeItem(self.shared_rectangle_roi)
@@ -171,21 +207,29 @@ class MainWindow(QtWidgets.QMainWindow):
         if tab is None or tab.grid is None:
             return
 
-        if self.shared_circle_roi is not None and self.shared_circle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_circle_roi):
             self.shared_circle_roi.setVisible(False)
             return
 
         # Hide rectangle ROI if present
-        if self.shared_rectangle_roi is not None and self.shared_rectangle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_rectangle_roi):
             self.shared_rectangle_roi.setVisible(False)
 
-        if self.shared_circle_roi is None:
+        if self._is_roi_deleted(self.shared_circle_roi):
             import pyqtgraph as pg
             h, w = tab.grid.shape
             self.shared_circle_roi = pg.CircleROI([w//2-50, h//2-50], [100, 100], pen=pg.mkPen('g', width=2))
             self.shared_circle_roi.setZValue(100)
 
-        if self.shared_circle_roi not in tab.image_view.getView().allChildren():
+        try:
+            if self.shared_circle_roi not in tab.image_view.getView().allChildren():
+                tab.image_view.getView().addItem(self.shared_circle_roi)
+        except RuntimeError:
+            # ROI was deleted, recreate it
+            import pyqtgraph as pg
+            h, w = tab.grid.shape
+            self.shared_circle_roi = pg.CircleROI([w//2-50, h//2-50], [100, 100], pen=pg.mkPen('g', width=2))
+            self.shared_circle_roi.setZValue(100)
             tab.image_view.getView().addItem(self.shared_circle_roi)
         self.shared_circle_roi.show()
 
@@ -199,23 +243,31 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # Hide rectangle ROI if already visible, then return
-        if self.shared_rectangle_roi is not None and self.shared_rectangle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_rectangle_roi):
             self.shared_rectangle_roi.setVisible(False)
             return
 
         # Hide circle ROI if present and visible
-        if self.shared_circle_roi is not None and self.shared_circle_roi.isVisible():
+        if self._is_roi_valid_and_visible(self.shared_circle_roi):
             self.shared_circle_roi.setVisible(False)
 
-        # Create rectangle ROI if it does not exist
-        if self.shared_rectangle_roi is None:
+        # Create rectangle ROI if it does not exist or was deleted
+        if self._is_roi_deleted(self.shared_rectangle_roi):
             import pyqtgraph as pg
             h, w = tab.grid.shape
             self.shared_rectangle_roi = pg.RectROI([w//2-50, h//2-50], [100, 100], pen=pg.mkPen('g', width=2))
             self.shared_rectangle_roi.setZValue(100)
 
         # Add rectangle ROI to the current tab if not already present
-        if self.shared_rectangle_roi not in tab.image_view.getView().allChildren():
+        try:
+            if self.shared_rectangle_roi not in tab.image_view.getView().allChildren():
+                tab.image_view.getView().addItem(self.shared_rectangle_roi)
+        except RuntimeError:
+            # ROI was deleted, recreate it
+            import pyqtgraph as pg
+            h, w = tab.grid.shape
+            self.shared_rectangle_roi = pg.RectROI([w//2-50, h//2-50], [100, 100], pen=pg.mkPen('g', width=2))
+            self.shared_rectangle_roi.setZValue(100)
             tab.image_view.getView().addItem(self.shared_rectangle_roi)
         self.shared_rectangle_roi.show()
 
@@ -901,8 +953,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tab1 = self.tabs.widget(idx1)
         tab2 = self.tabs.widget(idx2)
-        grid1 = tab1.masked
-        grid2 = tab2.masked
+        grid1 = tab1.grid  # Use grid, not masked (masked is transposed and thresholded)
+        grid2 = tab2.grid
 
         if grid1.shape != grid2.shape:
             h = min(grid1.shape[0], grid2.shape[0])
@@ -998,8 +1050,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             
             tab.grid = result
-            tab.masked = result.copy()
             tab.update_histogram()
+            tab.update_image()  # This will properly set masked from grid
             
             QtWidgets.QMessageBox.information(
                 self, "Success", 
@@ -1055,8 +1107,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             
             tab.grid = result
-            tab.masked = result.copy()
             tab.update_histogram()
+            tab.update_image()  # This will properly set masked from grid
             
             QtWidgets.QMessageBox.information(
                 self, "Success", 
@@ -1139,8 +1191,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 tab.px_y = new_px_y
             
             tab.grid = result
-            tab.masked = result.copy()
             tab.update_histogram()
+            tab.update_image()  # This will properly set masked from grid
             
             QtWidgets.QMessageBox.information(
                 self, "Success", 
@@ -1198,6 +1250,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 method=method
             )
             
+            # Auto-fallback: if cross-correlation gives poor RMSE, try ICP
+            if method == 'correlation' and params['rmse'] > 500.0:
+                logger.warning(f"Cross-correlation RMSE ({params['rmse']:.1f} nm) > 500 nm threshold. Trying ICP...")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Registration",
+                    f"Cross-correlation RMSE is high ({params['rmse']:.1f} nm).\n\n"
+                    f"Automatically switching to ICP method for better alignment."
+                )
+                params = auto_register_surfaces(
+                    ref_tab.grid, 
+                    mov_tab.grid,
+                    method='icp'
+                )
+                logger.info(f"ICP result: RMSE={params['rmse']:.1f} nm, translation={params['translation']}")
+            
             # Auto-generate coordinate arrays if missing
             h, w = mov_tab.grid.shape
             if not hasattr(mov_tab, 'xi') or mov_tab.xi is None:
@@ -1222,8 +1290,25 @@ class MainWindow(QtWidgets.QMainWindow):
             mov_tab.yi = new_yi
             mov_tab.px_x = new_px_x
             mov_tab.px_y = new_px_y
-            mov_tab.masked = registered.copy()
+            
+            # Check if registration resulted in valid data
+            valid_data = ~np.isnan(registered)
+            num_valid = np.sum(valid_data)
+            if num_valid == 0:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Registration Warning",
+                    "The registered surface contains no valid data.\n"
+                    "This can happen if the translation was too large.\n"
+                    "The operation will be undone."
+                )
+                # Don't apply the registration
+                QtWidgets.QApplication.restoreOverrideCursor()
+                return
+            
+            # Update visualization
             mov_tab.update_histogram()
+            mov_tab.update_image()  # This will properly set masked from grid
             
             # Show results
             msg = f"Registration completed!\n\n"
@@ -1234,7 +1319,17 @@ class MainWindow(QtWidgets.QMainWindow):
             if 'rotation' in params:
                 msg += f"Rotation: {params['rotation']:.2f}°\n"
             if 'rmse' in params:
-                msg += f"RMSE: {params['rmse']:.4f}\n"
+                rmse = params['rmse']
+                msg += f"RMSE: {rmse:.2f} nm"
+                # Add quality assessment
+                if rmse < 50:
+                    msg += " (excellent)\n"
+                elif rmse < 200:
+                    msg += " (good)\n"
+                elif rmse < 500:
+                    msg += " (fair)\n"
+                else:
+                    msg += " (poor - consider using ICP)\n"
             
             QtWidgets.QMessageBox.information(self, "Success", msg)
             

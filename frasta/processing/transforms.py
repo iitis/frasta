@@ -5,7 +5,7 @@ automatic registration (alignment) of two surfaces.
 """
 
 import numpy as np
-from scipy.ndimage import affine_transform, map_coordinates
+from scipy.ndimage import affine_transform, map_coordinates, shift as ndimage_shift
 from scipy.optimize import minimize
 from sklearn.linear_model import RANSACRegressor, LinearRegression
 
@@ -233,28 +233,104 @@ def _register_correlation(reference, target):
     ref_valid = ~np.isnan(reference)
     tgt_valid = ~np.isnan(target)
     
-    # Fill NaN with mean for correlation
-    ref_filled = np.where(ref_valid, reference, np.nanmean(reference))
-    tgt_filled = np.where(tgt_valid, target, np.nanmean(target))
+    # Normalize: subtract mean from each surface (zero-mean correlation)
+    # This is CRITICAL - otherwise filled NaN regions dominate the correlation
+    ref_mean = np.nanmean(reference)
+    tgt_mean = np.nanmean(target)
+    ref_centered = np.where(ref_valid, reference - ref_mean, 0.0)
+    tgt_centered = np.where(tgt_valid, target - tgt_mean, 0.0)
     
-    # Cross-correlation
-    correlation = correlate(ref_filled, tgt_filled, mode='same', method='fft')
+    # Cross-correlation on zero-mean data
+    # Note: correlate(a, b) finds where b is located relative to a
+    # The shift we calculate is how much we need to move b to align it with a
+    correlation = correlate(ref_centered, tgt_centered, mode='same', method='fft')
     
     # Find peak
+    max_val = np.max(correlation)
     max_pos = np.unravel_index(np.argmax(correlation), correlation.shape)
     center = (reference.shape[0] // 2, reference.shape[1] // 2)
     
-    dy = max_pos[0] - center[0]
-    dx = max_pos[1] - center[1]
+    # Check if peak is at edge (suspicious!)
+    edge_margin = 10
+    at_edge = (max_pos[0] < edge_margin or max_pos[0] > correlation.shape[0] - edge_margin or
+               max_pos[1] < edge_margin or max_pos[1] > correlation.shape[1] - edge_margin)
+    if at_edge:
+        logger.warning(f"Cross-correlation peak at edge! Position {max_pos} may be unreliable.")
+    
+    # Subpixel refinement using parabolic interpolation
+    # Fit parabola in y and x directions to find subpixel peak
+    peak_y = float(max_pos[0])
+    peak_x = float(max_pos[1])
+    
+    if 0 < max_pos[0] < correlation.shape[0] - 1:
+        # Parabolic fit in y direction
+        c_minus = correlation[max_pos[0] - 1, max_pos[1]]
+        c_zero = correlation[max_pos[0], max_pos[1]]
+        c_plus = correlation[max_pos[0] + 1, max_pos[1]]
+        denom = 2 * (2 * c_zero - c_minus - c_plus)
+        if abs(denom) > 1e-10:
+            offset_y = (c_minus - c_plus) / denom
+            if abs(offset_y) < 1.0:  # Sanity check
+                peak_y += offset_y
+    
+    if 0 < max_pos[1] < correlation.shape[1] - 1:
+        # Parabolic fit in x direction
+        c_minus = correlation[max_pos[0], max_pos[1] - 1]
+        c_zero = correlation[max_pos[0], max_pos[1]]
+        c_plus = correlation[max_pos[0], max_pos[1] + 1]
+        denom = 2 * (2 * c_zero - c_minus - c_plus)
+        if abs(denom) > 1e-10:
+            offset_x = (c_minus - c_plus) / denom
+            if abs(offset_x) < 1.0:  # Sanity check
+                peak_x += offset_x
+    
+    # The shift needed to align target with reference
+    # Note: we negate because correlate tells us where target IS relative to reference,
+    # but we want the shift needed to MOVE target back to reference
+    dy = -(peak_y - center[0])
+    dx = -(peak_x - center[1])
+    
+    logger.info(f"Cross-correlation found shift: dy={dy}, dx={dx}")
     
     # Calculate RMSE after alignment
-    shifted = np.roll(np.roll(target, dy, axis=0), dx, axis=1)
+    # Note: Can't use mode='nearest' with NaN - it propagates NaN!
+    # Fill NaN with mean before shifting for RMSE calculation
+    tgt_nan_mask = np.isnan(target)
+    tgt_valid_data = target[~tgt_nan_mask]
+    if tgt_valid_data.size > 0:
+        tgt_fill = np.mean(tgt_valid_data)
+    else:
+        tgt_fill = 0.0
+    target_filled = np.where(tgt_nan_mask, tgt_fill, target)
+    
+    # Apply shift with constant boundary
+    shifted = ndimage_shift(target_filled, (dy, dx), order=3, mode='constant', cval=tgt_fill)
+    
+    # Restore NaN mask
+    tgt_nan_mask_shifted = ndimage_shift(tgt_nan_mask.astype(float), (dy, dx), order=0, mode='constant', cval=1.0) > 0.5
+    shifted[tgt_nan_mask_shifted] = np.nan
+    
+    # Mark shifted regions that came from outside as NaN
+    # Create a mask of valid regions after shift
+    valid_mask = np.ones_like(target, dtype=bool)
+    if dy > 0:
+        valid_mask[:int(dy), :] = False
+    elif dy < 0:
+        valid_mask[int(dy):, :] = False
+    if dx > 0:
+        valid_mask[:, :int(dx)] = False
+    elif dx < 0:
+        valid_mask[:, int(dx):] = False
+    
+    shifted[~valid_mask] = np.nan
     valid_both = ref_valid & ~np.isnan(shifted)
     
     if np.sum(valid_both) > 0:
         rmse = np.sqrt(np.mean((reference[valid_both] - shifted[valid_both]) ** 2))
+        logger.info(f"Registration RMSE: {rmse:.2f} nm, overlapping points: {np.sum(valid_both)}")
     else:
         rmse = np.inf
+        logger.warning(f"Registration failed: no overlapping points after shift!")
     
     return {
         'translation': (dy, dx),
@@ -359,13 +435,53 @@ def apply_registration(grid, xi, yi, px_x, px_y, translation, rotation=0.0):
     Returns:
         tuple: (transformed_grid, xi, yi, px_x, px_y)
     """
+    
     # Apply rotation first if needed
     if abs(rotation) > 0.01:
         grid, xi, yi, px_x, px_y = rotate_grid(grid, rotation, xi, yi, px_x, px_y)
     
-    # Apply translation
+    # Apply translation using proper shift (not circular roll)
     dy, dx = translation
+    
     if abs(dy) > 0.5 or abs(dx) > 0.5:
-        grid = np.roll(np.roll(grid, int(round(dy)), axis=0), int(round(dx)), axis=1)
+        # Strategy: Can't use mode='nearest' with NaN - it propagates NaN everywhere!
+        # Instead:
+        # 1. Save NaN mask
+        # 2. Fill NaN with mean value (for interpolation)
+        # 3. Shift with mode='constant', cval=mean
+        # 4. Restore NaN mask and add edge mask
+        
+        nan_mask_before = np.isnan(grid)
+        
+        # Fill NaN with mean of valid data for interpolation
+        valid_data = grid[~nan_mask_before]
+        if valid_data.size > 0:
+            fill_value = np.mean(valid_data)
+        else:
+            fill_value = 0.0
+            logger.warning(f"apply_registration: grid is all NaN before shift!")
+        
+        grid_filled = np.where(nan_mask_before, fill_value, grid)
+        
+        # Shift with constant boundary (using fill value)
+        grid = ndimage_shift(grid_filled, (dy, dx), order=3, mode='constant', cval=fill_value)
+        
+        # Restore original NaN mask (shifted)
+        # Use order=1 (linear) instead of order=0 to properly interpolate mask values
+        nan_mask_shifted = ndimage_shift(nan_mask_before.astype(float), (dy, dx), order=1, mode='constant', cval=1.0) > 0.5
+        grid[nan_mask_shifted] = np.nan
+        
+        # Mark regions that were shifted from outside the original bounds as NaN
+        valid_mask = np.ones_like(grid, dtype=bool)
+        if dy > 0:
+            valid_mask[:int(np.ceil(dy)), :] = False
+        elif dy < 0:
+            valid_mask[int(np.floor(dy)):, :] = False
+        if dx > 0:
+            valid_mask[:, :int(np.ceil(dx))] = False
+        elif dx < 0:
+            valid_mask[:, int(np.floor(dx)):] = False
+        
+        grid[~valid_mask] = np.nan
     
     return grid, xi, yi, px_x, px_y
