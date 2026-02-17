@@ -13,3 +13,4 @@ pytest
 pytest-cov
 pytest-mock
 opencv-python
+rtree

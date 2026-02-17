@@ -24,7 +24,7 @@ from .scan_tab import ScanTab
 from ..core import GridData
 from .viewers import show_3d_viewer
 from ..utils import resource_path
-from ..io import load_csv_data, load_npz_data, load_h5_data, save_npz, save_h5, suggest_units
+from ..io import load_csv_data, load_npz_data, load_h5_data, load_stl_data, save_npz, save_h5, save_stl, suggest_units
 from .workers import GridWorker
 
 import logging
@@ -672,6 +672,54 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"Error while loading:\n{e}")
             return False
 
+    def load_stl(self, fname, tab):
+        """Load STL file and convert to height map grid.
+        
+        Args:
+            fname (str): Path to STL file.
+            tab (ScanTab): Tab widget to load data into.
+        """
+        # Ask user for resolution
+        resolution, ok = QtWidgets.QInputDialog.getDouble(
+            self,
+            "STL Resolution",
+            "Enter desired pixel resolution in micrometers (μm):\n(Leave as 0 for automatic resolution)",
+            value=0.0,
+            min=0.0,
+            max=1000.0,
+            decimals=2
+        )
+        
+        if not ok:
+            return
+        
+        if resolution == 0.0:
+            resolution = None
+        
+        # Create progress dialog
+        dlg = QtWidgets.QProgressDialog("Loading STL file...", None, 0, 100, self)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+        
+        try:
+            grid, xi, yi, px_x, px_y = load_stl_data(
+                fname,
+                resolution=resolution,
+                progress_callback=dlg.setValue
+            )
+            tab.set_data(grid, xi, yi, px_x, px_y)
+            dlg.setValue(100)
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self, "Error", f"Failed to load STL file:\n{e}")
+            # Remove the tab if loading failed
+            idx = self.tabs.indexOf(tab)
+            if idx >= 0:
+                self.tabs.removeTab(idx)
+    
     def load_h5(self, fname):
         try:
             scans = load_h5_data(fname)
@@ -701,13 +749,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.load_npz(fname)
         elif fname.endswith('.h5'):
             self.load_h5(fname)
+        elif fname.endswith('.stl'):
+            tab = ScanTab()
+            self.tabs.addTab(tab, fname.split('/')[-1])
+            self.tabs.setCurrentWidget(tab)
+            self.load_stl(fname, tab)
+            self.add_to_recent_files(fname)
         else:
             QtWidgets.QMessageBox.warning(self, "Unknown format", "Unsupported file type.")
             # self.tabs.removeTab(self.tabs.indexOf(tab))
             return
 
     def open_file(self):
-        fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open file", "", "CSV, NPZ, H5 (*.csv *.dat *.txt *.npz *.h5)")
+        fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open file", "", "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl)")
         if not fname:
             return
         self.create_tab_and_load(fname)
@@ -727,7 +781,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         fname, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save Scan", "", "NPZ (*.npz);;HDF5 (*.h5)"
+            self, "Save Scan", "", "NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl)"
         )
         if not fname:
             return
@@ -736,6 +790,8 @@ class MainWindow(QtWidgets.QMainWindow):
             fname += ".npz"
         elif selected_filter.startswith("HDF5") and not fname.endswith(".h5"):
             fname += ".h5"
+        elif selected_filter.startswith("STL") and not fname.endswith(".stl"):
+            fname += ".stl"
 
         try:
             # Prepare scans data: list of (name, grid, xi, yi, px_x, px_y)
@@ -747,6 +803,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 save_npz(fname, scans)
             elif fname.endswith(".h5"):
                 save_h5(fname, scans)
+            elif fname.endswith(".stl"):
+                # STL can only save a single scan
+                if len(scans) > 1:
+                    QtWidgets.QMessageBox.warning(
+                        self, "Multiple scans",
+                        "STL format can only save a single scan.\nOnly the first scan will be saved."
+                    )
+                name, grid, xi, yi, px_x, px_y = scans[0]
+                save_stl(fname, grid, xi, yi, binary=True)
 
             QtWidgets.QMessageBox.information(self, "Saved", f"Scan saved to: {fname}")
 
