@@ -1,0 +1,906 @@
+# FRASTA-toolbox Architecture Guide
+
+This document describes the architecture, design patterns, and conventions used in FRASTA-toolbox. Read this before making changes to understand how components interact and where new features should be added.
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#overview)
+2. [Core Principles](#core-principles)
+3. [Module Structure](#module-structure)
+4. [Data Flow](#data-flow)
+5. [Key Design Patterns](#key-design-patterns)
+6. [Adding New Features](#adding-new-features)
+7. [Testing Strategy](#testing-strategy)
+8. [Common Pitfalls](#common-pitfalls)
+
+---
+
+## Overview
+
+FRASTA-toolbox is a modular desktop application for fracture surface analysis built on:
+- **PyQt5** - GUI framework
+- **pyqtgraph** - fast 2D/3D visualization
+- **NumPy/SciPy** - numerical computations
+- **scikit-learn** - robust regression algorithms
+- **OpenCV** (optional) - accelerated image processing
+
+### Architecture Philosophy
+
+**Separation of Concerns**: Each module has a single, clear responsibility.
+- `core/` = data structures
+- `io/` = loading/saving data
+- `processing/` = algorithms (pure functions)
+- `gui/` = user interface orchestration
+
+**No Circular Dependencies**: Dependencies flow one way:
+```
+gui → processing → core
+  ↓       ↓
+  io  →  core
+```
+
+**Pure Functions**: Processing functions don't modify input data in-place, always return new arrays/objects.
+
+---
+
+## Core Principles
+
+### 1. **Immutability in Processing**
+
+All functions in `processing/` are **pure functions** - they:
+- ✅ Take input arrays and parameters
+- ✅ Return new arrays/tuples without side effects
+- ❌ Never modify input arrays in-place
+- ❌ Never call GUI functions or access global state
+
+**Example:**
+```python
+# CORRECT ✅
+def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=None):
+    grid = grid.copy()  # Work on copy
+    # ... processing ...
+    return result
+
+# WRONG ❌
+def bilateral_filter(grid, sigma_spatial, sigma_range):
+    grid[mask] = filtered_values  # Modifying input!
+    return grid
+```
+
+### 2. **GridData is a Container, Not a Business Object**
+
+`GridData` is a simple data holder with no business logic:
+```python
+class GridData:
+    def __init__(self, grid, xi, yi, px_x, px_y, vmin=None, vmax=None):
+        self.grid = grid      # 2D numpy array
+        self.xi = xi          # 1D x-coordinates
+        self.yi = yi          # 1D y-coordinates  
+        self.px_x = px_x      # Pixel size in x
+        self.px_y = px_y      # Pixel size in y
+        self.vmin = vmin      # Display range min
+        self.vmax = vmax      # Display range max
+```
+
+**Use it for:**
+- ✅ Passing scan data between GUI components
+- ✅ Storing visualization metadata (vmin/vmax)
+- ✅ Simple utility methods (crop, copy)
+
+**Don't use it for:**
+- ❌ Processing algorithms (use numpy arrays instead)
+- ❌ Business logic (filtering, leveling, etc.)
+- ❌ Complex state management
+
+### 3. **Lazy Imports in GUI**
+
+GUI modules import processing functions **only when needed**:
+```python
+# In main_window.py
+def apply_bilateral_filter(self):
+    from ..processing import bilateral_filter  # Import on demand
+    
+    current_tab = self.get_current_tab()
+    result = bilateral_filter(current_tab.grid, sigma_spatial=5.0, ...)
+```
+
+**Why?** Reduces startup time and allows processing to be used independently.
+
+### 4. **Units Convention**
+
+All spatial measurements use **micrometers (μm)** as the standard unit:
+- `px_x, px_y` - pixel sizes in μm
+- `xi, yi` - coordinate arrays in μm
+- `grid` - height values in μm
+
+Conversions happen **only at I/O boundaries**:
+- `load_stl_data()` converts from mm → μm
+- `save_stl()` converts from μm → mm
+- All internal processing stays in μm
+
+---
+
+## Module Structure
+
+```
+frasta/
+├── core/           # Data structures
+│   └── grid_data.py
+├── io/             # File I/O (loaders & exporters)
+│   ├── loaders.py
+│   └── exporters.py
+├── processing/     # Analysis algorithms (pure functions)
+│   ├── filtering.py
+│   ├── advanced_filtering.py
+│   ├── morphology.py
+│   ├── alignment.py
+│   ├── transforms.py
+│   └── interpolation.py
+├── gui/            # User interface
+│   ├── main_window.py
+│   ├── scan_tab.py
+│   ├── dialogs/
+│   │   ├── processing_dialog.py
+│   │   ├── profile_viewer.py
+│   │   └── overlay_viewer.py
+│   ├── viewers/
+│   │   ├── grid_3d_viewer.py
+│   │   └── lod_surface.py
+│   ├── widgets/
+│   │   └── surface_control_panel.py
+│   └── workers/
+│       ├── csv_loader_worker.py
+│       └── profile_loader_worker.py
+└── utils/          # Shared utilities
+    ├── decorators.py
+    └── resources.py
+```
+
+### Detailed Module Responsibilities
+
+#### `core/` - Data Structures
+**Single responsibility:** Define data containers.
+
+- `GridData` - holds scan data with metadata
+- No algorithms, no I/O, no GUI dependencies
+- Only simple utility methods (crop, copy)
+
+**When to modify:** Only when changing fundamental data representation.
+
+---
+
+#### `io/` - File I/O
+**Single responsibility:** Load and save scan data.
+
+**Key Files:**
+- `loaders.py` - functions for reading CSV, NPZ, HDF5, STL formats
+- `exporters.py` - functions for writing NPZ, HDF5, STL formats
+
+**Contract:**
+- All loaders return tuple: `(name, grid, xi, yi, px_x, px_y)` or list of such tuples
+- All exporters take list: `[(name, grid, xi, yi, px_x, px_y), ...]`
+- Handle unit conversions at file boundary (mm ↔ μm)
+- **Never** perform data processing (filtering, leveling, etc.)
+
+**When to add new function:**
+- New file format support
+- New unit conversion
+
+**When NOT to add:**
+- Data validation → use `processing/`
+- Coordinate transformations → use `processing/transforms.py`
+
+---
+
+#### `processing/` - Analysis Algorithms
+**Single responsibility:** Implement analysis algorithms as pure functions.
+
+**Submodules:**
+
+| File | Purpose | Example Functions |
+|------|---------|-------------------|
+| `filtering.py` | Basic smoothing/outlier removal | `nan_aware_gaussian()`, `remove_outliers()` |
+| `advanced_filtering.py` | Advanced filters | `bilateral_filter()`, `median_filter()`, `morphological_*()` |
+| `morphology.py` | Form removal & leveling | `level_by_plane()`, `remove_polynomial_form()`, `threshold_surface()` |
+| `alignment.py` | Scan-to-scan alignment | `remove_relative_offset()`, `remove_relative_tilt()` |
+| `transforms.py` | Geometric transforms | `rotate_grid()`, `rescale_grid()`, `crop_to_valid_region()`, `auto_register_surfaces()` |
+| `interpolation.py` | Hole filling | `fill_holes()` |
+
+**Function Signature Pattern:**
+```python
+def process_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
+    """
+    Args:
+        grid (np.ndarray): 2D input array
+        param1, param2: Algorithm parameters
+        px_x, px_y (float): Pixel sizes for physical dimensions
+        mask (np.ndarray, optional): Boolean mask for region of interest
+        
+    Returns:
+        np.ndarray: Processed result (new array, input unchanged)
+    """
+    grid = grid.copy()  # или создавай новую
+    # ... processing logic ...
+    return result
+```
+
+**Rules:**
+1. Accept `np.ndarray` as input (NOT `GridData`)
+2. Return `np.ndarray` or tuple of arrays/parameters
+3. Always document units for spatial parameters
+4. Handle NaN values gracefully
+5. Respect `mask` parameter if provided
+6. Never modify input arrays in-place
+7. No GUI imports, no file I/O
+
+**When to add new function:** Any new analysis algorithm.
+
+---
+
+#### `gui/` - User Interface
+**Single responsibility:** Orchestrate user interactions, visualize data, call processing functions.
+
+**Key Components:**
+
+```
+gui/
+├── main_window.py          # Main application window, menu bar, toolbar
+├── scan_tab.py             # Individual scan display with histogram/ROI tools
+├── dialogs/                # Modal dialogs for parameters & results
+│   ├── processing_dialog.py   # Parameter input for filtering/morphology/transforms
+│   ├── profile_viewer.py      # Cross-section profile analysis
+│   ├── overlay_viewer.py      # Scan-to-scan comparison
+│   └── about.py              # About dialog
+├── viewers/                # 3D visualization
+│   ├── grid_3d_viewer.py     # OpenGL-based 3D surface viewer
+│   ├── lod_surface.py        # Level-of-detail mesh for performance
+│   └── limited_gl_view.py    # Custom view with limited controls
+├── widgets/                # Reusable UI components
+│   ├── surface_control_panel.py
+│   └── responsive_infinite_line.py
+└── workers/                # Background threads for long operations
+    ├── csv_loader_worker.py
+    └── profile_loader_worker.py
+```
+
+**Responsibilities:**
+- Create UI layouts
+- Handle user input (clicks, dialogs, drag-drop)
+- Call `io.loaders` to load files
+- Call `processing.*` functions to analyze data
+- Update visualizations with results
+- Manage application state (tabs, recent files, settings)
+
+**Rules:**
+1. GUI calls `processing`, never the reverse
+2. Convert between `GridData` and `np.ndarray` as needed:
+   ```python
+   # Get grid from tab
+   grid = current_tab.grid
+   
+   # Process
+   from ..processing import bilateral_filter
+   result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0,
+                              px_x=current_tab.px_x, px_y=current_tab.px_y)
+   
+   # Update tab
+   current_tab.grid = result
+   current_tab.update_display()
+   ```
+3. Use dialogs for parameter input (`FilterDialog`, `MorphologyDialog`, etc.)
+4. Use workers for long-running operations (CSV loading, profile extraction)
+5. Never implement algorithms in GUI code
+
+---
+
+#### `utils/` - Shared Utilities
+**Single responsibility:** Cross-cutting concerns used by multiple modules.
+
+- `decorators.py` - function decorators (timers, logging)
+- `resources.py` - resource path resolution for icons/assets
+
+---
+
+## Data Flow
+
+### High-Level Flow Diagram
+
+```mermaid
+graph TD
+    A[User Loads CSV] --> B[io.loaders.load_csv_data]
+    B --> C[Returns: name, grid, xi, yi, px_x, px_y]
+    C --> D[GUI creates GridData object]
+    D --> E[ScanTab displays data]
+    E --> F[User applies filter]
+    F --> G[GUI extracts grid from GridData]
+    G --> H[processing.bilateral_filter]
+    H --> I[Returns filtered grid]
+    I --> J[GUI updates GridData.grid]
+    J --> K[ScanTab refreshes display]
+    K --> L[User exports result]
+    L --> M[io.exporters.save_npz]
+    M --> N[File saved]
+```
+
+### Detailed Flow: Loading a CSV File
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MainWindow
+    participant Loader
+    participant ScanTab
+    participant GridData
+    
+    User->>MainWindow: File → Open CSV
+    MainWindow->>MainWindow: Show unit dialog (mm/μm)
+    MainWindow->>Loader: load_csv_data(fname, units)
+    Loader->>Loader: Parse CSV, build coordinate arrays
+    Loader-->>MainWindow: (name, grid, xi, yi, px_x, px_y)
+    MainWindow->>GridData: Create GridData object
+    MainWindow->>ScanTab: Create new tab
+    ScanTab->>ScanTab: Set grid, xi, yi, px_x, px_y
+    ScanTab->>ScanTab: update_display()
+    ScanTab-->>User: Show scan image & histogram
+```
+
+### Detailed Flow: Applying a Bilateral Filter
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MainWindow
+    participant FilterDialog
+    participant Processing
+    participant ScanTab
+    
+    User->>MainWindow: Processing → Advanced Filtering
+    MainWindow->>FilterDialog: Show dialog
+    FilterDialog->>FilterDialog: User selects "Bilateral Filter"
+    FilterDialog->>FilterDialog: User sets sigma_spatial=5.0, sigma_range=10.0
+    User->>FilterDialog: Click OK
+    FilterDialog-->>MainWindow: Return params
+    MainWindow->>ScanTab: Get current tab
+    ScanTab-->>MainWindow: grid, px_x, px_y
+    MainWindow->>Processing: bilateral_filter(grid, 5.0, 10.0, px_x, px_y)
+    Processing->>Processing: Apply OpenCV/Python bilateral filter
+    Processing-->>MainWindow: filtered_grid
+    MainWindow->>ScanTab: Update tab.grid = filtered_grid
+    ScanTab->>ScanTab: update_display()
+    ScanTab-->>User: Show filtered result
+```
+
+### Data Type Conversions
+
+| Module | Input Type | Output Type | Notes |
+|--------|------------|-------------|-------|
+| `io.loaders` | File path | `tuple` | `(name, grid, xi, yi, px_x, px_y)` |
+| `io.exporters` | `list[tuple]` | File path | Writes to disk |
+| `processing.*` | `np.ndarray` | `np.ndarray` or `tuple` | Pure functions |
+| `gui.MainWindow` | File path | `GridData` | Creates tabs |
+| `gui.ScanTab` | `GridData` | Visual display | Uses `pyqtgraph.ImageView` |
+
+---
+
+## Key Design Patterns
+
+### 1. **Parameter Dialog Pattern**
+
+All processing operations with parameters use modal dialogs:
+
+```python
+# In processing_dialog.py
+class FilterDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        # Build UI with comboboxes, spinboxes, etc.
+        pass
+    
+    def get_parameters(self):
+        """Returns dict of user-selected parameters."""
+        return {
+            'filter_type': self.filter_combo.currentText(),
+            'sigma_spatial': self.sigma_spin.value(),
+            ...
+        }
+
+# In main_window.py
+def on_advanced_filtering_clicked(self):
+    dialog = FilterDialog(self)
+    if dialog.exec_() == QtWidgets.QDialog.Accepted:
+        params = dialog.get_parameters()
+        # Apply processing with params
+```
+
+### 2. **Worker Thread Pattern**
+
+Long-running operations use `QThread` to avoid blocking UI:
+
+```python
+# In workers/csv_loader_worker.py
+class GridWorker(QtCore.QThread):
+    progress = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(object)
+    error = QtCore.pyqtSignal(str)
+    
+    def run(self):
+        try:
+            result = self.heavy_computation()
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
+
+# In main_window.py
+worker = GridWorker(...)
+worker.progress.connect(progress_dialog.setValue)
+worker.finished.connect(self.on_load_complete)
+worker.start()
+```
+
+### 3. **Tab-Based Multi-Document Interface**
+
+Each scan gets its own `ScanTab` widget:
+
+```python
+# In main_window.py
+def add_new_scan(self, name, grid, xi, yi, px_x, px_y):
+    tab = ScanTab(parent=self)
+    tab.set_data(grid, xi, yi, px_x, px_y)
+    self.tab_widget.addTab(tab, name)
+```
+
+This allows:
+- Multiple scans open simultaneously
+- Per-scan undo history (stored in tab)
+- Independent ROI/masking per scan
+
+### 4. **Mask-Based Region of Interest**
+
+All processing functions accept optional `mask` parameter:
+
+```python
+# User selects circular ROI in GUI
+mask = create_circular_mask(center_x, center_y, radius, grid.shape)
+
+# Apply filter only to masked region
+filtered = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, mask=mask)
+```
+
+Inside processing functions:
+```python
+def bilateral_filter(grid, sigma_spatial, sigma_range, mask=None, ...):
+    if mask is not None:
+        # Apply filter only where mask is True
+        result = grid.copy()
+        filtered_region = bilateral_filter_impl(grid[mask], ...)
+        result[mask] = filtered_region
+        return result
+    else:
+        # Process entire grid
+        return bilateral_filter_impl(grid, ...)
+```
+
+---
+
+## Adding New Features
+
+### Adding a New Filter
+
+**1. Implement the algorithm in `processing/`:**
+
+```python
+# In frasta/processing/advanced_filtering.py
+
+def my_new_filter(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
+    """My new filtering algorithm.
+    
+    Args:
+        grid (np.ndarray): 2D input array.
+        param1 (float): Description of parameter.
+        param2 (int): Description of parameter.
+        px_x, px_y (float): Pixel sizes in micrometers.
+        mask (np.ndarray, optional): Boolean mask for ROI.
+        
+    Returns:
+        np.ndarray: Filtered result.
+        
+    Examples:
+        >>> filtered = my_new_filter(grid, param1=5.0, param2=3)
+    """
+    if grid is None:
+        return None
+    
+    grid = grid.copy()
+    
+    # Apply mask if provided
+    if mask is not None:
+        # Process only masked region
+        pass
+    
+    # Implement algorithm
+    # ...
+    
+    return result
+```
+
+**2. Add to `processing/__init__.py`:**
+
+```python
+from .advanced_filtering import (
+    bilateral_filter,
+    median_filter,
+    my_new_filter,  # Add here
+    # ...
+)
+```
+
+**3. Add option to `FilterDialog` in `gui/dialogs/processing_dialog.py`:**
+
+```python
+def init_ui(self):
+    # ...
+    self.filter_combo.addItems([
+        "Bilateral Filter",
+        "Median Filter",
+        "My New Filter",  # Add to dropdown
+        # ...
+    ])
+
+def update_parameter_panel(self):
+    # ...
+    elif filter_name == "My New Filter":
+        self.add_param_spin("Param1", 0.0, 10.0, 5.0, 0.1, "param1")
+        self.add_param_int("Param2", 1, 10, 3, "param2")
+        self.add_info("Description of what this filter does.")
+```
+
+**4. Wire up in `MainWindow.on_apply_filter()`:**
+
+```python
+def on_apply_filter(self):
+    from ..processing import my_new_filter
+    
+    dialog = FilterDialog(self)
+    if dialog.exec_() == QtWidgets.QDialog.Accepted:
+        params = dialog.get_parameters()
+        
+        if params['filter_type'] == "My New Filter":
+            result = my_new_filter(
+                current_tab.grid,
+                param1=params['param1'],
+                param2=params['param2'],
+                px_x=current_tab.px_x,
+                px_y=current_tab.px_y,
+                mask=current_tab.get_mask()
+            )
+            current_tab.grid = result
+            current_tab.update_display()
+```
+
+---
+
+### Adding a New File Format
+
+**1. Implement loader in `io/loaders.py`:**
+
+```python
+def load_my_format(fname, progress_callback=None):
+    """Loads scan data from MY_FORMAT.
+    
+    Args:
+        fname (str): Path to file.
+        progress_callback (callable, optional): Progress callback (0-100).
+        
+    Returns:
+        tuple: (grid, xi, yi, px_x, px_y)
+        
+    Raises:
+        ValueError: If file is invalid.
+    """
+    # Implement parsing logic
+    # ...
+    return grid, xi, yi, px_x, px_y
+```
+
+**2. Implement exporter in `io/exporters.py`:**
+
+```python
+def save_my_format(fname, scans):
+    """Saves scans to MY_FORMAT.
+    
+    Args:
+        fname (str): Output file path.
+        scans (list): List of (name, grid, xi, yi, px_x, px_y) tuples.
+    """
+    # Implement writing logic
+    # ...
+```
+
+**3. Add to `io/__init__.py`:**
+
+```python
+from .loaders import load_csv_data, load_npz_data, load_my_format
+from .exporters import save_npz, save_h5, save_my_format
+```
+
+**4. Update GUI file dialogs:**
+
+In `main_window.py`:
+```python
+def open_file(self):
+    fname, _ = QtWidgets.QFileDialog.getOpenFileName(
+        self,
+        "Open File",
+        "",
+        "All Supported (*.csv *.npz *.h5 *.myformat);;CSV (*.csv);;NPZ (*.npz);;HDF5 (*.h5);;MY_FORMAT (*.myformat)"
+    )
+```
+
+---
+
+### Adding a New Transformation
+
+Follow same pattern as filters, but use `TransformDialog` and `processing/transforms.py`.
+
+---
+
+### Adding a New 3D Visualization Mode
+
+**1. Implement in `gui/viewers/grid_3d_viewer.py` or `lod_surface.py`**
+
+**2. Add menu option in `main_window.py`**
+
+**3. Connect signal to new viewer function**
+
+---
+
+## Testing Strategy
+
+### Unit Tests (Priority)
+
+Test **processing functions** thoroughly:
+
+```python
+# In tests/test_advanced_processing.py
+
+def test_bilateral_filter_preserves_shape():
+    grid = np.random.randn(100, 100)
+    result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0)
+    assert result.shape == grid.shape
+
+def test_bilateral_filter_handles_nans():
+    grid = np.random.randn(100, 100)
+    grid[10:20, 10:20] = np.nan
+    result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0)
+    assert np.isnan(result[10:20, 10:20]).all()
+
+def test_bilateral_filter_respects_mask():
+    grid = np.ones((100, 100))
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[40:60, 40:60] = True
+    
+    result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, mask=mask)
+    # Only masked region should be modified
+    assert not np.array_equal(result[40:60, 40:60], grid[40:60, 40:60])
+    assert np.array_equal(result[0:10, 0:10], grid[0:10, 0:10])
+```
+
+### Integration Tests
+
+Test **I/O roundtrips**:
+
+```python
+def test_npz_roundtrip():
+    original_scans = [("scan1", grid, xi, yi, px_x, px_y)]
+    save_npz("test.npz", original_scans)
+    loaded_scans = load_npz_data("test.npz")
+    
+    assert loaded_scans[0][0] == original_scans[0][0]
+    np.testing.assert_array_equal(loaded_scans[0][1], original_scans[0][1])
+```
+
+### GUI Tests (Optional)
+
+Test **end-to-end workflows** using pytest-qt or manual testing:
+- Load CSV → Apply filter → Export NPZ
+- Load two scans → Overlay view → Profile extraction
+
+---
+
+## Common Pitfalls
+
+### ❌ Modifying Arrays In-Place
+
+```python
+# WRONG ❌
+def bad_filter(grid):
+    grid[grid > 100] = 100  # Modifies input!
+    return grid
+
+# CORRECT ✅
+def good_filter(grid):
+    result = grid.copy()
+    result[result > 100] = 100
+    return result
+```
+
+### ❌ Mixing GridData and np.ndarray
+
+```python
+# WRONG ❌
+from ..processing import bilateral_filter
+result = bilateral_filter(grid_data, ...)  # GridData has no __array__ interface
+
+# CORRECT ✅
+result = bilateral_filter(grid_data.grid, px_x=grid_data.px_x, ...)
+```
+
+### ❌ Putting Algorithms in GUI
+
+```python
+# WRONG ❌ - in main_window.py
+def apply_filter(self):
+    grid = self.current_tab.grid
+    for i in range(grid.shape[0]):  # Complex algorithm in GUI!
+        for j in range(grid.shape[1]):
+            grid[i,j] = ...
+
+# CORRECT ✅
+def apply_filter(self):
+    from ..processing import my_algorithm
+    result = my_algorithm(self.current_tab.grid, ...)
+    self.current_tab.grid = result
+```
+
+### ❌ Ignoring pixel_size Parameters
+
+```python
+# WRONG ❌
+def spatial_filter(grid, radius_pixels):
+    # Assumes pixels are square and uniform
+    kernel_size = 2 * radius_pixels + 1
+
+# CORRECT ✅
+def spatial_filter(grid, radius_physical, px_x=1.0, px_y=1.0):
+    # Convert physical radius to pixels
+    radius_x_pixels = radius_physical / px_x
+    radius_y_pixels = radius_physical / px_y
+    # Use anisotropic kernel if px_x != px_y
+```
+
+### ❌ Forgetting to Handle NaN Values
+
+```python
+# WRONG ❌
+def mean_filter(grid):
+    return scipy.ndimage.uniform_filter(grid, size=5)  # Propagates NaNs!
+
+# CORRECT ✅
+def mean_filter(grid):
+    # Use weighted approach to ignore NaNs
+    valid = ~np.isnan(grid)
+    filled = np.where(valid, grid, 0)
+    weights = valid.astype(float)
+    
+    smoothed = uniform_filter(filled, size=5)
+    weight_sum = uniform_filter(weights, size=5)
+    
+    result = smoothed / weight_sum
+    result[weight_sum == 0] = np.nan
+    return result
+```
+
+### ❌ Not Using Mask Parameter
+
+```python
+# WRONG ❌
+def filter_function(grid, sigma):
+    # Processes entire grid, ignoring user's ROI selection
+    return gaussian_filter(grid, sigma)
+
+# CORRECT ✅
+def filter_function(grid, sigma, mask=None):
+    if mask is not None:
+        result = grid.copy()
+        result[mask] = gaussian_filter(grid[mask].reshape(...), sigma)
+        return result
+    return gaussian_filter(grid, sigma)
+```
+
+---
+
+## Quick Reference: Where to Put Code
+
+| **Task** | **Module** | **File** |
+|----------|------------|----------|
+| New filter algorithm | `processing/` | `advanced_filtering.py` or `filtering.py` |
+| New geometric transform | `processing/` | `transforms.py` |
+| Plane/polynomial fitting | `processing/` | `morphology.py` |
+| Hole filling | `processing/` | `interpolation.py` |
+| Surface alignment | `processing/` | `alignment.py` |
+| Load new file format | `io/` | `loaders.py` |
+| Save new file format | `io/` | `exporters.py` |
+| New parameter dialog | `gui/dialogs/` | `processing_dialog.py` or new file |
+| New visualization | `gui/viewers/` | New file or modify existing |
+| New data structure | `core/` | New file (rare) |
+| Utility function | `utils/` | Appropriate file |
+
+---
+
+## Dependency Graph
+
+```mermaid
+graph TD
+    GUI[gui/] --> Processing[processing/]
+    GUI --> IO[io/]
+    GUI --> Core[core/]
+    GUI --> Utils[utils/]
+    
+    Processing --> Core
+    Processing --> Utils
+    
+    IO --> Core
+    IO --> Utils
+    
+    Core --> Utils
+    
+    style GUI fill:#e1f5ff
+    style Processing fill:#fff4e1
+    style IO fill:#e8f5e9
+    style Core fill:#fce4ec
+    style Utils fill:#f3e5f5
+```
+
+**Key takeaway:** Arrows only flow downward. No cycles allowed.
+
+---
+
+## Questions to Ask Before Coding
+
+1. **Is this a new algorithm?** → `processing/`
+2. **Is this about loading/saving data?** → `io/`
+3. **Is this a GUI interaction?** → `gui/`
+4. **Does it modify the fundamental data structure?** → `core/` (rare)
+5. **Is it used everywhere?** → `utils/`
+
+**When in doubt, ask:**
+- Would this function make sense in a command-line script (no GUI)?
+  - **Yes** → `processing/` or `io/`
+  - **No** → `gui/`
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-02-18 | Initial architecture documentation |
+
+---
+
+## Further Reading
+
+### User Documentation
+- [Quick Start Guide](docs/QUICK_START_GUI.md) - Using the GUI
+- [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - API documentation for all processing functions
+- [GUI Integration Guide](docs/GUI_INTEGRATION.md) - How to use processing in the GUI
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Function cheat sheet
+
+### Developer Conventions ⭐ ESSENTIAL
+- **[Conventions Index](docs/conventions/README.md)** - Start here for detailed coding standards
+  - [Processing Algorithms](docs/conventions/processing/algorithms.md) - **Required** for adding filters/transforms
+  - [File I/O](docs/conventions/io/file_formats.md) - Format specifications and loader patterns
+  - [GUI Development](docs/conventions/gui/development.md) - Dialog and widget patterns
+  - [Data Structures](docs/conventions/core/data_structures.md) - GridData and core types
+  - [General Standards](docs/conventions/general/) - Naming, imports, logging
+
+---
+
+**🎯 Remember:** When collaborating with AI assistants (like GitHub Copilot), share this document so they understand:
+- Where to put new code
+- Function signature conventions
+- Data flow patterns
+- Testing expectations
+
+This ensures consistent, maintainable code across the project!

@@ -128,4 +128,12 @@ See [examples/README.md](examples/README.md) for details.
 * running tests:
 `./.venv/bin/python -m pytest -v -s`
 
+## Developer Documentation
 
+For contributors and developers:
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design principles
+- **[Conventions](docs/conventions/README.md)** - Detailed coding standards by module
+  - [Processing algorithms](docs/conventions/processing/algorithms.md) - Required reading for algorithm development
+  - [File I/O patterns](docs/conventions/io/) - Loader/exporter conventions
+  - [GUI development](docs/conventions/gui/) - Dialog and widget patterns
+  - [General standards](docs/conventions/general/) - Naming, imports, logging

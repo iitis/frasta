@@ -12,8 +12,11 @@ processing, and analyzing 2D scan data. It includes features for:
 
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtGui import QIcon, QPixmap, QPainter
 from functools import partial
+from PyQt5.QtSvg import QSvgRenderer
+
 
 import sys
 import os
@@ -30,6 +33,16 @@ from .workers import GridWorker
 import logging
 logger = logging.getLogger(__name__)
 
+def svg_icon(path, size=24):
+    renderer = QSvgRenderer(path)
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+
+    p = QPainter(pm)
+    renderer.render(p)
+    p.end()
+
+    return QIcon(pm)
 
 class MainWindow(QtWidgets.QMainWindow):
     """Main application window for the scan loader and hole filler tool.
@@ -309,10 +322,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions["show_mask"] = QtWidgets.QAction("Show/hide the circle mask", self)
         self.actions["show_rmask"] = QtWidgets.QAction("Show/hide the rectangle mask", self)
 
-
-
         self.actions["open"].setIcon(QIcon(resource_path("icons/icons8-open-file1-50.png")))
         self.actions["save_scan"].setIcon(QIcon(resource_path("icons/icons8-save1-50.png")))
+        # self.actions["save_scan"].setIcon(svg_icon("icons/save.svg", 20))
         self.actions["save_multi"].setIcon(QIcon(resource_path("icons/icons8-save2-50.png")))
         self.actions["repair"].setIcon(QIcon(resource_path("icons/icons8-job-50.png")))
         self.actions["flipUD"].setIcon(QIcon(resource_path("icons/flipUD.png")))
@@ -327,6 +339,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions["profile"].setIcon(QIcon(resource_path("icons/icons8-graph-50.png")))
         self.actions["about"].setIcon(QIcon(resource_path("icons/icons8-about-50.png")))
         self.actions["exit"].setIcon(QIcon(resource_path("icons/icons8-exit-50.png")))
+
+        self.actions["filter"].setIcon(QIcon(resource_path("icons/icons8-filter-50.png")))
+        self.actions["morphology"].setIcon(QIcon(resource_path("icons/icons8-filter2-50.png")))
+        self.actions["transform"].setIcon(QIcon(resource_path("icons/icons8-transform-64.png")))
 
         self.actions["colormap"].setCheckable(True)
         self.actions["colormap"].setChecked(False)
@@ -451,6 +467,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.actions["about"])
         self.toolbar.addAction(self.actions["exit"])
+
+        self.toolbar.setStyleSheet("QToolButton { color: #222; }")
+
 
     def create_circle_mask(self, shape, center, radius):
         """Creates a boolean mask for a circle within a 2D array.
