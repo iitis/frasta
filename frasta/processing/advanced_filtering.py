@@ -19,7 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=None, use_opencv=True):
+def bilateral_filter(grid, sigma_spatial, sigma_range, dx=1.0, dy=1.0, mask=None, use_opencv=True):
     """Applies bilateral filtering for edge-preserving smoothing.
     
     Bilateral filtering combines spatial proximity (Gaussian in space) with 
@@ -39,8 +39,8 @@ def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=
         sigma_range (float): Range (height) Gaussian standard deviation.
             Controls how much height difference is tolerated for smoothing.
             Smaller values preserve edges more strongly.
-        px_x (float, optional): Pixel size in x-direction. Defaults to 1.0.
-        px_y (float, optional): Pixel size in y-direction. Defaults to 1.0.
+        dx (float, optional): Pixel size in x-direction. Defaults to 1.0.
+        dy (float, optional): Pixel size in y-direction. Defaults to 1.0.
         mask (np.ndarray, optional): Boolean mask indicating region to filter.
             If None, filters entire grid. Defaults to None.
         use_opencv (bool, optional): Use OpenCV if available. Defaults to True.
@@ -67,8 +67,8 @@ def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=
     grid = grid.copy()
     
     # Convert spatial sigma to pixels
-    sigma_x_pixels = sigma_spatial / px_x
-    sigma_y_pixels = sigma_spatial / px_y
+    sigma_x_pixels = sigma_spatial / dx
+    sigma_y_pixels = sigma_spatial / dy
     sigma_spatial_pixels = (sigma_x_pixels + sigma_y_pixels) / 2
     
     # Warn if sigma is too small
@@ -108,7 +108,7 @@ def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=
         logger.info("bilateral_filter: OpenCV not available, using pure Python (slow)")
     
     return _bilateral_filter_python(grid, work_grid, mask, sigma_spatial_pixels,
-                                   sigma_spatial, sigma_range, px_x, px_y, 
+                                   sigma_spatial, sigma_range, dx, dy, 
                                    kernel_radius, kernel_size)
 
 
@@ -157,7 +157,7 @@ def _bilateral_filter_opencv_nan(work_grid, sigma_spatial_pixels, sigma_range, k
 
 
 def _bilateral_filter_python(grid, work_grid, mask, sigma_spatial_pixels, sigma_spatial, 
-                             sigma_range, px_x, px_y, kernel_radius, kernel_size):
+                             sigma_range, dx, dy, kernel_radius, kernel_size):
     """Pure Python bilateral filter implementation (slow but no dependencies)."""
     # Apply mask if provided
     if mask is not None:
@@ -189,7 +189,7 @@ def _bilateral_filter_python(grid, work_grid, mask, sigma_spatial_pixels, sigma_
             y_coords, x_coords = np.ogrid[i_min:i_max, j_min:j_max]
             
             # Spatial weights (Gaussian)
-            spatial_dist_sq = ((x_coords - j) * px_x) ** 2 + ((y_coords - i) * px_y) ** 2
+            spatial_dist_sq = ((x_coords - j) * dx) ** 2 + ((y_coords - i) * dy) ** 2
             spatial_weights = np.exp(-spatial_dist_sq / (2 * sigma_spatial ** 2))
             
             # Range weights (Gaussian on height differences)
@@ -211,7 +211,7 @@ def _bilateral_filter_python(grid, work_grid, mask, sigma_spatial_pixels, sigma_
     return result
 
 
-def median_filter_nan_aware(grid, size, px_x=1.0, px_y=1.0, mask=None):
+def median_filter_nan_aware(grid, size, dx=1.0, dy=1.0, mask=None):
     """Applies median filtering for robust outlier removal.
     
     Median filters are non-linear and robust to outliers and spikes.
@@ -221,8 +221,8 @@ def median_filter_nan_aware(grid, size, px_x=1.0, px_y=1.0, mask=None):
     Args:
         grid (np.ndarray or None): 2D array to filter.
         size (float): Filter kernel size in physical units.
-        px_x (float, optional): Pixel size in x-direction. Defaults to 1.0.
-        px_y (float, optional): Pixel size in y-direction. Defaults to 1.0.
+        dx (float, optional): Pixel size in x-direction. Defaults to 1.0.
+        dy (float, optional): Pixel size in y-direction. Defaults to 1.0.
         mask (np.ndarray, optional): Boolean mask indicating region to filter.
             If None, filters entire grid. Defaults to None.
             
@@ -237,8 +237,8 @@ def median_filter_nan_aware(grid, size, px_x=1.0, px_y=1.0, mask=None):
         return None
     
     # Convert physical size to pixel units
-    size_x = size / px_x
-    size_y = size / px_y
+    size_x = size / dx
+    size_y = size / dy
     
     # Kernel size must be odd integer
     kernel_x = int(np.round(size_x))
@@ -268,7 +268,7 @@ def median_filter_nan_aware(grid, size, px_x=1.0, px_y=1.0, mask=None):
     return result
 
 
-def morphological_opening(grid, size, px_x=1.0, px_y=1.0, mask=None):
+def morphological_opening(grid, size, dx=1.0, dy=1.0, mask=None):
     """Applies morphological opening (erosion followed by dilation).
     
     Opening removes small peaks, spikes, and bright outliers while smoothing
@@ -277,8 +277,8 @@ def morphological_opening(grid, size, px_x=1.0, px_y=1.0, mask=None):
     Args:
         grid (np.ndarray or None): 2D array to filter.
         size (float): Structuring element size in physical units.
-        px_x (float, optional): Pixel size in x-direction. Defaults to 1.0.
-        px_y (float, optional): Pixel size in y-direction. Defaults to 1.0.
+        dx (float, optional): Pixel size in x-direction. Defaults to 1.0.
+        dy (float, optional): Pixel size in y-direction. Defaults to 1.0.
         mask (np.ndarray, optional): Boolean mask indicating region to filter.
             If None, filters entire grid. Defaults to None.
             
@@ -293,8 +293,8 @@ def morphological_opening(grid, size, px_x=1.0, px_y=1.0, mask=None):
         return None
     
     # Convert to pixels
-    size_x = size / px_x
-    size_y = size / px_y
+    size_x = size / dx
+    size_y = size / dy
     
     kernel_x = int(np.round(size_x))
     kernel_y = int(np.round(size_y))
@@ -320,7 +320,7 @@ def morphological_opening(grid, size, px_x=1.0, px_y=1.0, mask=None):
     return result
 
 
-def morphological_closing(grid, size, px_x=1.0, px_y=1.0, mask=None):
+def morphological_closing(grid, size, dx=1.0, dy=1.0, mask=None):
     """Applies morphological closing (dilation followed by erosion).
     
     Closing removes small valleys, pits, and dark outliers while smoothing
@@ -329,8 +329,8 @@ def morphological_closing(grid, size, px_x=1.0, px_y=1.0, mask=None):
     Args:
         grid (np.ndarray or None): 2D array to filter.
         size (float): Structuring element size in physical units.
-        px_x (float, optional): Pixel size in x-direction. Defaults to 1.0.
-        px_y (float, optional): Pixel size in y-direction. Defaults to 1.0.
+        dx (float, optional): Pixel size in x-direction. Defaults to 1.0.
+        dy (float, optional): Pixel size in y-direction. Defaults to 1.0.
         mask (np.ndarray, optional): Boolean mask indicating region to filter.
             If None, filters entire grid. Defaults to None.
             
@@ -345,8 +345,8 @@ def morphological_closing(grid, size, px_x=1.0, px_y=1.0, mask=None):
         return None
     
     # Convert to pixels
-    size_x = size / px_x
-    size_y = size / px_y
+    size_x = size / dx
+    size_y = size / dy
     
     kernel_x = int(np.round(size_x))
     kernel_y = int(np.round(size_y))
@@ -372,7 +372,7 @@ def morphological_closing(grid, size, px_x=1.0, px_y=1.0, mask=None):
     return result
 
 
-def robust_gaussian_filter(grid, sigma, px_x=1.0, px_y=1.0, mask=None, iterations=3, threshold=3.0):
+def robust_gaussian_filter(grid, sigma, dx=1.0, dy=1.0, mask=None, iterations=3, threshold=3.0):
     """Applies robust Gaussian filtering with iterative outlier rejection.
     
     This filter iteratively applies Gaussian smoothing while excluding outliers
@@ -382,8 +382,8 @@ def robust_gaussian_filter(grid, sigma, px_x=1.0, px_y=1.0, mask=None, iteration
     Args:
         grid (np.ndarray or None): 2D array to filter.
         sigma (float): Gaussian standard deviation in physical units.
-        px_x (float, optional): Pixel size in x-direction. Defaults to 1.0.
-        px_y (float, optional): Pixel size in y-direction. Defaults to 1.0.
+        dx (float, optional): Pixel size in x-direction. Defaults to 1.0.
+        dy (float, optional): Pixel size in y-direction. Defaults to 1.0.
         mask (np.ndarray, optional): Boolean mask indicating region to filter.
         iterations (int, optional): Number of outlier rejection iterations. Defaults to 3.
         threshold (float, optional): Number of standard deviations for outlier threshold.
@@ -402,8 +402,8 @@ def robust_gaussian_filter(grid, sigma, px_x=1.0, px_y=1.0, mask=None, iteration
     from scipy.ndimage import gaussian_filter
     
     # Convert sigma to pixels
-    sigma_x = sigma / px_x
-    sigma_y = sigma / px_y
+    sigma_x = sigma / dx
+    sigma_y = sigma / dy
     
     grid_work = grid.copy()
     if mask is not None:

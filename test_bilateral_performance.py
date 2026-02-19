@@ -25,7 +25,7 @@ for size in sizes:
     print("  🚀 OpenCV version...", end=" ", flush=True)
     start = time.time()
     result_cv = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, 
-                                 px_x=1.0, px_y=1.0, use_opencv=True)
+                                 dx=1.0, dy=1.0, use_opencv=True)
     time_cv = time.time() - start
     print(f"{time_cv:.4f}s")
     
@@ -34,7 +34,7 @@ for size in sizes:
         print("  🐌 Python version...", end=" ", flush=True)
         start = time.time()
         result_py = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, 
-                                     px_x=1.0, px_y=1.0, use_opencv=False)
+                                     dx=1.0, dy=1.0, use_opencv=False)
         time_py = time.time() - start
         print(f"{time_py:.4f}s")
         

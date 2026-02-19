@@ -33,7 +33,7 @@ except ImportError:
     HAS_OPENCV = False
 
 # 4. Local application imports (relative)
-from ..core import GridData
+from ..core import Surface
 from ..processing import bilateral_filter, median_filter
 from .dialogs import FilterDialog
 from .workers import GridWorker
@@ -91,8 +91,8 @@ from scipy import *            ❌ (star imports)
 
 ```python
 # In frasta/processing/advanced_filtering.py
-from ..core import GridData           ✅ (relative)
-from frasta.core import GridData      ❌ (absolute in package)
+from ..core import Surface           ✅ (relative)
+from frasta.core import Surface      ❌ (absolute in package)
 ```
 
 ### From External Code (Use Absolute)

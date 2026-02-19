@@ -36,23 +36,23 @@ print("Testing filter functions...")
 print("="*60)
 
 print("\n1. Bilateral filter...")
-result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, px_x=1.0, px_y=1.0)
+result = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, dx=1.0, dy=1.0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n2. Median filter...")
-result = median_filter_nan_aware(grid, size=5, px_x=1.0, px_y=1.0)
+result = median_filter_nan_aware(grid, size=5, dx=1.0, dy=1.0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n3. Morphological opening...")
-result = morphological_opening(grid, size=5, px_x=1.0, px_y=1.0)
+result = morphological_opening(grid, size=5, dx=1.0, dy=1.0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n4. Morphological closing...")
-result = morphological_closing(grid, size=5, px_x=1.0, px_y=1.0)
+result = morphological_closing(grid, size=5, dx=1.0, dy=1.0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n5. Robust Gaussian filter...")
-result = robust_gaussian_filter(grid, sigma=2.0, px_x=1.0, px_y=1.0, iterations=3, threshold=3.0)
+result = robust_gaussian_filter(grid, sigma=2.0, dx=1.0, dy=1.0, iterations=3, threshold=3.0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n" + "="*60)
@@ -89,17 +89,17 @@ xi = np.arange(w) * 1.0
 yi = np.arange(h) * 1.0
 
 print("\n10. Rotate grid...")
-result, new_xi, new_yi, px_x, px_y = rotate_grid(grid, angle_degrees=45, xi=xi, yi=yi, px_x=1.0, px_y=1.0, order=3)
+result, new_xi, new_yi, px_x, px_y = rotate_grid(grid, angle_degrees=45, xi=xi, yi=yi, dx=1.0, dy=1.0, order=3)
 print(f"   ✓ Result shape: {result.shape}")
 print(f"   ✓ Coordinate shapes: xi={new_xi.shape}, yi={new_yi.shape}")
 
 print("\n11. Rescale grid...")
-result, new_xi, new_yi, px_x, px_y = rescale_grid(grid, scale_factor=0.5, xi=xi, yi=yi, px_x=1.0, px_y=1.0, order=3)
+result, new_xi, new_yi, px_x, px_y = rescale_grid(grid, scale_factor=0.5, xi=xi, yi=yi, dx=1.0, dy=1.0, order=3)
 print(f"   ✓ Result shape: {result.shape} (downsampled from {grid.shape})")
 print(f"   ✓ New pixel size: {px_x:.2f} x {px_y:.2f}")
 
 print("\n12. Crop to valid region...")
-result, new_xi, new_yi, px_x, px_y = crop_to_valid_region(grid, xi=xi, yi=yi, px_x=1.0, px_y=1.0, margin=0)
+result, new_xi, new_yi, px_x, px_y = crop_to_valid_region(grid, xi=xi, yi=yi, dx=1.0, dy=1.0, margin=0)
 print(f"   ✓ Result shape: {result.shape}")
 
 print("\n" + "="*60)

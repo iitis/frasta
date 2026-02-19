@@ -70,7 +70,7 @@ def my_processing_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
 
 ### Key Rules
 
-1. **First parameter is always `grid`** (np.ndarray, not GridData)
+1. **First parameter is always `grid`** (np.ndarray, not Surface)
 2. **Algorithm parameters come next** (required, no defaults)
 3. **Physical parameters** (`px_x`, `px_y`) always have default=1.0
 4. **`mask` parameter always last**, default=None
@@ -1060,7 +1060,7 @@ def level_by_plane(grid, mask=None, method='least_squares'):
 Before submitting a new processing function, verify:
 
 - [ ] Function signature follows standard pattern
-- [ ] Accepts `np.ndarray`, not `GridData`
+- [ ] Accepts `np.ndarray`, not `Surface`
 - [ ] Returns same type as input (None → None, array → array)
 - [ ] Handles NaN values gracefully (preserves or fills appropriately)
 - [ ] Implements `mask` parameter correctly
@@ -1101,8 +1101,8 @@ logger = logging.getLogger(__name__)
 
 ## Questions or Edge Cases?
 
-**Q: Should I accept GridData objects directly?**  
-**A:** No. Processing functions work with `np.ndarray`. GUI converts `GridData.grid` to array before calling.
+**Q: Should I accept Surface objects directly?**  
+**A:** No. Processing functions work with `np.ndarray`. GUI converts `Surface.height` to array before calling.
 
 **Q: What if my function needs to return multiple outputs?**  
 **A:** Return tuple:

@@ -49,7 +49,7 @@ def test_bilateral_filter(sample_grid):
     grid, xi, yi, px_x, px_y = sample_grid
     
     filtered = bilateral_filter(grid, sigma_spatial=1.0, sigma_range=0.5, 
-                                px_x=px_x, px_y=px_y)
+                                dx=px_x, dy=px_y)
     
     assert filtered is not None
     assert filtered.shape == grid.shape
@@ -66,7 +66,7 @@ def test_median_filter(sample_grid):
     grid_with_spike[25, 25] = 100
     
     filtered = median_filter_nan_aware(grid_with_spike, size=1.0, 
-                                      px_x=px_x, px_y=px_y)
+                                      dx=px_x, dy=px_y)
     
     assert filtered is not None
     assert filtered.shape == grid.shape
@@ -78,7 +78,7 @@ def test_morphological_opening(sample_grid):
     """Test morphological opening."""
     grid, xi, yi, px_x, px_y = sample_grid
     
-    filtered = morphological_opening(grid, size=0.5, px_x=px_x, px_y=px_y)
+    filtered = morphological_opening(grid, size=0.5, dx=px_x, dy=px_y)
     
     assert filtered is not None
     assert filtered.shape == grid.shape
@@ -88,7 +88,7 @@ def test_morphological_closing(sample_grid):
     """Test morphological closing."""
     grid, xi, yi, px_x, px_y = sample_grid
     
-    filtered = morphological_closing(grid, size=0.5, px_x=px_x, px_y=px_y)
+    filtered = morphological_closing(grid, size=0.5, dx=px_x, dy=px_y)
     
     assert filtered is not None
     assert filtered.shape == grid.shape
@@ -104,7 +104,7 @@ def test_robust_gaussian_filter(sample_grid):
     grid_with_outliers[20, 20] = -50
     
     filtered = robust_gaussian_filter(grid_with_outliers, sigma=1.0, 
-                                     px_x=px_x, px_y=px_y, iterations=2)
+                                     dx=px_x, dy=px_y, iterations=2)
     
     assert filtered is not None
     assert filtered.shape == grid.shape

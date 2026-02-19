@@ -24,7 +24,7 @@ import os
 from .dialogs import (ProfileViewer, OverlayViewer, AboutDialog,
                       FilterDialog, MorphologyDialog, TransformDialog, RegistrationDialog)
 from .scan_tab import ScanTab
-from ..core import GridData
+from ..core import Surface
 from .viewers import show_3d_viewer
 from ..utils import resource_path
 from ..io import load_csv_data, load_npz_data, load_h5_data, load_stl_data, save_npz, save_h5, save_stl, suggest_units
@@ -512,9 +512,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def view3d(self):
         if tab := self.current_tab():
             # Przekaż rozmiary pikseli dla prawidłowych proporcji
-            px_x = getattr(tab, 'px_x', 1.0)
-            px_y = getattr(tab, 'px_y', 1.0)
-            show_3d_viewer(tab.grid, show_controls=False, pixel_size_x=px_x, pixel_size_y=px_y)
+            dx = getattr(tab, 'dx', 1.0)
+            dy = getattr(tab, 'dy', 1.0)
+            show_3d_viewer(tab.grid, show_controls=False, pixel_size_x=dx, pixel_size_y=dy)
 
 
     def toggle_colormap_current_tab(self):
@@ -677,11 +677,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_npz(self, fname):
         try:
             scans = load_npz_data(fname)
-            for name, grid, xi, yi, px_x, px_y in scans:
+            for name, grid, xi, yi, dx, dy in scans:
                 tab = ScanTab()
                 self.tabs.addTab(tab, name)
                 self.tabs.setCurrentWidget(tab)
-                tab.set_data(grid, xi, yi, px_x, px_y)
+                tab.set_data(grid, xi, yi, dx, dy)
             self.add_to_recent_files(fname)
             return True
         except ValueError as e:
@@ -724,12 +724,12 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.show()
         
         try:
-            grid, xi, yi, px_x, px_y = load_stl_data(
+            grid, xi, yi, dx, dy = load_stl_data(
                 fname,
                 resolution=resolution,
                 progress_callback=dlg.setValue
             )
-            tab.set_data(grid, xi, yi, px_x, px_y)
+            tab.set_data(grid, xi, yi, dx, dy)
             dlg.setValue(100)
         except Exception as e:
             dlg.close()
@@ -742,11 +742,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_h5(self, fname):
         try:
             scans = load_h5_data(fname)
-            for name, grid, xi, yi, px_x, px_y in scans:
+            for name, grid, xi, yi, dx, dy in scans:
                 tab = ScanTab()
                 self.tabs.addTab(tab, str(name))
                 self.tabs.setCurrentWidget(tab)
-                tab.set_data(grid, xi, yi, px_x, px_y)
+                tab.set_data(grid, xi, yi, dx, dy)
             self.add_to_recent_files(fname)
             return True
         except ValueError as e:
@@ -813,10 +813,11 @@ class MainWindow(QtWidgets.QMainWindow):
             fname += ".stl"
 
         try:
-            # Prepare scans data: list of (name, grid, xi, yi, px_x, px_y)
+            # Prepare scans data: list of (name, Surface)
             scans = []
             for name, tab in tabs:
-                scans.append((name, tab.grid, tab.xi, tab.yi, tab.px_x, tab.px_y))
+                surface = tab.getGridData()
+                scans.append((name, surface))
             
             if fname.endswith(".npz"):
                 save_npz(fname, scans)
@@ -829,8 +830,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         self, "Multiple scans",
                         "STL format can only save a single scan.\nOnly the first scan will be saved."
                     )
-                name, grid, xi, yi, px_x, px_y = scans[0]
-                save_stl(fname, grid, xi, yi, binary=True)
+                name, surface = scans[0]
+                save_stl(fname, surface, binary=True)
 
             QtWidgets.QMessageBox.information(self, "Saved", f"Scan saved to: {fname}")
 
@@ -925,7 +926,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Za mało skanów", "Musisz mieć przynajmniej 2 skany!")
             return
 
-        def receive_aligned_grids(scan1_aligned_data : GridData, scan2_aligned_data : GridData, idx1=None, idx2=None):
+        def receive_aligned_grids(scan1_aligned_data : Surface, scan2_aligned_data : Surface, idx1=None, idx2=None):
             b = idx1 is not None and idx2 is not None
             if b:
                 msg = QtWidgets.QMessageBox(self)
@@ -1061,8 +1062,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._profile_viewer.set_data(
             grid1, grid2,
-            tab1.px_x, tab1.px_y,
-            tab2.px_x, tab2.px_y
+            tab1.dx, tab1.dy,
+            tab2.dx, tab2.dy
         )
         self._profile_viewer.show()
         self._profile_viewer.raise_()
@@ -1099,36 +1100,36 @@ class MainWindow(QtWidgets.QMainWindow):
                     tab.grid, 
                     sigma_spatial=params['sigma_spatial'],
                     sigma_range=params['sigma_range'],
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0
                 )
             elif filter_type == "median":
                 result = median_filter_nan_aware(
                     tab.grid, 
                     size=params['size'],
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0
                 )
             elif filter_type == "opening":
                 result = morphological_opening(
                     tab.grid, 
                     size=params['size'],
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0
                 )
             elif filter_type == "closing":
                 result = morphological_closing(
                     tab.grid, 
                     size=params['size'],
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0
                 )
             elif filter_type == "robust_gaussian":
                 result = robust_gaussian_filter(
                     tab.grid,
                     sigma=params['sigma'],
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0,
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0,
                     iterations=params['max_iterations'],
                     threshold=params['outlier_threshold']
                 )
@@ -1229,50 +1230,50 @@ class MainWindow(QtWidgets.QMainWindow):
             # Ensure coordinate arrays exist
             if not hasattr(tab, 'xi') or tab.xi is None:
                 h, w = tab.grid.shape
-                tab.xi = np.arange(w) * (tab.px_x or 1.0)
-                tab.yi = np.arange(h) * (tab.px_y or 1.0)
+                tab.xi = np.arange(w) * (tab.dx or 1.0)
+                tab.yi = np.arange(h) * (tab.dy or 1.0)
             
             if transform_type == "rotate":
-                result, new_xi, new_yi, new_px_x, new_px_y = rotate_grid(
+                result, new_xi, new_yi, new_dx, new_dy = rotate_grid(
                     tab.grid,
                     angle_degrees=params['angle'],
                     xi=tab.xi,
                     yi=tab.yi,
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0,
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0,
                     order=params.get('order', 3)
                 )
                 tab.xi = new_xi
                 tab.yi = new_yi
-                tab.px_x = new_px_x
-                tab.px_y = new_px_y
+                tab.dx = new_dx
+                tab.dy = new_dy
             elif transform_type == "rescale":
-                result, new_xi, new_yi, new_px_x, new_px_y = rescale_grid(
+                result, new_xi, new_yi, new_dx, new_dy = rescale_grid(
                     tab.grid,
                     scale_factor=params['scale'],
                     xi=tab.xi,
                     yi=tab.yi,
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0,
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0,
                     order=params.get('order', 3)
                 )
                 tab.xi = new_xi
                 tab.yi = new_yi
-                tab.px_x = new_px_x
-                tab.px_y = new_px_y
+                tab.dx = new_dx
+                tab.dy = new_dy
             elif transform_type == "crop":
-                result, new_xi, new_yi, new_px_x, new_px_y = crop_to_valid_region(
+                result, new_xi, new_yi, new_dx, new_dy = crop_to_valid_region(
                     tab.grid,
                     xi=tab.xi,
                     yi=tab.yi,
-                    px_x=tab.px_x or 1.0,
-                    px_y=tab.px_y or 1.0,
+                    dx=tab.dx or 1.0,
+                    dy=tab.dy or 1.0,
                     margin=params.get('margin', 0)
                 )
                 tab.xi = new_xi
                 tab.yi = new_yi
-                tab.px_x = new_px_x
-                tab.px_y = new_px_y
+                tab.dx = new_dx
+                tab.dy = new_dy
             
             tab.grid = result
             tab.update_histogram()
@@ -1282,7 +1283,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self, "Success", 
                 f"Transform applied successfully!\n"
                 f"New shape: {result.shape}\n"
-                f"Pixel size: {tab.px_x:.3f} x {tab.px_y:.3f}"
+                f"Pixel size: {tab.dx:.3f} x {tab.dy:.3f}"
             )
             
         except Exception as e:
@@ -1353,17 +1354,17 @@ class MainWindow(QtWidgets.QMainWindow):
             # Auto-generate coordinate arrays if missing
             h, w = mov_tab.grid.shape
             if not hasattr(mov_tab, 'xi') or mov_tab.xi is None:
-                mov_tab.xi = np.arange(w) * (mov_tab.px_x or 1.0)
+                mov_tab.xi = np.arange(w) * (mov_tab.dx or 1.0)
             if not hasattr(mov_tab, 'yi') or mov_tab.yi is None:
-                mov_tab.yi = np.arange(h) * (mov_tab.px_y or 1.0)
+                mov_tab.yi = np.arange(h) * (mov_tab.dy or 1.0)
             
             # Apply registration to moving surface
-            registered, new_xi, new_yi, new_px_x, new_px_y = apply_registration(
+            registered, new_xi, new_yi, new_dx, new_dy = apply_registration(
                 mov_tab.grid,
                 mov_tab.xi,
                 mov_tab.yi,
-                mov_tab.px_x or 1.0,
-                mov_tab.px_y or 1.0,
+                mov_tab.dx or 1.0,
+                mov_tab.dy or 1.0,
                 params['translation'],
                 params.get('rotation', 0.0)
             )
@@ -1372,8 +1373,8 @@ class MainWindow(QtWidgets.QMainWindow):
             mov_tab.grid = registered
             mov_tab.xi = new_xi
             mov_tab.yi = new_yi
-            mov_tab.px_x = new_px_x
-            mov_tab.px_y = new_px_y
+            mov_tab.dx = new_dx
+            mov_tab.dy = new_dy
             
             # Check if registration resulted in valid data
             valid_data = ~np.isnan(registered)

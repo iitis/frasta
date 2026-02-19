@@ -55,8 +55,8 @@ def demo_filters():
     px = x[1] - x[0]
     
     # Apply different filters
-    bilateral = bilateral_filter(Z, sigma_spatial=2.0, sigma_range=5.0, px_x=px, px_y=px)
-    median = median_filter_nan_aware(Z, size=2.0, px_x=px, px_y=px)
+    bilateral = bilateral_filter(Z, sigma_spatial=2.0, sigma_range=5.0, dx=px, dy=px)
+    median = median_filter_nan_aware(Z, size=2.0, dx=px, dy=px)
     
     # Plot comparison
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -252,7 +252,7 @@ def demo_edge_preservation():
     # Compare filters
     from frasta.processing import nan_aware_gaussian
     gaussian = nan_aware_gaussian(Z, sigma=2.0, mask=None)
-    bilateral = bilateral_filter(Z, sigma_spatial=2.0, sigma_range=5.0, px_x=px, px_y=px)
+    bilateral = bilateral_filter(Z, sigma_spatial=2.0, sigma_range=5.0, dx=px, dy=px)
     
     # Plot cross-sections
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))

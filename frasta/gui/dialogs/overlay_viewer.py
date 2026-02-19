@@ -9,7 +9,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from ...core import GridData        
+from ...core import Surface        
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.
@@ -19,20 +19,20 @@ class OverlayViewer(QtWidgets.QWidget):
     modes (blinking, transparency).
     
     Attributes:
-        scan1_data (GridData): First scan dataset.
-        scan2_data (GridData): Second scan dataset.
+        scan1_data (Surface): First scan dataset.
+        scan2_data (Surface): Second scan dataset.
         img1 (pg.ImageItem): Image item for first scan.
         img2 (pg.ImageItem): Image item for second scan (transformable).
         diff_view (pg.ImageView): View displaying the difference map.
         on_accept (callable, optional): Callback when alignment is accepted.
     """
     
-    def __init__(self, scan1_data: GridData, scan2_data: GridData, on_accept=None, parent=None):
+    def __init__(self, scan1_data: Surface, scan2_data: Surface, on_accept=None, parent=None):
         """Initialize the overlay viewer.
         
         Args:
-            scan1_data (GridData): First scan to display (reference).
-            scan2_data (GridData): Second scan to display (adjustable).
+            scan1_data (Surface): First scan to display (reference).
+            scan2_data (Surface): Second scan to display (adjustable).
             on_accept (callable, optional): Callback function called when accepting alignment.
             parent (QWidget, optional): Parent widget. Defaults to None.
         """
@@ -46,8 +46,8 @@ class OverlayViewer(QtWidgets.QWidget):
         self.scan1_data = scan1_data
         self.scan2_data = scan2_data
 
-        self.scan1 = scan1_data.grid
-        self.scan2 = scan2_data.grid
+        self.scan1 = scan1_data.height
+        self.scan2 = scan2_data.height
 
         self._orig_scan1 = self.scan1.copy()
         self._orig_scan2 = self.scan2.copy()
@@ -304,22 +304,22 @@ class OverlayViewer(QtWidgets.QWidget):
         h = min(self.scan1.shape[0], scan2_trans.shape[0])
         w = min(self.scan1.shape[1], scan2_trans.shape[1])
 
-        data1 = GridData(
-            grid=self.scan1[:h, :w],
-            xi=self.scan1_data.xi[:w],
-            yi=self.scan1_data.yi[:h],
-            px_x=self.scan1_data.px_x,
-            px_y=self.scan1_data.px_y,
+        data1 = Surface(
+            height=self.scan1[:h, :w],
+            dx=self.scan1_data.dx,
+            dy=self.scan1_data.dy,
+            x0=self.scan1_data.x0,
+            y0=self.scan1_data.y0,
             vmin=self.vmin1,
             vmax=self.vmax1
         )
 
-        data2 = GridData(
-            grid=scan2_trans[:h, :w],
-            xi=self.scan1_data.xi[:w],  # uwaga: zakładamy, że scan2 został przetransformowany do układu scan1
-            yi=self.scan1_data.yi[:h],
-            px_x=self.scan1_data.px_x,
-            px_y=self.scan1_data.px_y,
+        data2 = Surface(
+            height=scan2_trans[:h, :w],
+            dx=self.scan1_data.dx,
+            dy=self.scan1_data.dy,
+            x0=self.scan1_data.x0,
+            y0=self.scan1_data.y0,
             vmin=self.vmin2,
             vmax=self.vmax2
         )

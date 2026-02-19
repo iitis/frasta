@@ -6,22 +6,34 @@
 
 ---
 
-## GridData Usage
+## Surface Usage (Replaces GridData)
 
-### What GridData Is
+### What Surface Is
 
-`GridData` is a **simple container** for scan data:
+`Surface` is a **unified container** for 2D surface data:
 
 ```python
-class GridData:
-    def __init__(self, grid, xi, yi, px_x, px_y, vmin=None, vmax=None):
-        self.grid = grid      # 2D numpy array
-        self.xi = xi          # 1D x-coordinates
-        self.yi = yi          # 1D y-coordinates
-        self.px_x = px_x      # Pixel size in x (μm)
-        self.px_y = px_y      # Pixel size in y (μm)
+class Surface:
+    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="µm", 
+                 metadata=None, vmin=None, vmax=None):
+        self.height = height  # 2D numpy array
+        self.dx = dx          # Pixel size in x (µm)
+        self.dy = dy          # Pixel size in y (µm)
+        self.x0 = x0          # Origin/offset for X coordinates
+        self.y0 = y0          # Origin/offset for Y coordinates
+        self.mask = mask      # Boolean mask (optional)
+        self.unit = unit      # Physical unit
+        self.metadata = {}    # Additional metadata
         self.vmin = vmin      # Display range min (optional)
         self.vmax = vmax      # Display range max (optional)
+    
+    @property
+    def xi(self):  # Generated from x0, dx and shape
+        return self.x0 + np.arange(self.nx) * self.dx
+    
+    @property
+    def yi(self):  # Generated from y0, dy and shape
+        return self.y0 + np.arange(self.ny) * self.dy
 ```
 
 ### When to Use
@@ -36,17 +48,39 @@ class GridData:
 - ❌ Business logic / algorithms
 - ❌ Complex state management
 
-### Extending GridData
+### Spatial Coordinates
+
+`Surface` preserves spatial positioning through `x0` and `y0`:
+
+```python
+# Example: Data starting at X=10.5, Y=20.0
+surf = Surface(
+    height=data,
+    dx=0.5, dy=0.5,
+    x0=10.5, y0=20.0
+)
+
+# Coordinate arrays respect the origin
+print(surf.xi)  # [10.5, 11.0, 11.5, 12.0, ...]
+print(surf.yi)  # [20.0, 20.5, 21.0, 21.5, ...]
+```
+
+**Important:** Always preserve `x0` and `y0` when:
+- Loading data from files (CSV, NPZ, H5)
+- Creating Surface from real-world measurements
+- Aligning/comparing multiple scans
+
+### Extending Surface
 
 If you need additional fields:
 
 ```python
-class ExtendedGridData(GridData):
-    """Extended version with metadata."""
+class ExtendedSurface(Surface):
+    """Extended version with custom metadata."""
     
-    def __init__(self, grid, xi, yi, px_x, px_y, vmin=None, vmax=None, metadata=None):
-        super().__init__(grid, xi, yi, px_x, px_y, vmin, vmax)
-        self.metadata = metadata or {}
+    def __init__(self, height, dx, dy, custom_field=None, **kwargs):
+        super().__init__(height, dx, dy, **kwargs)
+        self.custom_field = custom_field
 ```
 
 ---

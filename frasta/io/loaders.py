@@ -76,8 +76,8 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
             - grid: 2D numpy array of Z values
             - xi: 1D array of X coordinates
             - yi: 1D array of Y coordinates
-            - px_x: Pixel size in X
-            - px_y: Pixel size in Y
+            - dx: Pixel size in X
+            - dy: Pixel size in Y
     """
     chunk_size = 100_000
     total = sum(1 for _ in open(fname, encoding="utf-8"))
@@ -128,23 +128,23 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
     else:
         logger.info("Używam Z w mikrometrach - brak konwersji.")
 
-    px_x = np.median(dx[dx > 0]).round(2)
-    px_y = np.median(dy[dy > 0]).round(2)
+    dx = np.median(dx[dx > 0]).round(2)
+    dy = np.median(dy[dy > 0]).round(2)
 
-    logger.debug(f"px_x: {px_x}, px_y: {px_y}")
+    logger.debug(f"px_x: {dx}, px_y: {dy}")
 
     x_min, x_max = x.min(), x.max()
     y_min, y_max = y.min(), y.max()
-    grid_size_x = int((x_max - x_min) / px_x) + 1
-    grid_size_y = int((y_max - y_min) / px_y) + 1
+    grid_size_x = int((x_max - x_min) / dx) + 1
+    grid_size_y = int((y_max - y_min) / dy) + 1
 
     grid = np.full((grid_size_y, grid_size_x), np.nan, dtype=np.float64)
     counts = np.zeros_like(grid, dtype=np.int32)
     N = len(x)
     
     for idx, (xi, yi, zi) in enumerate(zip(x, y, z)):
-        ix = int(round((xi - x_min) / px_x))
-        iy = int(round((yi - y_min) / px_y))
+        ix = int(round((xi - x_min) / dx))
+        iy = int(round((yi - y_min) / dy))
         if 0 <= ix < grid_size_x and 0 <= iy < grid_size_y:
             if np.isnan(grid[iy, ix]):
                 grid[iy, ix] = zi
@@ -162,17 +162,20 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
     if progress_callback:
         progress_callback(100)
     
-    return grid, xi_grid, yi_grid, px_x, px_y
+    return grid, xi_grid, yi_grid, dx, dy
 
 
 def load_npz_data(fname):
     """Loads scan data from NPZ format.
     
+    Supports both new format (height, dx, dy, x0, y0) and legacy format 
+    (grid, px_x, px_y, xi, yi arrays).
+    
     Args:
         fname (str): Path to NPZ file.
         
     Returns:
-        list: List of tuples (name, grid, xi, yi, px_x, px_y) for each scan.
+        list: List of tuples (name, grid, xi, yi, dx, dy) for each scan.
         
     Raises:
         ValueError: If NPZ file doesn't contain grid data.
@@ -185,12 +188,45 @@ def load_npz_data(fname):
     cnt = data['frasta_cnt']
     for i in range(cnt):
         name = str(data[f"name_{i:02}"])
-        grid = data[f"grid_{i:02}"]
-        xi = data[f"xi_{i:02}"]
-        yi = data[f"yi_{i:02}"]
-        px_x = data[f"px_{i:02}"]
-        px_y = data[f"py_{i:02}"]
-        results.append((name, grid, xi, yi, px_x, px_y))
+
+        # Support both naming conventions: new (height) and legacy (grid)
+        if f"height_{i:02}" in data:
+            grid = data[f"height_{i:02}"]
+        elif f"grid_{i:02}" in data:
+            grid = data[f"grid_{i:02}"]
+        else:
+            raise ValueError(f"Missing grid/height data for scan {i}")
+        
+        # Support both naming conventions: new (dx, dy) and legacy (px, py)
+        if f"dx_{i:02}" in data:
+            dx = float(data[f"dx_{i:02}"])
+            dy = float(data[f"dy_{i:02}"])
+        elif f"px_{i:02}" in data:
+            dx = float(data[f"px_{i:02}"])
+            dy = float(data[f"py_{i:02}"])
+        else:
+            raise ValueError(f"Missing pixel size data for scan {i}")
+        
+        # Check for new format with x0, y0
+        if f"x0_{i:02}" in data and f"y0_{i:02}" in data:
+            # New format: reconstruct xi, yi from x0, y0, dx, dy
+            x0 = float(data[f"x0_{i:02}"])
+            y0 = float(data[f"y0_{i:02}"])
+            xi = x0 + np.arange(grid.shape[1]) * dx
+            yi = y0 + np.arange(grid.shape[0]) * dy
+            logger.debug(f"Loaded scan {i} with new format: x0={x0}, y0={y0}")
+        elif f"xi_{i:02}" in data and f"yi_{i:02}" in data:
+            # Legacy format: use stored xi, yi arrays
+            xi = data[f"xi_{i:02}"]
+            yi = data[f"yi_{i:02}"]
+            logger.debug(f"Loaded scan {i} with legacy format: xi[0]={xi[0]}, yi[0]={yi[0]}")
+        else:
+            # Fallback: generate from origin (0, 0)
+            xi = np.arange(grid.shape[1]) * dx
+            yi = np.arange(grid.shape[0]) * dy
+            logger.warning(f"Scan {i} missing coordinate data, assuming origin at (0, 0)")
+
+        results.append((name, grid, xi, yi, dx, dy))
     
     return results
 
@@ -198,11 +234,14 @@ def load_npz_data(fname):
 def load_h5_data(fname):
     """Loads scan data from HDF5 format.
     
+    Supports both new format (height, dx, dy, x0, y0) and legacy format 
+    (grid, px_x, px_y, xi, yi arrays).
+    
     Args:
         fname (str): Path to HDF5 file.
         
     Returns:
-        list: List of tuples (name, grid, xi, yi, px_x, px_y) for each scan.
+        list: List of tuples (name, grid, xi, yi, dx, dy) for each scan.
         
     Raises:
         ValueError: If HDF5 file doesn't contain grid data.
@@ -217,15 +256,45 @@ def load_h5_data(fname):
             group_name = f"tab_{i:02}"
             if group_name not in f:
                 continue
-
+            
             group = f[group_name]
             name = group["name"][()].decode("utf-8")
-            grid = group["grid"][:]
-            xi = group["xi"][:]
-            yi = group["yi"][:]
-            px_x = group["px_x"][()]
-            px_y = group["py_y"][()]
-            results.append((name, grid, xi, yi, px_x, px_y))
+            
+            # Support both naming conventions
+            if "height" in group:
+                grid = group["height"][:]
+            elif "grid" in group:
+                grid = group["grid"][:]
+            else:
+                raise ValueError(f"Missing grid/height data for scan {i}")
+            
+            # Support both naming conventions for pixel size
+            if "dx" in group:
+                dx = float(group["dx"][()])
+                dy = float(group["dy"][()])
+            elif "px_x" in group:
+                dx = float(group["px_x"][()])
+                dy = float(group["px_y"][()])
+            else:
+                raise ValueError(f"Missing pixel size data for scan {i}")
+            
+            # Check for new format with x0, y0
+            if "x0" in group and "y0" in group:
+                x0 = float(group["x0"][()])
+                y0 = float(group["y0"][()])
+                xi = x0 + np.arange(grid.shape[1]) * dx
+                yi = y0 + np.arange(grid.shape[0]) * dy
+                logger.debug(f"Loaded scan {i} with new format: x0={x0}, y0={y0}")
+            elif "xi" in group and "yi" in group:
+                xi = group["xi"][:]
+                yi = group["yi"][:]
+                logger.debug(f"Loaded scan {i} with legacy format")
+            else:
+                xi = np.arange(grid.shape[1]) * dx
+                yi = np.arange(grid.shape[0]) * dy
+                logger.warning(f"Scan {i} missing coordinate data, assuming origin at (0, 0)")
+            
+            results.append((name, grid, xi, yi, dx, dy))
     
     return results
 
@@ -248,8 +317,8 @@ def load_stl_data(fname, resolution=None, progress_callback=None):
             - grid: 2D numpy array of Z values (height map)
             - xi: 1D array of X coordinates
             - yi: 1D array of Y coordinates
-            - px_x: Pixel size in X
-            - px_y: Pixel size in Y
+            - dx: Pixel size in X
+            - dy: Pixel size in Y
             
     Raises:
         ValueError: If STL file cannot be loaded or is empty.
@@ -285,11 +354,11 @@ def load_stl_data(fname, resolution=None, progress_callback=None):
             max_range = max(x_range, y_range)
             resolution = max_range / 500.0 if max_range > 0 else 1.0
         
-        px_x = px_y = resolution
+        dx = dy = resolution
         
         # Create grid
-        grid_size_x = int((x_max - x_min) / px_x) + 1
-        grid_size_y = int((y_max - y_min) / px_y) + 1
+        grid_size_x = int((x_max - x_min) / dx) + 1
+        grid_size_y = int((y_max - y_min) / dy) + 1
         
         xi_grid = np.linspace(x_min, x_max, grid_size_x)
         yi_grid = np.linspace(y_min, y_max, grid_size_y)
@@ -337,9 +406,9 @@ def load_stl_data(fname, resolution=None, progress_callback=None):
         if progress_callback:
             progress_callback(100)
         
-        logger.info(f"STL loaded: {grid_size_x}x{grid_size_y} grid, resolution: {px_x:.2f} μm")
+        logger.info(f"STL loaded: {grid_size_x}x{grid_size_y} grid, resolution: {dx:.2f} μm")
         
-        return grid, xi_grid, yi_grid, px_x, px_y
+        return grid, xi_grid, yi_grid, dx, dy
         
     except Exception as e:
         logger.error(f"Error loading STL file: {e}")

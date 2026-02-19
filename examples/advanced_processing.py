@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from frasta.core.grid_data import GridData
+from frasta.core import Surface
 from frasta.processing import (
     # Advanced filtering
     bilateral_filter,
@@ -45,22 +45,21 @@ def example_bilateral_filtering():
     X, Y = np.meshgrid(x, y)
     Z = np.sin(X/10) * np.cos(Y/10) + 0.5 * np.random.randn(200, 200)
     
-    grid_data = GridData(Z, x, y, px_x=0.5, px_y=0.5)
+    grid_data = Surface(height=Z, dx=0.5, dy=0.5)
     
     # Apply bilateral filter - smooths noise but preserves edges
     filtered = bilateral_filter(
-        grid_data.grid,
+        grid_data.height,
         sigma_spatial=5.0,  # spatial smoothing scale (in physical units)
         sigma_range=10.0,   # height difference tolerance
-        px_x=grid_data.px_x,
-        px_y=grid_data.px_y
+        dx=grid_data.dx,
+        dy=grid_data.dy
     )
     
-    # Create new GridData with filtered result
-    filtered_data = GridData(filtered, grid_data.xi, grid_data.yi, 
-                            grid_data.px_x, grid_data.px_y)
+    # Create new Surface with filtered result
+    filtered_data = Surface(height=filtered, dx=grid_data.dx, dy=grid_data.dy)
     
-    print(f"Original noise: {np.nanstd(grid_data.grid):.3f}")
+    print(f"Original noise: {np.nanstd(grid_data.height):.3f}")
     print(f"Filtered noise: {np.nanstd(filtered):.3f}")
     print("Bilateral filter preserves edges while smoothing!")
 
@@ -79,18 +78,18 @@ def example_median_filter():
     Z[100, 100] = -100
     Z[150, 150] = 80
     
-    grid_data = GridData(Z, x, y, px_x=0.5, px_y=0.5)
+    grid_data = Surface(height=Z, dx=0.5, dy=0.5)
     
     # Apply median filter - robust to outliers
     filtered = median_filter_nan_aware(
-        grid_data.grid,
+        grid_data.height,
         size=2.0,  # kernel size in physical units
-        px_x=grid_data.px_x,
-        px_y=grid_data.px_y
+        dx=grid_data.dx,
+        dy=grid_data.dy
     )
     
-    print(f"Spike at (50,50): {grid_data.grid[50,50]:.1f} -> {filtered[50,50]:.1f}")
-    print(f"Spike at (100,100): {grid_data.grid[100,100]:.1f} -> {filtered[100,100]:.1f}")
+    print(f"Spike at (50,50): {grid_data.height[50,50]:.1f} -> {filtered[50,50]:.1f}")
+    print(f"Spike at (100,100): {grid_data.height[100,100]:.1f} -> {filtered[100,100]:.1f}")
     print("Spikes removed!")
 
 
@@ -105,12 +104,12 @@ def example_plane_leveling():
     
     x = np.arange(nx) * 0.5
     y = np.arange(ny) * 0.5
-    grid_data = GridData(Z, x, y, px_x=0.5, px_y=0.5)
+    grid_data = Surface(height=Z, dx=0.5, dy=0.5)
     
-    print(f"Before leveling - mean: {np.nanmean(grid_data.grid):.3f}")
+    print(f"Before leveling - mean: {np.nanmean(grid_data.height):.3f}")
     
     # Remove plane (tilt)
-    leveled = level_by_plane(grid_data.grid, method='least_squares')
+    leveled = level_by_plane(grid_data.height, method='least_squares')
     
     print(f"After leveling - mean: {np.nanmean(leveled):.3f}")
     print("Tilt removed!")
@@ -131,12 +130,12 @@ def example_polynomial_correction():
     
     x = np.arange(nx) * 0.5
     y = np.arange(ny) * 0.5
-    grid_data = GridData(Z, x, y, px_x=0.5, px_y=0.5)
+    grid_data = Surface(height=Z, dx=0.5, dy=0.5)
     
-    print(f"Before correction - range: {np.nanmax(grid_data.grid) - np.nanmin(grid_data.grid):.3f}")
+    print(f"Before correction - range: {np.nanmax(grid_data.height) - np.nanmin(grid_data.height):.3f}")
     
     # Remove quadratic form
-    corrected = remove_polynomial_form(grid_data.grid, order=2)
+    corrected = remove_polynomial_form(grid_data.height, order=2)
     
     print(f"After correction - range: {np.nanmax(corrected) - np.nanmin(corrected):.3f}")
     print("Curved form removed!")
@@ -151,15 +150,15 @@ def example_surface_rotation():
     X, Y = np.meshgrid(x, y)
     Z = X + 0.5 * Y  # Linear trend
     
-    grid_data = GridData(Z, x, y, px_x=1.0, px_y=1.0)
+    grid_data = Surface(height=Z, dx=1.0, dy=1.0)
     
     # Rotate by 45 degrees
     rotated, xi, yi, px_x, px_y = rotate_grid(
-        grid_data.grid, 45, grid_data.xi, grid_data.yi,
-        grid_data.px_x, grid_data.px_y
+        grid_data.height, 45, grid_data.xi, grid_data.yi,
+        grid_data.dx, grid_data.dy
     )
     
-    print(f"Original shape: {grid_data.grid.shape}")
+    print(f"Original shape: {grid_data.height.shape}")
     print(f"Rotated shape: {rotated.shape}")
     print("Surface rotated by 45°!")
 
@@ -186,10 +185,10 @@ def example_auto_registration():
     print(f"Inlier points: {params['inliers']}")
     
     # Apply registration
-    grid_data = GridData(target, x, y, px_x=x[1]-x[0], px_y=y[1]-y[0])
+    grid_data = Surface(height=target, dx=x[1]-x[0], dy=y[1]-y[0])
     aligned, xi, yi, px_x, px_y = apply_registration(
-        grid_data.grid, grid_data.xi, grid_data.yi,
-        grid_data.px_x, grid_data.px_y,
+        grid_data.height, grid_data.xi, grid_data.yi,
+        grid_data.dx, grid_data.dy,
         translation=params['translation'],
         rotation=params['rotation']
     )
@@ -205,22 +204,22 @@ def example_rescaling():
     y = np.linspace(0, 100, 100)
     Z = np.random.randn(100, 100)
     
-    grid_data = GridData(Z, x, y, px_x=1.0, px_y=1.0)
+    grid_data = Surface(height=Z, dx=1.0, dy=1.0)
     
-    print(f"Original: {grid_data.grid.shape}, pixel size: {grid_data.px_x:.2f}")
+    print(f"Original: {grid_data.height.shape}, pixel size: {grid_data.dx:.2f}")
     
     # Double resolution
     high_res, xi, yi, px_x, px_y = rescale_grid(
-        grid_data.grid, 2.0, grid_data.xi, grid_data.yi,
-        grid_data.px_x, grid_data.px_y
+        grid_data.height, 2.0, grid_data.xi, grid_data.yi,
+        grid_data.dx, grid_data.dy
     )
     
     print(f"High-res: {high_res.shape}, pixel size: {px_x:.2f}")
     
     # Half resolution
     low_res, xi, yi, px_x, px_y = rescale_grid(
-        grid_data.grid, 0.5, grid_data.xi, grid_data.yi,
-        grid_data.px_x, grid_data.px_y
+        grid_data.height, 0.5, grid_data.xi, grid_data.yi,
+        grid_data.dx, grid_data.dy
     )
     
     print(f"Low-res: {low_res.shape}, pixel size: {px_x:.2f}")
@@ -240,20 +239,20 @@ def example_robust_filtering():
         i, j = np.random.randint(0, 150, 2)
         Z[i, j] = np.random.choice([-50, 50])
     
-    grid_data = GridData(Z, x, y, px_x=x[1]-x[0], px_y=y[1]-y[0])
+    grid_data = Surface(height=Z, dx=x[1]-x[0], dy=y[1]-y[0])
     
     # Regular Gaussian would be affected by outliers
     # Robust Gaussian iteratively excludes them
     filtered = robust_gaussian_filter(
-        grid_data.grid,
+        grid_data.height,
         sigma=5.0,
-        px_x=grid_data.px_x,
-        px_y=grid_data.px_y,
+        dx=grid_data.dx,
+        dy=grid_data.dy,
         iterations=3,
         threshold=3.0
     )
     
-    print(f"Original std: {np.nanstd(grid_data.grid):.3f}")
+    print(f"Original std: {np.nanstd(grid_data.height):.3f}")
     print(f"Filtered std: {np.nanstd(filtered):.3f}")
     print("Outliers rejected during smoothing!")
 

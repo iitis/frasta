@@ -69,19 +69,28 @@ def bilateral_filter(grid, sigma_spatial, sigma_range):
     return grid
 ```
 
-### 2. **GridData is a Container, Not a Business Object**
+### 2. **Surface is a Container, Not a Business Object**
 
-`GridData` is a simple data holder with no business logic:
+`Surface` is a simple data holder with no business logic:
 ```python
-class GridData:
-    def __init__(self, grid, xi, yi, px_x, px_y, vmin=None, vmax=None):
-        self.grid = grid      # 2D numpy array
-        self.xi = xi          # 1D x-coordinates
-        self.yi = yi          # 1D y-coordinates  
-        self.px_x = px_x      # Pixel size in x
-        self.px_y = px_y      # Pixel size in y
+class Surface:
+    def __init__(self, height, dx, dy, mask=None, unit="µm", metadata=None, vmin=None, vmax=None):
+        self.height = height  # 2D numpy array
+        self.dx = dx          # Pixel size in x
+        self.dy = dy          # Pixel size in y
+        self.mask = mask      # Boolean mask
+        self.unit = unit      # Physical unit
+        self.metadata = {}    # Additional metadata
         self.vmin = vmin      # Display range min
         self.vmax = vmax      # Display range max
+    
+    @property
+    def xi(self):  # Generated from dx and shape
+        return np.arange(self.nx) * self.dx
+    
+    @property
+    def yi(self):  # Generated from dy and shape
+        return np.arange(self.ny) * self.dy
 ```
 
 **Use it for:**
@@ -163,7 +172,7 @@ frasta/
 #### `core/` - Data Structures
 **Single responsibility:** Define data containers.
 
-- `GridData` - holds scan data with metadata
+- `Surface` - holds scan data with metadata
 - No algorithms, no I/O, no GUI dependencies
 - Only simple utility methods (crop, copy)
 
@@ -227,7 +236,7 @@ def process_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
 ```
 
 **Rules:**
-1. Accept `np.ndarray` as input (NOT `GridData`)
+1. Accept `np.ndarray` as input (NOT `Surface`)
 2. Return `np.ndarray` or tuple of arrays/parameters
 3. Always document units for spatial parameters
 4. Handle NaN values gracefully
@@ -275,7 +284,7 @@ gui/
 
 **Rules:**
 1. GUI calls `processing`, never the reverse
-2. Convert between `GridData` and `np.ndarray` as needed:
+2. Convert between `Surface` and `np.ndarray` as needed:
    ```python
    # Get grid from tab
    grid = current_tab.grid
@@ -311,13 +320,13 @@ gui/
 graph TD
     A[User Loads CSV] --> B[io.loaders.load_csv_data]
     B --> C[Returns: name, grid, xi, yi, px_x, px_y]
-    C --> D[GUI creates GridData object]
+    C --> D[GUI creates Surface object]
     D --> E[ScanTab displays data]
     E --> F[User applies filter]
-    F --> G[GUI extracts grid from GridData]
+    F --> G[GUI extracts height from Surface]
     G --> H[processing.bilateral_filter]
     H --> I[Returns filtered grid]
-    I --> J[GUI updates GridData.grid]
+    I --> J[GUI updates Surface.height]
     J --> K[ScanTab refreshes display]
     K --> L[User exports result]
     L --> M[io.exporters.save_npz]
@@ -332,14 +341,14 @@ sequenceDiagram
     participant MainWindow
     participant Loader
     participant ScanTab
-    participant GridData
+    participant Surface
     
     User->>MainWindow: File → Open CSV
     MainWindow->>MainWindow: Show unit dialog (mm/μm)
     MainWindow->>Loader: load_csv_data(fname, units)
     Loader->>Loader: Parse CSV, build coordinate arrays
     Loader-->>MainWindow: (name, grid, xi, yi, px_x, px_y)
-    MainWindow->>GridData: Create GridData object
+    MainWindow->>Surface: Create Surface object
     MainWindow->>ScanTab: Create new tab
     ScanTab->>ScanTab: Set grid, xi, yi, px_x, px_y
     ScanTab->>ScanTab: update_display()
@@ -379,8 +388,8 @@ sequenceDiagram
 | `io.loaders` | File path | `tuple` | `(name, grid, xi, yi, px_x, px_y)` |
 | `io.exporters` | `list[tuple]` | File path | Writes to disk |
 | `processing.*` | `np.ndarray` | `np.ndarray` or `tuple` | Pure functions |
-| `gui.MainWindow` | File path | `GridData` | Creates tabs |
-| `gui.ScanTab` | `GridData` | Visual display | Uses `pyqtgraph.ImageView` |
+| `gui.MainWindow` | File path | `Surface` | Creates tabs |
+| `gui.ScanTab` | `Surface` | Visual display | Uses `pyqtgraph.ImageView` |
 
 ---
 
@@ -725,15 +734,15 @@ def good_filter(grid):
     return result
 ```
 
-### ❌ Mixing GridData and np.ndarray
+### ❌ Mixing Surface and np.ndarray
 
 ```python
 # WRONG ❌
 from ..processing import bilateral_filter
-result = bilateral_filter(grid_data, ...)  # GridData has no __array__ interface
+result = bilateral_filter(grid_data, ...)  # Surface has no __array__ interface
 
 # CORRECT ✅
-result = bilateral_filter(grid_data.grid, px_x=grid_data.px_x, ...)
+result = bilateral_filter(grid_data.height, px_x=grid_data.dx, ...)
 ```
 
 ### ❌ Putting Algorithms in GUI
@@ -892,7 +901,7 @@ graph TD
   - [Processing Algorithms](docs/conventions/processing/algorithms.md) - **Required** for adding filters/transforms
   - [File I/O](docs/conventions/io/file_formats.md) - Format specifications and loader patterns
   - [GUI Development](docs/conventions/gui/development.md) - Dialog and widget patterns
-  - [Data Structures](docs/conventions/core/data_structures.md) - GridData and core types
+  - [Data Structures](docs/conventions/core/data_structures.md) - Surface and core types
   - [General Standards](docs/conventions/general/) - Naming, imports, logging
 
 ---

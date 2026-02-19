@@ -7,6 +7,7 @@ from frasta.io import (
     load_csv_data, load_npz_data, load_h5_data,
     save_npz, save_h5, suggest_units
 )
+from frasta.core import Surface
 
 
 class TestLoaders:
@@ -79,9 +80,18 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
-        # Save data - list of tuples: (name, grid, xi, yi, px_x, px_y)
+        # Create Surface object
+        surface = Surface(
+            height=sample_grid,
+            dx=1.5,
+            dy=1.5,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
+        # Save data - list of tuples: (name, Surface)
         scans_data = [
-            ('test_scan', sample_grid, xi, yi, 1.5, 1.5)
+            ('test_scan', surface)
         ]
         save_npz(filepath, scans_data)
         
@@ -101,9 +111,18 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
-        # Save data - list of tuples: (name, grid, xi, yi, px_x, px_y)
+        # Create Surface object
+        surface = Surface(
+            height=sample_grid,
+            dx=2.0,
+            dy=2.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
+        # Save data - list of tuples: (name, Surface)
         scans_data = [
-            ('test_scan', sample_grid, xi, yi, 2.0, 2.0)
+            ('test_scan', surface)
         ]
         save_h5(filepath, scans_data)
         
@@ -123,9 +142,24 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
+        surface1 = Surface(
+            height=sample_grid,
+            dx=1.0,
+            dy=1.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        surface2 = Surface(
+            height=sample_grid * 2,
+            dx=1.0,
+            dy=1.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
         scans_data = [
-            ('scan1', sample_grid, xi, yi, 1.0, 1.0),
-            ('scan2', sample_grid * 2, xi, yi, 1.0, 1.0),
+            ('scan1', surface1),
+            ('scan2', surface2),
         ]
         save_npz(filepath, scans_data)
         

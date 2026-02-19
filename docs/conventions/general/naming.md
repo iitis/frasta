@@ -20,7 +20,7 @@ frasta/processing/AdvancedFiltering.py   ❌
 
 ```python
 # PascalCase
-class GridData:           ✅
+class Surface:           ✅
 class ScanTab:            ✅
 class grid_data:          ❌
 ```

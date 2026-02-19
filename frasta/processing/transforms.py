@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def rotate_grid(grid, angle_degrees, xi, yi, px_x, px_y, order=3):
+def rotate_grid(grid, angle_degrees, xi, yi, dx, dy, order=3):
     """Rotates a grid around its center with interpolation.
     
     Rotates the height grid by the specified angle while maintaining the same
@@ -24,19 +24,19 @@ def rotate_grid(grid, angle_degrees, xi, yi, px_x, px_y, order=3):
         angle_degrees (float): Rotation angle in degrees (positive = counterclockwise).
         xi (np.ndarray): 1D array of x-coordinates.
         yi (np.ndarray): 1D array of y-coordinates.
-        px_x (float): Pixel size in x-direction.
-        px_y (float): Pixel size in y-direction.
+        dx (float): Pixel size in x-direction.
+        dy (float): Pixel size in y-direction.
         order (int, optional): Interpolation order (0=nearest, 1=linear, 3=cubic).
             Defaults to 3.
             
     Returns:
-        tuple: (rotated_grid, new_xi, new_yi, px_x, px_y)
+        tuple: (rotated_grid, new_xi, new_yi, dx, dy)
             The rotated grid with updated coordinate arrays.
             
     Examples:
         >>> # Rotate by 45 degrees
-        >>> rotated, xi_new, yi_new, px_x, px_y = rotate_grid(
-        ...     grid, 45, xi, yi, px_x, px_y)
+        >>> rotated, xi_new, yi_new, dx, dy = rotate_grid(
+        ...     grid, 45, xi, yi, dx, dy)
     """
     ny, nx = grid.shape
     center_x = nx / 2
@@ -70,10 +70,10 @@ def rotate_grid(grid, angle_degrees, xi, yi, px_x, px_y, order=3):
     
     # Coordinates don't change in the grid reference frame
     # (the data rotates, not the coordinate system)
-    return rotated, xi, yi, px_x, px_y
+    return rotated, xi, yi, dx, dy
 
 
-def rescale_grid(grid, scale_factor, xi, yi, px_x, px_y, order=3):
+def rescale_grid(grid, scale_factor, xi, yi, dx, dy, order=3):
     """Rescales a grid by changing its resolution.
     
     Resamples the grid to a different resolution. Scale factor > 1 increases
@@ -84,18 +84,18 @@ def rescale_grid(grid, scale_factor, xi, yi, px_x, px_y, order=3):
         scale_factor (float): Scaling factor. 2.0 doubles resolution, 0.5 halves it.
         xi (np.ndarray): 1D array of x-coordinates.
         yi (np.ndarray): 1D array of y-coordinates.
-        px_x (float): Pixel size in x-direction.
-        px_y (float): Pixel size in y-direction.
+        dx (float): Pixel size in x-direction.
+        dy (float): Pixel size in y-direction.
         order (int, optional): Interpolation order. Defaults to 3.
             
     Returns:
-        tuple: (rescaled_grid, new_xi, new_yi, new_px_x, new_px_y)
+        tuple: (rescaled_grid, new_xi, new_yi, new_dx, new_dy)
             
     Examples:
         >>> # Double the resolution
-        >>> high_res, xi, yi, px_x, px_y = rescale_grid(grid, 2.0, xi, yi, px_x, px_y)
+        >>> high_res, xi, yi, dx, dy = rescale_grid(grid, 2.0, xi, yi, dx, dy)
         >>> # Reduce to half resolution
-        >>> low_res, xi, yi, px_x, px_y = rescale_grid(grid, 0.5, xi, yi, px_x, px_y)
+        >>> low_res, xi, yi, dx, dy = rescale_grid(grid, 0.5, xi, yi, dx, dy)
     """
     ny, nx = grid.shape
     
@@ -121,13 +121,13 @@ def rescale_grid(grid, scale_factor, xi, yi, px_x, px_y, order=3):
     # Update coordinate arrays and pixel sizes
     new_xi = np.linspace(xi[0], xi[-1], new_nx)
     new_yi = np.linspace(yi[0], yi[-1], new_ny)
-    new_px_x = px_x / scale_factor
-    new_px_y = px_y / scale_factor
+    new_dx = dx / scale_factor
+    new_dy = dy / scale_factor
     
-    return rescaled, new_xi, new_yi, new_px_x, new_px_y
+    return rescaled, new_xi, new_yi, new_dx, new_dy
 
 
-def crop_to_valid_region(grid, xi, yi, px_x, px_y, margin=0):
+def crop_to_valid_region(grid, xi, yi, dx, dy, margin=0):
     """Crops grid to the smallest rectangle containing all valid (non-NaN) data.
     
     Removes rows and columns that contain only NaN values, optionally keeping
@@ -137,18 +137,18 @@ def crop_to_valid_region(grid, xi, yi, px_x, px_y, margin=0):
         grid (np.ndarray): 2D height array.
         xi (np.ndarray): 1D array of x-coordinates.
         yi (np.ndarray): 1D array of y-coordinates.
-        px_x (float): Pixel size in x-direction.
-        px_y (float): Pixel size in y-direction.
+        dx (float): Pixel size in x-direction.
+        dy (float): Pixel size in y-direction.
         margin (int, optional): Number of pixels to keep as margin around valid region.
             Defaults to 0.
             
     Returns:
-        tuple: (cropped_grid, new_xi, new_yi, px_x, px_y)
+        tuple: (cropped_grid, new_xi, new_yi, dx, dy)
             
     Examples:
         >>> # Crop to valid data with 10-pixel margin
-        >>> cropped, xi, yi, px_x, px_y = crop_to_valid_region(
-        ...     grid, xi, yi, px_x, px_y, margin=10)
+        >>> cropped, xi, yi, dx, dy = crop_to_valid_region(
+        ...     grid, xi, yi, dx, dy, margin=10)
     """
     valid = ~np.isnan(grid)
     
@@ -158,7 +158,7 @@ def crop_to_valid_region(grid, xi, yi, px_x, px_y, margin=0):
     
     if not np.any(valid_rows) or not np.any(valid_cols):
         logger.warning("crop_to_valid_region: no valid data found")
-        return grid, xi, yi, px_x, px_y
+        return grid, xi, yi, dx, dy
     
     # Find bounds
     row_start = np.argmax(valid_rows)
@@ -179,7 +179,7 @@ def crop_to_valid_region(grid, xi, yi, px_x, px_y, margin=0):
     
     logger.info(f"Cropped from {grid.shape} to {cropped.shape}")
     
-    return cropped, new_xi, new_yi, px_x, px_y
+    return cropped, new_xi, new_yi, dx, dy
 
 
 def auto_register_surfaces(reference, target, method='icp', max_iterations=100):
@@ -420,25 +420,25 @@ def _register_icp(reference, target, max_iterations=100):
     }
 
 
-def apply_registration(grid, xi, yi, px_x, px_y, translation, rotation=0.0):
+def apply_registration(grid, xi, yi, dx, dy, translation, rotation=0.0):
     """Applies registration transformation to a grid.
     
     Args:
         grid (np.ndarray): 2D height array.
         xi (np.ndarray): 1D array of x-coordinates.
         yi (np.ndarray): 1D array of y-coordinates.
-        px_x (float): Pixel size in x-direction.
-        px_y (float): Pixel size in y-direction.
+        dx (float): Pixel size in x-direction.
+        dy (float): Pixel size in y-direction.
         translation (tuple): (dy, dx) translation in pixels.
         rotation (float, optional): Rotation angle in degrees. Defaults to 0.0.
             
     Returns:
-        tuple: (transformed_grid, xi, yi, px_x, px_y)
+        tuple: (transformed_grid, xi, yi, dx, dy)
     """
     
     # Apply rotation first if needed
     if abs(rotation) > 0.01:
-        grid, xi, yi, px_x, px_y = rotate_grid(grid, rotation, xi, yi, px_x, px_y)
+        grid, xi, yi, dx, dy = rotate_grid(grid, rotation, xi, yi, dx, dy)
     
     # Apply translation using proper shift (not circular roll)
     dy, dx = translation
@@ -484,4 +484,4 @@ def apply_registration(grid, xi, yi, px_x, px_y, translation, rotation=0.0):
         
         grid[~valid_mask] = np.nan
     
-    return grid, xi, yi, px_x, px_y
+    return grid, xi, yi, dx, dy

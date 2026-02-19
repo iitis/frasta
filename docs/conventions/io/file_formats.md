@@ -200,8 +200,13 @@ def load_csv_data(fname, xy_units='um', z_units='um', progress_callback=None):
 ### Example Export
 
 ```python
-def save_stl(fname, grid, xi, yi, binary=True):
+def save_stl(fname, surface, binary=True):
     """Export height map as STL mesh."""
+    # Extract coordinates from Surface (includes x0, y0)
+    xi = surface.xi
+    yi = surface.yi
+    grid = surface.height
+    
     # Convert μm to mm
     xi_mm = xi / 1000.0
     yi_mm = yi / 1000.0

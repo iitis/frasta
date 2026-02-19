@@ -46,7 +46,7 @@ conventions/
 
 ### For Core Data Structures
 - **[Data Structures](core/data_structures.md)**
-  - GridData usage and extension
+  - Surface usage and extension
   - When to create new data structures
 
 ### General Standards
@@ -69,7 +69,7 @@ conventions/
 | Support a new file format | [io/file_formats.md](io/file_formats.md) + [io/loaders.md](io/loaders.md) |
 | Create a parameter dialog | [gui/development.md](gui/development.md) |
 | Add a custom widget | [gui/widgets.md](gui/widgets.md) |
-| Extend GridData or create new structure | [core/data_structures.md](core/data_structures.md) |
+| Extend Surface or create new structure | [core/data_structures.md](core/data_structures.md) |
 | Understand project-wide naming | [general/naming.md](general/naming.md) |
 | Set up logging in new module | [general/logging.md](general/logging.md) |
 

@@ -12,7 +12,7 @@ from skimage.segmentation import flood
 from scipy.interpolate import griddata
 import trimesh
 
-from ..core import GridData
+from ..core import Surface
 from ..processing import fill_holes, remove_outliers, nan_aware_gaussian
 from .widgets import ResponsiveInfiniteLine
 from scipy.ndimage import gaussian_filter
@@ -35,8 +35,8 @@ class ScanTab(QtWidgets.QWidget):
         grid (np.ndarray): Current 2D scan data.
         xi (np.ndarray): X-coordinate array.
         yi (np.ndarray): Y-coordinate array.
-        px_x (float): Pixel size in x-direction.
-        px_y (float): Pixel size in y-direction.
+        dx (float): Pixel size in x-direction.
+        dy (float): Pixel size in y-direction.
         zero_point_mode (bool): Flag for zero point selection mode.
         tilt_mode (bool): Flag for tilt correction mode.
     """
@@ -72,8 +72,8 @@ class ScanTab(QtWidgets.QWidget):
         self.masked = None
         self.xi = None
         self.yi = None
-        self.px_x = None
-        self.px_y = None
+        self.dx = None
+        self.dy = None
 
         self.is_colormap = False
         self.current_colormap = 'gray'  # or None
@@ -183,26 +183,30 @@ class ScanTab(QtWidgets.QWidget):
             grid_min = 0.0
             grid_max = 1.0
         
-        data = GridData(
-            self.grid,
-            self.xi,
-            self.yi,
-            self.px_x,
-            self.px_y,
-            grid_min,
-            grid_max
+        # Extract origin from stored xi, yi arrays
+        x0 = self.xi[0] if hasattr(self, 'xi') and len(self.xi) > 0 else 0.0
+        y0 = self.yi[0] if hasattr(self, 'yi') and len(self.yi) > 0 else 0.0
+        
+        data = Surface(
+            height=self.grid,
+            dx=self.dx,
+            dy=self.dy,
+            x0=x0,
+            y0=y0,
+            vmin=grid_min,
+            vmax=grid_max
         )
         if hasattr(self, 'hist_min_line') and hasattr(self, 'hist_max_line'):
             data.vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
             data.vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
         return data
     
-    def setGridData(self, data: GridData):
-        self.grid = data.grid
+    def setGridData(self, data: Surface):
+        self.grid = data.height
         self.xi = data.xi
         self.yi = data.yi
-        self.px_x = data.px_x
-        self.px_y = data.px_y
+        self.dx = data.dx
+        self.dy = data.dy
         # Update histogram first to set hist_min_line and hist_max_line
         self.update_histogram()
         self.update_image()
@@ -217,9 +221,9 @@ class ScanTab(QtWidgets.QWidget):
         self.grid = grid
         self.xi = xi
         self.yi = yi
-        self.px_x = px_x
-        self.px_y = px_y
-        logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.px_x}, px_y: {self.px_y}")
+        self.dx = px_x
+        self.dy = px_y
+        logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
         # Update histogram first to set hist_min_line and hist_max_line
         # Then update_image() will use those values
         self.update_histogram()
