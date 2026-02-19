@@ -60,16 +60,19 @@ def save_h5(fname, scans):
     logger.info(f"Saved {len(scans)} scans to {fname} (Surface format)")
 
 
-def save_stl(fname, surface, binary=True):
+def save_stl(fname, surface, binary=True, max_points=50000000):
     """Saves a single scan as an STL mesh file.
     
     Converts a 2D height map to a 3D triangular mesh and saves it
     in STL format. NaN values are excluded from the mesh.
+    Large grids are automatically downsampled to keep file size reasonable.
     
     Args:
         fname (str): Path to output STL file.
         surface (Surface): Surface object containing height data and coordinates.
         binary (bool): If True, save as binary STL; if False, save as ASCII STL.
+        max_points (int): Maximum number of grid points to include. If the grid
+            is larger, it will be downsampled. Default: 500000.
     
     Raises:
         ValueError: If surface contains no valid data points.
@@ -78,6 +81,22 @@ def save_stl(fname, surface, binary=True):
     xi = surface.xi
     yi = surface.yi
     grid = surface.height
+    
+    # Count valid (non-NaN) points to decide on downsampling
+    h, w = grid.shape
+    valid_points = np.count_nonzero(~np.isnan(grid))
+    total_points = h * w
+    
+    # Downsample only if valid points exceed max_points
+    if valid_points > max_points:
+        stride = int(np.ceil(np.sqrt(valid_points / max_points)))
+        nan_percent = 100 * (1 - valid_points / total_points)
+        logger.info(f"Grid size {h}x{w} ({total_points:,} points, {valid_points:,} valid, {nan_percent:.1f}% NaN) "
+                   f"exceeds max_points={max_points:,}. "
+                   f"Downsampling with stride={stride} to ~{valid_points // (stride*stride):,} points")
+        grid = grid[::stride, ::stride]
+        xi = xi[::stride]
+        yi = yi[::stride]
     
     # Convert coordinates from micrometers to millimeters for STL
     xi_mm = xi / 1000.0

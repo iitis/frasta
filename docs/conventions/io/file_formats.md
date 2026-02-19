@@ -196,16 +196,28 @@ def load_csv_data(fname, xy_units='um', z_units='um', progress_callback=None):
 - **Mesh generation:** Create triangular mesh from 2D height map
 - **NaN handling:** Exclude NaN regions from mesh
 - **Format:** Binary STL preferred (smaller files)
+- **Downsampling:** Large grids are automatically downsampled
+  - Based on **valid (non-NaN) points count**, not total grid size
+  - Default: max 500k valid points
+  - Example: 10M grid with 50% NaN → 5M valid → downsampled only if >500k valid
 
 ### Example Export
 
 ```python
-def save_stl(fname, surface, binary=True):
+def save_stl(fname, surface, binary=True, max_points=500000):
     """Export height map as STL mesh."""
     # Extract coordinates from Surface (includes x0, y0)
     xi = surface.xi
     yi = surface.yi
     grid = surface.height
+    
+    # Downsample large grids automatically
+    h, w = grid.shape
+    if h * w > max_points:
+        stride = int(np.ceil(np.sqrt(h * w / max_points)))
+        grid = grid[::stride, ::stride]
+        xi = xi[::stride]
+        yi = yi[::stride]
     
     # Convert μm to mm
     xi_mm = xi / 1000.0
