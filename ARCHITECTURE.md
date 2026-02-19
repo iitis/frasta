@@ -74,10 +74,12 @@ def bilateral_filter(grid, sigma_spatial, sigma_range):
 `Surface` is a simple data holder with no business logic:
 ```python
 class Surface:
-    def __init__(self, height, dx, dy, mask=None, unit="µm", metadata=None, vmin=None, vmax=None):
+    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="µm", metadata=None, vmin=None, vmax=None):
         self.height = height  # 2D numpy array
-        self.dx = dx          # Pixel size in x
-        self.dy = dy          # Pixel size in y
+        self.dx = dx          # Pixel size in x (µm)
+        self.dy = dy          # Pixel size in y (µm)
+        self.x0 = x0          # Origin/offset for X coordinates
+        self.y0 = y0          # Origin/offset for Y coordinates
         self.mask = mask      # Boolean mask
         self.unit = unit      # Physical unit
         self.metadata = {}    # Additional metadata
@@ -85,12 +87,12 @@ class Surface:
         self.vmax = vmax      # Display range max
     
     @property
-    def xi(self):  # Generated from dx and shape
-        return np.arange(self.nx) * self.dx
+    def xi(self):  # Generated from x0, dx and shape
+        return self.x0 + np.arange(self.nx) * self.dx
     
     @property
-    def yi(self):  # Generated from dy and shape
-        return np.arange(self.ny) * self.dy
+    def yi(self):  # Generated from y0, dy and shape
+        return self.y0 + np.arange(self.ny) * self.dy
 ```
 
 **Use it for:**
@@ -188,10 +190,11 @@ frasta/
 - `exporters.py` - functions for writing NPZ, HDF5, STL formats
 
 **Contract:**
-- All loaders return tuple: `(name, grid, xi, yi, px_x, px_y)` or list of such tuples
-- All exporters take list: `[(name, grid, xi, yi, px_x, px_y), ...]`
+- **Loaders return:** `Surface` object or list of `Surface` objects
+- **Exporters take:** list of tuples `[(name, Surface), ...]`
 - Handle unit conversions at file boundary (mm ↔ μm)
 - **Never** perform data processing (filtering, leveling, etc.)
+- Preserve spatial positioning (`x0`, `y0`) when loading data
 
 **When to add new function:**
 - New file format support
@@ -319,9 +322,9 @@ gui/
 ```mermaid
 graph TD
     A[User Loads CSV] --> B[io.loaders.load_csv_data]
-    B --> C[Returns: name, grid, xi, yi, px_x, px_y]
-    C --> D[GUI creates Surface object]
-    D --> E[ScanTab displays data]
+    B --> C[Returns: Surface object]
+    C --> D[GUI passes Surface to ScanTab]
+    D --> E[ScanTab.setSurface displays data]
     E --> F[User applies filter]
     F --> G[GUI extracts height from Surface]
     G --> H[processing.bilateral_filter]
@@ -329,8 +332,9 @@ graph TD
     I --> J[GUI updates Surface.height]
     J --> K[ScanTab refreshes display]
     K --> L[User exports result]
-    L --> M[io.exporters.save_npz]
-    M --> N[File saved]
+    L --> M[GUI: tab.getSurface]
+    M --> N[io.exporters.save_npz]
+    N --> O[File saved]
 ```
 
 ### Detailed Flow: Loading a CSV File
@@ -339,18 +343,20 @@ graph TD
 sequenceDiagram
     participant User
     participant MainWindow
+    participant Worker
     participant Loader
     participant ScanTab
-    participant Surface
     
     User->>MainWindow: File → Open CSV
     MainWindow->>MainWindow: Show unit dialog (mm/μm)
-    MainWindow->>Loader: load_csv_data(fname, units)
-    Loader->>Loader: Parse CSV, build coordinate arrays
-    Loader-->>MainWindow: (name, grid, xi, yi, px_x, px_y)
-    MainWindow->>Surface: Create Surface object
+    MainWindow->>Worker: GridWorker(fname, units)
+    Worker->>Loader: load_csv_data(fname, units)
+    Loader->>Loader: Parse CSV, grid data, create Surface
+    Loader-->>Worker: Surface object
+    Worker-->>MainWindow: finished signal (Surface)
     MainWindow->>ScanTab: Create new tab
-    ScanTab->>ScanTab: Set grid, xi, yi, px_x, px_y
+    MainWindow->>ScanTab: setSurface(surface)
+    ScanTab->>ScanTab: Extract height, xi, yi, dx, dy
     ScanTab->>ScanTab: update_display()
     ScanTab-->>User: Show scan image & histogram
 ```
@@ -385,11 +391,11 @@ sequenceDiagram
 
 | Module | Input Type | Output Type | Notes |
 |--------|------------|-------------|-------|
-| `io.loaders` | File path | `tuple` | `(name, grid, xi, yi, px_x, px_y)` |
-| `io.exporters` | `list[tuple]` | File path | Writes to disk |
+| `io.loaders` | File path | `Surface` or `list[Surface]` | Single or multiple scans |
+| `io.exporters` | `list[(name, Surface)]` | File path | Writes to disk |
 | `processing.*` | `np.ndarray` | `np.ndarray` or `tuple` | Pure functions |
-| `gui.MainWindow` | File path | `Surface` | Creates tabs |
-| `gui.ScanTab` | `Surface` | Visual display | Uses `pyqtgraph.ImageView` |
+| `gui.MainWindow` | File path | `ScanTab` | Creates tabs with Surface data |
+| `gui.ScanTab` | `Surface` (via setSurface) | Visual display | Uses `pyqtgraph.ImageView` |
 
 ---
 
@@ -453,9 +459,10 @@ Each scan gets its own `ScanTab` widget:
 
 ```python
 # In main_window.py
-def add_new_scan(self, name, grid, xi, yi, px_x, px_y):
+def add_new_scan(self, surface):
+    name = surface.metadata.get('name', 'Scan')
     tab = ScanTab(parent=self)
-    tab.set_data(grid, xi, yi, px_x, px_y)
+    tab.setSurface(surface)
     self.tab_widget.addTab(tab, name)
 ```
 
@@ -626,6 +633,25 @@ def save_my_format(fname, scans):
     # ...
 ```
 
+**2. Update return value to Surface:**
+
+```python
+def load_my_format(fname, progress_callback=None):
+    # ... parsing logic ...
+    
+    # Create and return Surface object
+    surface = Surface(
+        height=grid,
+        dx=dx,
+        dy=dy,
+        x0=xi[0] if len(xi) > 0 else 0.0,
+        y0=yi[0] if len(yi) > 0 else 0.0,
+        unit="µm",
+        metadata={"name": name}
+    )
+    return surface
+```
+
 **3. Add to `io/__init__.py`:**
 
 ```python
@@ -633,9 +659,24 @@ from .loaders import load_csv_data, load_npz_data, load_my_format
 from .exporters import save_npz, save_h5, save_my_format
 ```
 
-**4. Update GUI file dialogs:**
+**4. Update GUI loading code:**
 
 In `main_window.py`:
+```python
+def load_my_format_file(self, fname):
+    try:
+        surface = load_my_format(fname)
+        tab = ScanTab()
+        name = surface.metadata.get('name', 'Scan')
+        self.tabs.addTab(tab, name)
+        tab.setSurface(surface)
+        self.add_to_recent_files(fname)
+    except Exception as e:
+        QtWidgets.QMessageBox.critical(self, "Error", f"Failed to load: {e}")
+```
+
+**5. Update file dialogs:**
+
 ```python
 def open_file(self):
     fname, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -885,6 +926,7 @@ graph TD
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-02-18 | Initial architecture documentation |
+| 1.1 | 2026-02-19 | Updated to reflect Surface-based I/O, added x0/y0 positioning |
 
 ---
 

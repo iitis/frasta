@@ -172,7 +172,7 @@ class ScanTab(QtWidgets.QWidget):
             self.update_image()
             self.update_histogram()
 
-    def getGridData(self):
+    def get_surface(self) -> Surface:
         # Handle grid that might contain NaN
         valid_data = self.grid[~np.isnan(self.grid)]
         if valid_data.size > 0:
@@ -201,42 +201,36 @@ class ScanTab(QtWidgets.QWidget):
             data.vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
         return data
     
-    def setGridData(self, data: Surface):
+    def set_surface(self, data: Surface):
+        """Set scan data from a Surface object.
+        
+        Args:
+            data (Surface): Surface object containing scan data.
+        """
         self.grid = data.height
         self.xi = data.xi
         self.yi = data.yi
         self.dx = data.dx
         self.dy = data.dy
+        logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
         # Update histogram first to set hist_min_line and hist_max_line
         self.update_histogram()
         self.update_image()
         # Then set the histogram line values if provided
         if hasattr(self, 'hist_min_line') and hasattr(self, 'hist_max_line'):
-            self.hist_min_line.setValue(data.vmin)
-            self.hist_max_line.setValue(data.vmax)
+            if data.vmin is not None:
+                self.hist_min_line.setValue(data.vmin)
+            if data.vmax is not None:
+                self.hist_max_line.setValue(data.vmax)
 
 
-
-    def set_data(self, grid, xi, yi, px_x, px_y):
-        self.grid = grid
-        self.xi = xi
-        self.yi = yi
-        self.dx = px_x
-        self.dy = px_y
-        logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
-        # Update histogram first to set hist_min_line and hist_max_line
-        # Then update_image() will use those values
-        self.update_histogram()
-        self.update_image()
-
-
-    def grid_to_mesh_vectorized(self, grid, pixel_size_x=1.0, pixel_size_y=1.0):
+    def grid_to_mesh_vectorized(self, grid, dx=1.0, dy=1.0):
         h, w = grid.shape
 
         # XY grid
         y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-        x_coords = x_indices * pixel_size_x
-        y_coords = y_indices * pixel_size_y
+        x_coords = x_indices * dx
+        y_coords = y_indices * dy
         z_coords = grid
 
         # All vertices
@@ -274,8 +268,8 @@ class ScanTab(QtWidgets.QWidget):
         return vertices.astype(np.float32), faces.astype(np.int32)
 
 
-    def save_as_mesh(self, grid, px_x=1.38, px_y=1.38):
-        v, f = self.grid_to_mesh_vectorized(grid, px_x, px_y)
+    def save_as_mesh(self, grid, dx=1.38, dy=1.38):
+        v, f = self.grid_to_mesh_vectorized(grid, dx, dy)
         mesh = trimesh.Trimesh(vertices=v, faces=f, process=False)
         mesh.export("mesh_output.obj")
 
@@ -340,6 +334,17 @@ class ScanTab(QtWidgets.QWidget):
         return dialog, ed_sigma, ed_thresh
 
 
+    def repair_grid_processing(self, sigma, threshold, mask=None):
+        grid_filled = fill_holes(self.grid, mask=mask)
+        grid_smooth = nan_aware_gaussian(grid_filled, sigma, mask=mask)
+        grid_cleaned = remove_outliers(grid_filled, grid_smooth, threshold, mask=mask)
+
+        if mask is not None:
+            self.grid[mask] = grid_cleaned[mask]
+        else:
+            self.grid = grid_cleaned
+
+
     def repair_grid(self, mask=None):
         dialog, ed_sigma, ed_thresh = self.create_repair_dialog()
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
@@ -349,14 +354,7 @@ class ScanTab(QtWidgets.QWidget):
 
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 
-        grid_filled = fill_holes(self.grid, mask=mask)
-        grid_smooth = nan_aware_gaussian(grid_filled, sigma, mask=mask)
-        grid_cleaned = remove_outliers(grid_filled, grid_smooth, threshold, mask=mask)
-
-        if mask is not None:
-            self.grid[mask] = grid_cleaned[mask]
-        else:
-            self.grid = grid_cleaned
+        self.repair_grid_processing(sigma, threshold, mask)
 
         self.update_image()
         QtWidgets.QApplication.restoreOverrideCursor()

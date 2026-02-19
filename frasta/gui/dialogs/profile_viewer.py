@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 
 from ..viewers import show_3d_viewer
+from ...core import Surface
 from ...processing import remove_relative_offset, remove_relative_tilt
 from ..workers import ProfileWorker
 from ..widgets import ResponsiveInfiniteLine
@@ -244,7 +245,33 @@ class ProfileViewer(QtWidgets.QMainWindow):
 
         QtWidgets.QApplication.restoreOverrideCursor()
 
+    def set_surfaces(self, surface1, surface2):
+        """Set scan data from Surface objects.
+        
+        Args:
+            surface1 (Surface): Reference surface object.
+            surface2 (Surface): Adjusted surface object.
+        """
+        self.set_data(
+            surface1.height, 
+            surface2.height,
+            surface1.dx, 
+            surface1.dy,
+            surface2.dx, 
+            surface2.dy
+        )
+
     def set_data(self, grid1, grid2, px1_um, py1_um, px2_um, py2_um):
+        """Set scan data from grid arrays and pixel sizes.
+        
+        Args:
+            grid1 (np.ndarray): Reference grid data.
+            grid2 (np.ndarray): Adjusted grid data.
+            px1_um (float): Reference pixel size in X (micrometers).
+            py1_um (float): Reference pixel size in Y (micrometers).
+            px2_um (float): Adjusted pixel size in X (micrometers).
+            py2_um (float): Adjusted pixel size in Y (micrometers).
+        """
         self.reference_grid = grid1
         self.adjusted_grid = grid2
 

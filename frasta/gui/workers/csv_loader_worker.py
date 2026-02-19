@@ -15,11 +15,11 @@ class GridWorker(QtCore.QObject):
     
     Signals:
         progress (int): Progress percentage (0-100).
-        finished (object, object, object, float, float): Emitted when processing completes.
+        finished (Surface): Emitted when processing completes with Surface object.
     """
     
     progress = QtCore.pyqtSignal(int)
-    finished = QtCore.pyqtSignal(object, object, object, float, float)
+    finished = QtCore.pyqtSignal(object)
 
     def __init__(self, fname, units_xy='um', units_z='um'):
         """Initialize the CSV loader worker.
@@ -38,16 +38,15 @@ class GridWorker(QtCore.QObject):
     def process(self):
         """Process the CSV file using io.load_csv_data.
         
-        Emits progress signals during loading and finished signal with results.
-        Results: (grid, xi, yi, pixel_size_x, pixel_size_y)
+        Emits progress signals during loading and finished signal with Surface object.
         """
         def progress_callback(value):
             self.progress.emit(value)
         
-        grid, xi, yi, px_x, px_y = load_csv_data(
+        surface = load_csv_data(
             self.fname,
             units_xy=self.units_xy,
             units_z=self.units_z,
             progress_callback=progress_callback
         )
-        self.finished.emit(grid, xi, yi, px_x, px_y)
+        self.finished.emit(surface)

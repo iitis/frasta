@@ -311,10 +311,10 @@ def process_all_tabs(self):
 ### Add New Tab
 
 ```python
-def add_scan_tab(self, name, grid, xi, yi, px_x, px_y):
-    """Create and add new scan tab."""
+def add_scan_tab(self, name, surface):
+    """Create and add new scan tab from Surface object."""
     tab = ScanTab(parent=self)
-    tab.set_data(grid, xi, yi, px_x, px_y)
+    tab.setSurface(surface)
     
     index = self.tab_widget.addTab(tab, name)
     self.tab_widget.setCurrentIndex(index)

@@ -9,6 +9,8 @@ import h5py
 import trimesh
 import logging
 
+from ..core import Surface
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,12 +74,7 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
         progress_callback (callable, optional): Function to call with progress updates (0-100).
         
     Returns:
-        tuple: (grid, xi, yi, px_x, px_y) containing:
-            - grid: 2D numpy array of Z values
-            - xi: 1D array of X coordinates
-            - yi: 1D array of Y coordinates
-            - dx: Pixel size in X
-            - dy: Pixel size in Y
+        Surface: Surface object containing the gridded data.
     """
     chunk_size = 100_000
     total = sum(1 for _ in open(fname, encoding="utf-8"))
@@ -162,7 +159,16 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
     if progress_callback:
         progress_callback(100)
     
-    return grid, xi_grid, yi_grid, dx, dy
+    # Create and return Surface object
+    surface = Surface(
+        height=grid,
+        dx=dx,
+        dy=dy,
+        x0=xi_grid[0],
+        y0=yi_grid[0],
+        unit="µm"
+    )
+    return surface
 
 
 def load_npz_data(fname):
@@ -175,7 +181,7 @@ def load_npz_data(fname):
         fname (str): Path to NPZ file.
         
     Returns:
-        list: List of tuples (name, grid, xi, yi, dx, dy) for each scan.
+        list: List of Surface objects, one for each scan in the file.
         
     Raises:
         ValueError: If NPZ file doesn't contain grid data.
@@ -226,7 +232,17 @@ def load_npz_data(fname):
             yi = np.arange(grid.shape[0]) * dy
             logger.warning(f"Scan {i} missing coordinate data, assuming origin at (0, 0)")
 
-        results.append((name, grid, xi, yi, dx, dy))
+        # Create Surface object
+        surface = Surface(
+            height=grid,
+            dx=dx,
+            dy=dy,
+            x0=xi[0] if len(xi) > 0 else 0.0,
+            y0=yi[0] if len(yi) > 0 else 0.0,
+            unit="µm",
+            metadata={"name": name}
+        )
+        results.append(surface)
     
     return results
 
@@ -241,7 +257,7 @@ def load_h5_data(fname):
         fname (str): Path to HDF5 file.
         
     Returns:
-        list: List of tuples (name, grid, xi, yi, dx, dy) for each scan.
+        list: List of Surface objects, one for each scan in the file.
         
     Raises:
         ValueError: If HDF5 file doesn't contain grid data.
@@ -294,7 +310,17 @@ def load_h5_data(fname):
                 yi = np.arange(grid.shape[0]) * dy
                 logger.warning(f"Scan {i} missing coordinate data, assuming origin at (0, 0)")
             
-            results.append((name, grid, xi, yi, dx, dy))
+            # Create Surface object
+            surface = Surface(
+                height=grid,
+                dx=dx,
+                dy=dy,
+                x0=xi[0],
+                y0=yi[0],
+                unit="µm",
+                metadata={"name": name}
+            )
+            results.append(surface)
     
     return results
 
@@ -313,12 +339,7 @@ def load_stl_data(fname, resolution=None, progress_callback=None):
         progress_callback (callable, optional): Function to call with progress updates (0-100).
         
     Returns:
-        tuple: (grid, xi, yi, px_x, px_y) containing:
-            - grid: 2D numpy array of Z values (height map)
-            - xi: 1D array of X coordinates
-            - yi: 1D array of Y coordinates
-            - dx: Pixel size in X
-            - dy: Pixel size in Y
+        Surface: Surface object containing the height map data.
             
     Raises:
         ValueError: If STL file cannot be loaded or is empty.
@@ -408,7 +429,16 @@ def load_stl_data(fname, resolution=None, progress_callback=None):
         
         logger.info(f"STL loaded: {grid_size_x}x{grid_size_y} grid, resolution: {dx:.2f} μm")
         
-        return grid, xi_grid, yi_grid, dx, dy
+        # Create and return Surface object
+        surface = Surface(
+            height=grid,
+            dx=dx,
+            dy=dy,
+            x0=xi_grid[0],
+            y0=yi_grid[0],
+            unit="µm"
+        )
+        return surface
         
     except Exception as e:
         logger.error(f"Error loading STL file: {e}")

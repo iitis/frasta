@@ -38,9 +38,11 @@ class Surface:
 
 ### When to Use
 
-- ✅ GUI components passing data between tabs
-- ✅ Storing visualization parameters (vmin/vmax)
-- ✅ Simple utility methods (crop, copy)
+- ✅ **Loading/Saving:** Loaders return Surface, exporters accept (name, Surface) tuples
+- ✅ **GUI components:** Pass Surface between tabs and dialogs
+- ✅ **Storing visualization parameters:** vmin/vmax for display ranges
+- ✅ **Simple utility methods:** crop, copy
+- ✅ **Preserving spatial positioning:** x0, y0 for alignment and comparison
 
 ### When NOT to Use
 
@@ -70,6 +72,45 @@ print(surf.yi)  # [20.0, 20.5, 21.0, 21.5, ...]
 - Creating Surface from real-world measurements
 - Aligning/comparing multiple scans
 
+### Usage in GUI
+
+```python
+# Loading data
+surface = load_csv_data(fname, units_xy='um', units_z='um')
+
+# Setting data in tab
+tab = ScanTab()
+tab.setSurface(surface)
+
+# Getting data from tab
+surface = tab.getSurface()
+
+# Processing (extract arrays)
+from ..processing import bilateral_filter
+result = bilateral_filter(
+    surface.height,
+    sigma_spatial=5.0,
+    sigma_range=10.0,
+    px_x=surface.dx,
+    px_y=surface.dy
+)
+
+# Update surface
+surface.height = result
+tab.setSurface(surface)
+```
+
+### Usage in Dialogs
+
+```python
+# ProfileViewer - accepts two Surface objects
+viewer = ProfileViewer()
+viewer.set_surfaces(surface1, surface2)
+
+# OverlayViewer - accepts two Surface objects
+overlay = OverlayViewer(surface1, surface2)
+```
+
 ### Extending Surface
 
 If you need additional fields:
@@ -80,7 +121,7 @@ class ExtendedSurface(Surface):
     
     def __init__(self, height, dx, dy, custom_field=None, **kwargs):
         super().__init__(height, dx, dy, **kwargs)
-        self.custom_field = custom_field
+        self.custom_field =9custom_field
 ```
 
 ---

@@ -30,9 +30,9 @@ def load_format_data(fname, progress_callback=None, **format_specific_params):
         **format_specific_params: Format-specific parameters (e.g., units, encoding).
         
     Returns:
-        tuple or list: 
-            - Single scan: (name, grid, xi, yi, px_x, px_y)
-            - Multiple scans: [(name1, grid1, ...), (name2, grid2, ...), ...]
+        Surface or list[Surface]: 
+            - Single scan: Surface object
+            - Multiple scans: list of Surface objects
         
     Raises:
         FileNotFoundError: If file doesn't exist.
@@ -48,6 +48,8 @@ def load_format_data(fname, progress_callback=None, **format_specific_params):
 def load_my_format(fname, progress_callback=None):
     """Load MY_FORMAT file."""
     import logging
+    from ..core import Surface
+    
     logger = logging.getLogger(__name__)
     
     # Step 1: Validate file exists
@@ -80,15 +82,26 @@ def load_my_format(fname, progress_callback=None):
         # Step 5: Apply unit conversions
         grid, xi, yi, px_x, px_y = convert_units(grid, xi, yi, px_x, px_y)
         
-        if progress_callback:
-            progress_callback(100)
-        
         # Step 6: Generate name from filename
         name = os.path.splitext(os.path.basename(fname))[0]
         
+        # Step 7: Create Surface object
+        surface = Surface(
+            height=grid,
+            dx=px_x,
+            dy=px_y,
+            x0=xi[0] if len(xi) > 0 else 0.0,
+            y0=yi[0] if len(yi) > 0 else 0.0,
+            unit="µm",
+            metadata={"name": name}
+        )
+        
+        if progress_callback:
+            progress_callback(100)
+        
         logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}μm")
         
-        return name, grid, xi, yi, px_x, px_y
+        return surface
         
     except ValueError as e:
         raise ValueError(f"Invalid MY_FORMAT file: {e}")
@@ -99,12 +112,13 @@ def load_my_format(fname, progress_callback=None):
 
 ### Key Rules
 
-1. **Always return same structure:** `(name, grid, xi, yi, px_x, px_y)` or list thereof
-2. **Coordinates in micrometers:** Convert at I/O boundary
-3. **NaN for missing data:** Use `np.nan`, not 0 or sentinel values
-4. **Name from filename:** Extract base name, remove extension
-5. **Log important info:** File loaded, dimensions, warnings
-6. **Progress at key milestones:** 10%, 40%, 60%, 80%, 100%
+1. **Return Surface objects:** Single `Surface` or `list[Surface]` for multiple scans
+2. **Preserve spatial positioning:** Set `x0` and `y0` from coordinate arrays
+3. **Store metadata:** Use `Surface.metadata` for scan name and other info
+4. **Coordinates in micrometers:** Convert at I/O boundary
+5. **NaN for missing data:** Use `np.nan`, not 0 or sentinel values
+6. **Log important info:** File loaded, dimensions, warnings
+7. **Progress at key milestones:** 10%, 40%, 60%, 80%, 100%
 
 ---
 
@@ -118,7 +132,7 @@ def save_format(fname, scans, **format_specific_params):
     
     Args:
         fname (str): Path to output file.
-        scans (list): List of (name, grid, xi, yi, px_x, px_y) tuples.
+        scans (list): List of (name, Surface) tuples.
         **format_specific_params: Format-specific parameters.
         
     Raises:
@@ -140,19 +154,22 @@ def save_my_format(fname, scans, compression=True):
     if not scans:
         raise ValueError("scans list is empty")
     
-    if not all(len(s) == 6 for s in scans):
-        raise ValueError("Each scan must be (name, grid, xi, yi, px_x, px_y)")
+    if not all(isinstance(s[1], Surface) for s in scans):
+        raise ValueError("Each scan must be (name, Surface)")
     
     try:
-        # Step 2: Convert units if necessary
-        converted_scans = [convert_for_export(s) for s in scans]
-        
-        # Step 3: Write file
+        # Step 2: Write file
         with open(fname, 'wb') as f:
-            write_header(f, len(converted_scans))
+            write_header(f, len(scans))
             
-            for name, grid, xi, yi, px_x, px_y in converted_scans:
-                write_scan(f, name, grid, xi, yi, px_x, px_y)
+            for name, surface in scans:
+                # Convert units if necessary for format
+                grid_mm = surface.height / 1000.0  # example: μm -> mm
+                xi_mm = surface.xi / 1000.0
+                yi_mm = surface.yi / 1000.0
+                
+                write_scan(f, name, grid_mm, xi_mm, yi_mm, 
+                          surface.dx / 1000.0, surface.dy / 1000.0)
         
         logger.info(f"Saved {len(scans)} scan(s) to {fname}")
         
@@ -163,11 +180,12 @@ def save_my_format(fname, scans, compression=True):
 
 ### Key Rules
 
-1. **Accept list of scans:** Even if format supports only one
-2. **Convert units at boundary:** Internal μm → format's expected units
-3. **Handle NaN appropriately:** Skip, fill, or format-specific encoding
-4. **Atomic writes if possible:** Write to temp file, then rename
-5. **Log on success:** Number of scans, file size
+1. **Accept list of (name, Surface) tuples:** Even if format supports only one
+2. **Extract data from Surface:** Use `surface.height`, `surface.xi`, `surface.yi`, etc.
+3. **Convert units at boundary:** Internal μm → format's expected units
+4. **Handle NaN appropriately:** Skip, fill, or format-specific encoding
+5. **Atomic writes if possible:** Write to temp file, then rename
+6. **Log on success:** Number of scans, file size
 
 ---
 
@@ -277,16 +295,17 @@ def convert_from_internal_units(value_um, target_unit):
 
 ```python
 # In tests/test_io.py
+from frasta.core import Surface
 
 class TestMyFormatLoader:
     def test_loads_valid_file(self):
         """Test loading a known-good file."""
-        name, grid, xi, yi, px_x, px_y = load_my_format('test_data/valid.myformat')
+        surface = load_my_format('test_data/valid.myformat')
         
-        assert name == "valid"
-        assert grid.shape == (100, 100)
-        assert len(xi) == 100
-        assert px_x > 0
+        assert isinstance(surface, Surface)
+        assert surface.metadata.get('name') == "valid"
+        assert surface.height.shape == (100, 100)
+        assert surface.dx > 0
     
     def test_raises_on_missing_file(self):
         """Test error handling for missing files."""
@@ -296,26 +315,32 @@ class TestMyFormatLoader:
     def test_unit_conversion(self):
         """Test that units are converted correctly."""
         # Load file known to be in mm
-        _, grid, xi, yi, px_x, px_y = load_my_format('test_data/mm_units.myformat')
+        surface = load_my_format('test_data/mm_units.myformat')
         
         # Should be converted to μm internally
-        assert px_x > 100  # If original was ~0.1mm
+        assert surface.dx > 100  # If original was ~0.1mm
     
     def test_preserves_nan(self):
         """Test that NaN values are preserved."""
-        _, grid, *_ = load_my_format('test_data/with_nan.myformat')
+        surface = load_my_format('test_data/with_nan.myformat')
         
-        assert np.any(np.isnan(grid))
+        assert np.any(np.isnan(surface.height))
     
     def test_roundtrip(self):
         """Test save then load preserves data."""
-        original = [("test", grid, xi, yi, px_x, px_y)]
+        original_surface = Surface(
+            height=np.random.rand(10, 10),
+            dx=1.5, dy=1.5,
+            x0=0.0, y0=0.0,
+            metadata={"name": "test"}
+        )
+        original = [("test", original_surface)]
         
         save_my_format('temp.myformat', original)
         loaded = load_my_format('temp.myformat')
         
-        assert loaded[0] == "test"
-        np.testing.assert_array_almost_equal(loaded[1], grid)
+        assert loaded.metadata.get('name') == "test"
+        np.testing.assert_array_almost_equal(loaded.height, original_surface.height)
 ```
 
 ---
@@ -323,8 +348,10 @@ class TestMyFormatLoader:
 ## Checklist for New Format
 
 - [ ] Loader follows standard signature
+- [ ] Loader returns Surface object(s)
 - [ ] Exporter follows standard signature
-- [ ] Returns correct tuple structure
+- [ ] Exporter accepts (name, Surface) tuples
+- [ ] Preserves spatial positioning (x0, y0)
 - [ ] Converts units to micrometers
 - [ ] Handles NaN appropriately
 - [ ] Progress reporting implemented
@@ -336,4 +363,4 @@ class TestMyFormatLoader:
 
 ---
 
-**Last Updated:** 2026-02-18
+**Last Updated:** 2026-02-19

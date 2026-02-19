@@ -49,16 +49,16 @@
 
 ```python
 def save_npz(fname, scans):
-    """Save list of (name, grid, xi, yi, px_x, px_y) tuples."""
+    """Save list of (name, Surface) tuples."""
     save_dict = {'frasta_info': 1, 'frasta_cnt': len(scans)}
     
-    for i, (name, grid, xi, yi, px_x, px_y) in enumerate(scans):
+    for i, (name, surface) in enumerate(scans):
         save_dict[f"name_{i:02}"] = name
-        save_dict[f"grid_{i:02}"] = grid
-        save_dict[f"xi_{i:02}"] = xi
-        save_dict[f"yi_{i:02}"] = yi
-        save_dict[f"px_{i:02}"] = px_x
-        save_dict[f"py_{i:02}"] = px_y
+        save_dict[f"grid_{i:02}"] = surface.height
+        save_dict[f"xi_{i:02}"] = surface.xi
+        save_dict[f"yi_{i:02}"] = surface.yi
+        save_dict[f"px_{i:02}"] = surface.dx
+        save_dict[f"py_{i:02}"] = surface.dy
     
     np.savez_compressed(fname, **save_dict)
 ```
@@ -106,14 +106,14 @@ def save_h5(fname, scans):
         f.attrs['frasta_info'] = 1
         f.attrs['frasta_cnt'] = len(scans)
         
-        for i, (name, grid, xi, yi, px_x, px_y) in enumerate(scans):
+        for i, (name, surface) in enumerate(scans):
             group = f.create_group(f"tab_{i:02}")
             group.create_dataset("name", data=name.encode("utf-8"))
-            group.create_dataset("grid", data=grid, compression="gzip")
-            group.create_dataset("xi", data=xi, compression="gzip")
-            group.create_dataset("yi", data=yi, compression="gzip")
-            group.create_dataset("px_x", data=px_x)
-            group.create_dataset("px_y", data=px_y)
+            group.create_dataset("grid", data=surface.height, compression="gzip")
+            group.create_dataset("xi", data=surface.xi, compression="gzip")
+            group.create_dataset("yi", data=surface.yi, compression="gzip")
+            group.create_dataset("px_x", data=surface.dx)
+            group.create_dataset("px_y", data=surface.dy)
 ```
 
 ---
@@ -172,7 +172,15 @@ def load_csv_data(fname, xy_units='um', z_units='um', progress_callback=None):
     # Build grid from coordinates
     # ... (grid construction logic)
     
-    return name, grid, xi, yi, px_x, px_y
+    # Return Surface object
+    return Surface(
+        height=grid,
+        dx=px_x,
+        dy=px_y,
+        x0=xi[0],
+        y0=yi[0],
+        unit="µm"
+    )
 ```
 
 ---

@@ -33,7 +33,7 @@ from .workers import GridWorker
 import logging
 logger = logging.getLogger(__name__)
 
-def svg_icon(path, size=24):
+def svg_icon(path: str, size: int = 24):
     renderer = QSvgRenderer(path)
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
@@ -81,7 +81,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker = None
         self.thread = None
 
-    def _is_roi_valid_and_visible(self, roi):
+    def _is_roi_valid_and_visible(self, roi) -> bool:
         """Safely checks if a Qt ROI object is valid and visible.
         
         Args:
@@ -98,7 +98,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # Object has been deleted by Qt
             return False
 
-    def _is_roi_deleted(self, roi):
+    def _is_roi_deleted(self, roi) -> bool:
         """Checks if a Qt ROI object has been deleted.
         
         Args:
@@ -122,7 +122,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.currentChanged.connect(self.move_roi_to_current_tab)
 
 
-    def create_mask(self, h, w):
+    def create_mask(self, h: int, w: int) -> np.ndarray | None:
         """Creates a boolean mask for the currently active ROI (circle or rectangle).
 
         Determines which ROI is visible and generates the corresponding mask for the given shape.
@@ -155,7 +155,7 @@ class MainWindow(QtWidgets.QMainWindow):
             mask = self.create_rectangle_mask((h, w), (cx, cy), width, height)
         return mask
 
-    def apply_roi_mask(self, inside):
+    def apply_roi_mask(self, inside: bool):
         """Applies a mask to the current tab's grid based on the active ROI.
 
         Generates a mask from the visible ROI and deletes values inside or outside the mask, depending on the 'inside' flag.
@@ -185,7 +185,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def del_outside_mask(self):
         self.apply_roi_mask(False)
 
-    def move_roi_to_current_tab(self, idx):
+    def move_roi_to_current_tab(self, idx: int):
         """Moves the shared ROI (circle or rectangle) to the currently selected tab.
 
         Ensures that only the active ROI is visible on the current tab and removed from all others.
@@ -284,7 +284,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tab.image_view.getView().addItem(self.shared_rectangle_roi)
         self.shared_rectangle_roi.show()
 
-    def close_tab(self, index):
+    def close_tab(self, index: int):
         widget = self.tabs.widget(index)
         if widget is not None:
             self.tabs.removeTab(index)
@@ -471,7 +471,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toolbar.setStyleSheet("QToolButton { color: #222; }")
 
 
-    def create_circle_mask(self, shape, center, radius):
+    def create_circle_mask(self, shape: tuple[int, int], center: tuple[int, int], radius: float) -> np.ndarray:
         """Creates a boolean mask for a circle within a 2D array.
 
         Generates a mask where points inside the specified circle are True and others are False.
@@ -489,7 +489,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return dist <= radius
 
 
-    def create_rectangle_mask(self, shape, center, width, height):
+    def create_rectangle_mask(self, shape: tuple[int, int], center: tuple[int, int], width: float, height: float) -> np.ndarray:
         """
         Creates a boolean mask for a rectangle within a 2D array.
 
@@ -546,7 +546,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings.setValue("recentFiles", self.recent_files)
         event.accept()
 
-    def add_to_recent_files(self, path):
+    def add_to_recent_files(self, path: str):
         if path in self.recent_files:
             self.recent_files.remove(path)
         self.recent_files.insert(0, path)
@@ -574,7 +574,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def current_tab(self):
         return self.tabs.currentWidget()
 
-    def load_csv(self, fname, tab):
+    def load_csv(self, fname: str, tab: ScanTab):
         # Zapytaj użytkownika o jednostki z sugerowanym wyborem
         units = self._ask_for_units(fname)
         if units is None:
@@ -592,13 +592,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thread = QtCore.QThread()
         self.worker.moveToThread(self.thread)
         self.worker.progress.connect(dlg.setValue)
-        self.worker.finished.connect(lambda *args: tab.set_data(*args))
+        self.worker.finished.connect(tab.set_surface)
         self.worker.finished.connect(self.thread.quit)
         self.thread.started.connect(self.worker.process)
         self.thread.start()
         dlg.exec_()
     
-    def _ask_for_units(self, fname):
+    def _ask_for_units(self, fname: str) -> tuple[str, str] | None:
         """Ask user about XY and Z coordinate units with suggested choices based on data sample.
         
         Args:
@@ -674,14 +674,15 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             return None
 
-    def load_npz(self, fname):
+    def load_npz(self, fname: str) -> bool:
         try:
-            scans = load_npz_data(fname)
-            for name, grid, xi, yi, dx, dy in scans:
+            surfaces = load_npz_data(fname)
+            for surface in surfaces:
+                name = surface.metadata.get("name", "Scan")
                 tab = ScanTab()
                 self.tabs.addTab(tab, name)
                 self.tabs.setCurrentWidget(tab)
-                tab.set_data(grid, xi, yi, dx, dy)
+                tab.set_surface(surface)
             self.add_to_recent_files(fname)
             return True
         except ValueError as e:
@@ -691,7 +692,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"Error while loading:\n{e}")
             return False
 
-    def load_stl(self, fname, tab):
+    def load_stl(self, fname: str, tab: ScanTab) -> None:
         """Load STL file and convert to height map grid.
         
         Args:
@@ -724,12 +725,12 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.show()
         
         try:
-            grid, xi, yi, dx, dy = load_stl_data(
+            surface = load_stl_data(
                 fname,
                 resolution=resolution,
                 progress_callback=dlg.setValue
             )
-            tab.set_data(grid, xi, yi, dx, dy)
+            tab.set_surface(surface)
             dlg.setValue(100)
         except Exception as e:
             dlg.close()
@@ -739,14 +740,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if idx >= 0:
                 self.tabs.removeTab(idx)
     
-    def load_h5(self, fname):
+    def load_h5(self, fname: str) -> bool:
         try:
-            scans = load_h5_data(fname)
-            for name, grid, xi, yi, dx, dy in scans:
+            surfaces = load_h5_data(fname)
+            for surface in surfaces:
+                name = surface.metadata.get("name", "Scan")
                 tab = ScanTab()
                 self.tabs.addTab(tab, str(name))
                 self.tabs.setCurrentWidget(tab)
-                tab.set_data(grid, xi, yi, dx, dy)
+                tab.set_surface(surface)
             self.add_to_recent_files(fname)
             return True
         except ValueError as e:
@@ -757,7 +759,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
 
 
-    def create_tab_and_load(self, fname):
+    def create_tab_and_load(self, fname: str):
         if fname.endswith('.csv') or fname.endswith('.dat') or fname.endswith('.txt'):
             tab = ScanTab()
             self.tabs.addTab(tab, fname.split('/')[-1])
@@ -785,7 +787,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.create_tab_and_load(fname)
 
-    def open_file_from_recent(self, path):
+    def open_file_from_recent(self, path: str):
         if not QtCore.QFile.exists(path):
             QtWidgets.QMessageBox.warning(self, "File not found", f"File not found:\n{path}")
             self.recent_files.remove(path)
@@ -794,7 +796,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.create_tab_and_load(path)
 
     # format: tabs = [('name0', tab0), ('name1', tab1), ...]
-    def save_tabs(self, tabs=None):
+    def save_tabs(self, tabs: list[tuple[str, ScanTab]] = None) -> None:
         if tabs is None:
             QtWidgets.QMessageBox.warning(self, "Warning", "No data to save.")
             return
@@ -816,7 +818,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # Prepare scans data: list of (name, Surface)
             scans = []
             for name, tab in tabs:
-                surface = tab.getGridData()
+                surface = tab.get_surface()
                 scans.append((name, surface))
             
             if fname.endswith(".npz"):
@@ -946,8 +948,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 tab1 = self.tabs.widget(idx1)
                 tab2 = self.tabs.widget(idx2)
 
-            tab1.setGridData(scan1_aligned_data)
-            tab2.setGridData(scan2_aligned_data)
+            tab1.set_surface(scan1_aligned_data)
+            tab2.set_surface(scan2_aligned_data)
 
 
         # Dialog wyboru zakładek
@@ -993,8 +995,8 @@ class MainWindow(QtWidgets.QMainWindow):
         #     self.viewer = None
 
         self.viewer = OverlayViewer( 
-            tab1.getGridData(), 
-            tab2.getGridData(),
+            tab1.get_surface(), 
+            tab2.get_surface(),
             on_accept=partial(receive_aligned_grids, idx1=idx1, idx2=idx2),
             parent=self
         )
