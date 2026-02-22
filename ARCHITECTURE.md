@@ -148,19 +148,40 @@ frasta/
 │   ├── morphology.py
 │   ├── alignment.py
 │   ├── transforms.py
-│   └── interpolation.py
+│   ├── interpolation.py
+│   └── plane_fitting.py
 ├── gui/            # User interface
-│   ├── main_window.py
-│   ├── scan_tab.py
+│   ├── main_window/
+│   │   ├── main_window.py
+│   │   ├── roi_controller.py
+│   │   ├── file_controller.py
+│   │   ├── processing_controller.py
+│   │   ├── registration_controller.py
+│   │   ├── menu_builder.py
+│   │   └── toolbar_builder.py
+│   ├── scan_tab/
+│   │   ├── scan_tab.py
+│   │   ├── histogram_manager.py
+│   │   ├── interactive_handler.py
+│   │   └── transform_operations.py
 │   ├── dialogs/
 │   │   ├── processing_dialog.py
-│   │   ├── profile_viewer.py
-│   │   └── overlay_viewer.py
+│   │   ├── profile_viewer/
+│   │   ├── overlay_viewer.py
+│   │   └── about.py
 │   ├── viewers/
-│   │   ├── grid_3d_viewer.py
-│   │   └── lod_surface.py
+│   │   ├── grid_3d_viewer/
+│   │   │   ├── grid_3d_viewer.py
+│   │   │   ├── lod_manager.py
+│   │   │   ├── colormap_manager.py
+│   │   │   ├── surface_renderer.py
+│   │   │   ├── profile_manager.py
+│   │   │   └── camera_controller.py
+│   │   ├── lod_surface.py
+│   │   └── limited_gl_view.py
 │   ├── widgets/
-│   │   └── surface_control_panel.py
+│   │   ├── surface_control_panel.py
+│   │   └── responsive_infinite_line.py
 │   └── workers/
 │       ├── csv_loader_worker.py
 │       └── profile_loader_worker.py
@@ -219,6 +240,7 @@ frasta/
 | `alignment.py` | Scan-to-scan alignment | `remove_relative_offset()`, `remove_relative_tilt()` |
 | `transforms.py` | Geometric transforms | `rotate_grid()`, `rescale_grid()`, `crop_to_valid_region()`, `auto_register_surfaces()` |
 | `interpolation.py` | Hole filling | `fill_holes()` |
+| `plane_fitting.py` | Local plane fitting for tilt correction | `fit_plane_local_least_squares()`, `fit_plane_local_ransac()`, `fit_plane_local_median_filter()` |
 
 **Function Signature Pattern:**
 ```python
@@ -258,15 +280,38 @@ def process_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
 
 ```
 gui/
-├── main_window.py          # Main application window, menu bar, toolbar
-├── scan_tab.py             # Individual scan display with histogram/ROI tools
+├── main_window/            # Main application window (refactored into controllers)
+│   ├── main_window.py          # Main window class with routing
+│   ├── roi_controller.py       # ROI operations
+│   ├── file_controller.py      # File I/O operations
+│   ├── processing_controller.py # Data processing
+│   ├── registration_controller.py # Scan comparison/registration
+│   ├── menu_builder.py         # Menu and action creation
+│   └── toolbar_builder.py      # Toolbar setup
+├── scan_tab/               # Individual scan display (refactored into components)
+│   ├── scan_tab.py             # Main scan widget
+│   ├── histogram_manager.py    # Histogram display and threshold controls
+│   ├── interactive_handler.py  # Mouse event handling (zero point, tilt, seeds)
+│   └── transform_operations.py # Geometric transformations
 ├── dialogs/                # Modal dialogs for parameters & results
 │   ├── processing_dialog.py   # Parameter input for filtering/morphology/transforms
-│   ├── profile_viewer.py      # Cross-section profile analysis
+│   ├── profile_viewer/         # Cross-section profile analysis (refactored)
+│   │   ├── profile_viewer.py      # Main profile viewer window
+│   │   ├── data_manager.py        # Load/save profiles and scans
+│   │   ├── profile_analyzer.py    # Linear fit, angle, tilt corrections
+│   │   ├── roi_handler.py         # Profile line placement and ROI
+│   │   ├── plot_interactions.py   # Plot mouse events and annotations
+│   │   └── visualization_manager.py # 3D view, statistics, volume calc
 │   ├── overlay_viewer.py      # Scan-to-scan comparison
 │   └── about.py              # About dialog
 ├── viewers/                # 3D visualization
-│   ├── grid_3d_viewer.py     # OpenGL-based 3D surface viewer
+│   ├── grid_3d_viewer/         # OpenGL-based 3D surface viewer (refactored)
+│   │   ├── grid_3d_viewer.py      # Main 3D viewer widget
+│   │   ├── lod_manager.py         # Level-of-detail management
+│   │   ├── colormap_manager.py    # Colormap and range controls
+│   │   ├── surface_renderer.py    # Surface geometry and rendering
+│   │   ├── profile_manager.py     # Profile lines and cross-sections
+│   │   └── camera_controller.py   # Camera positioning
 │   ├── lod_surface.py        # Level-of-detail mesh for performance
 │   └── limited_gl_view.py    # Custom view with limited controls
 ├── widgets/                # Reusable UI components
@@ -697,7 +742,10 @@ Follow same pattern as filters, but use `TransformDialog` and `processing/transf
 
 ### Adding a New 3D Visualization Mode
 
-**1. Implement in `gui/viewers/grid_3d_viewer.py` or `lod_surface.py`**
+**1. Implement in `gui/viewers/grid_3d_viewer/` modules:**
+   - New rendering modes → `surface_renderer.py`
+   - LOD adjustments → `lod_manager.py`
+   - Colormap schemes → `colormap_manager.py`
 
 **2. Add menu option in `main_window.py`**
 

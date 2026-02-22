@@ -40,6 +40,13 @@ from .transforms import (
     apply_registration
 )
 
+# Local plane fitting (for interactive tilt correction)
+from .plane_fitting import (
+    fit_plane_local_least_squares,
+    fit_plane_local_ransac,
+    fit_plane_local_median_filter
+)
+
 __all__ = [
     # Alignment
     'remove_relative_offset',
@@ -70,4 +77,8 @@ __all__ = [
     'crop_to_valid_region',
     'auto_register_surfaces',
     'apply_registration',
+    # Local plane fitting
+    'fit_plane_local_least_squares',
+    'fit_plane_local_ransac',
+    'fit_plane_local_median_filter',
 ]

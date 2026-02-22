@@ -215,3 +215,18 @@ class ControlsPanel(QtWidgets.QWidget):
         ctrl_layout.addWidget(self.checkbox_plane)
         
         main_layout.addLayout(ctrl_layout)
+    
+    def update_visibility(self, has_adjusted_surface=False, has_profile_line=False):
+        """Update visibility of controls based on available data.
+        
+        Args:
+            has_adjusted_surface (bool): Whether adjusted surface data is present.
+            has_profile_line (bool): Whether profile line data is present.
+        """
+        # Adjusted surface controls and link checkbox
+        self.adj_controls.setVisible(has_adjusted_surface)
+        self.chk_link_ranges.setVisible(has_adjusted_surface)
+        
+        # Profile line and section plane controls
+        self.checkbox_line.setVisible(has_profile_line)
+        self.checkbox_plane.setVisible(has_profile_line)
