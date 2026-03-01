@@ -121,7 +121,7 @@ class TestLODManager:
     def test_update_lod_tick_handles_errors(self, lod_manager):
         """Test _update_lod_tick handles exceptions gracefully."""
         mock_lod = Mock()
-        mock_lod.update_visible.side_effect = Exception("Test error")
+        mock_lod.update_lod.side_effect = Exception("Test error")
         lod_manager._lod['ref'] = mock_lod
         
         # Should not raise exception

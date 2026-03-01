@@ -73,7 +73,7 @@ class LODManager:
             # Update LOD surfaces
             for key in ['ref', 'adj']:
                 if self._lod.get(key):
-                    self._lod[key].update_visible()
+                    self._lod[key].update_lod()
             
             # Ensure cross-section plane and profile lines render last
             # (after surfaces) by removing and re-adding them
