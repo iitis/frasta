@@ -1,4 +1,8 @@
+# Surface data model
+from functools import cached_property
+
 import numpy as np
+
 
 class Surface:
     """
@@ -46,18 +50,22 @@ class Surface:
 
     @property
     def ny(self):
+        """Number of data points in Y (rows)."""
         return self.height.shape[0]
 
     @property
     def nx(self):
+        """Number of data points in X (columns)."""
         return self.height.shape[1]
 
     @property
     def length(self):
+        """Physical length in Y direction."""
         return (self.ny - 1) * self.dy
 
     @property
     def width(self):
+        """Physical width in X direction."""
         return (self.nx - 1) * self.dx
 
     # ---------------------------
@@ -65,12 +73,14 @@ class Surface:
     # replaces GridData.xi, yi
     # ---------------------------
 
-    @property
+    @cached_property
     def xi(self):
+        """X coordinates array (cached)."""
         return self.x0 + np.arange(self.nx) * self.dx
 
-    @property
+    @cached_property
     def yi(self):
+        """Y coordinates array (cached)."""
         return self.y0 + np.arange(self.ny) * self.dy
 
     # ---------------------------
@@ -92,6 +102,7 @@ class Surface:
         )
 
     def crop(self, ny, nx):
+        """Crop surface to ny rows and nx columns, keeping the same origin."""
         return Surface(
             self.height[:ny, :nx],
             self.dx,
@@ -104,3 +115,4 @@ class Surface:
             self.vmin,
             self.vmax,
         )
+
