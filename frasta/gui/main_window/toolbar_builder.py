@@ -21,6 +21,7 @@ class ToolbarBuilder:
         """
         self.main_window = main_window
         self.menu_builder = menu_builder
+        self.colormap_combo = None
     
     def create_toolbar(self):
         """Create toolbar with commonly used actions."""
@@ -41,7 +42,12 @@ class ToolbarBuilder:
         toolbar.addAction(actions["inverse"])
         toolbar.addAction(actions["zero"])
         toolbar.addAction(actions["tilt"])
-        toolbar.addAction(actions["colormap"])
+        toolbar.addWidget(QtWidgets.QLabel("2D colormap:"))
+        self.colormap_combo = QtWidgets.QComboBox()
+        self.colormap_combo.addItems(["Gray", "Metrology", "viridis", "plasma", "magma", "turbo"])
+        self.colormap_combo.setCurrentText("Gray")
+        self.colormap_combo.currentTextChanged.connect(self.main_window.set_current_tab_colormap)
+        toolbar.addWidget(self.colormap_combo)
         toolbar.addSeparator()
         
         # Advanced processing
@@ -61,5 +67,6 @@ class ToolbarBuilder:
         toolbar.addAction(actions["exit"])
 
         toolbar.setStyleSheet("QToolButton { color: #222; }")
+        self.main_window.sync_colormap_selector()
         
         return toolbar

@@ -14,7 +14,9 @@ import pyqtgraph as pg
 
 from frasta.gui.scan_tab.histogram_manager import HistogramManager
 from frasta.gui.scan_tab.interactive_handler import InteractiveHandler
+from frasta.gui.scan_tab.scan_tab import ScanTab
 from frasta.gui.scan_tab.transform_operations import TransformOperations
+from frasta.gui.widgets import HistogramViewBox
 
 
 # ============================================================================
@@ -31,6 +33,12 @@ class TestHistogramManager:
         widget.clear = Mock()
         widget.plot = Mock(return_value=Mock())
         widget.addItem = Mock()
+        widget.setXRange = Mock()
+        view_box = Mock()
+        view_box.set_data_bounds = Mock()
+        view_box.viewRange = Mock(return_value=([10.0, 20.0], [0.0, 1.0]))
+        view_box._clamp_x_range = Mock(side_effect=lambda x0, x1: (x0, x1))
+        widget.getViewBox = Mock(return_value=view_box)
         return widget
     
     @pytest.fixture
@@ -47,6 +55,7 @@ class TestHistogramManager:
         """Test HistogramManager initializes correctly."""
         assert hist_manager.hist_widget == mock_hist_widget
         assert hist_manager.hist_plot is None
+        assert hist_manager.hist_bars is None
         assert hist_manager.hist_min_line is None
         assert hist_manager.hist_max_line is None
         assert hist_manager._updating_histogram is False
@@ -56,11 +65,13 @@ class TestHistogramManager:
         grid = np.arange(100, dtype=float).reshape(10, 10)
         
         with patch('frasta.gui.scan_tab.histogram_manager.ResponsiveInfiniteLine'):
-            hist_manager.update_histogram(grid)
+            hist_manager.update_histogram(grid, colormap_name="Metrology")
             
             # Should clear and create new plot
             hist_manager.hist_widget.clear.assert_called_once()
             hist_manager.hist_widget.plot.assert_called_once()
+            assert hist_manager.hist_bars is not None
+            assert "pen" in hist_manager.hist_widget.plot.call_args.kwargs
     
     def test_update_histogram_with_nan(self, hist_manager):
         """Test update_histogram handles NaN values."""
@@ -72,6 +83,22 @@ class TestHistogramManager:
             
             # Should process successfully
             hist_manager.hist_widget.clear.assert_called_once()
+
+    def test_update_histogram_preserves_visible_x_range(self, hist_manager):
+        """Histogram redraw should keep the current horizontal zoom window."""
+        grid = np.arange(100, dtype=float).reshape(10, 10)
+
+        with patch('frasta.gui.scan_tab.histogram_manager.ResponsiveInfiniteLine'):
+            hist_manager.update_histogram(grid, colormap_name="Metrology")
+            hist_manager.hist_min_line.value.return_value = 10.0
+            hist_manager.hist_max_line.value.return_value = 90.0
+            hist_manager.hist_widget.setXRange.reset_mock()
+            hist_manager.update_histogram(grid, colormap_name="viridis")
+
+        hist_manager.hist_widget.setXRange.assert_called()
+        args = hist_manager.hist_widget.setXRange.call_args.args
+        assert args[0] == 10.0
+        assert args[1] == 20.0
     
     def test_update_histogram_all_nan(self, hist_manager):
         """Test update_histogram handles all-NaN data."""
@@ -223,6 +250,7 @@ class TestInteractiveHandler:
         tab.histogram_manager.update_histogram = Mock()
         tab.histogram_manager.set_threshold_values = Mock()
         tab.update_image = Mock()
+        tab.update_histogram = Mock()
         return tab
     
     @pytest.fixture
@@ -284,6 +312,7 @@ class TestInteractiveHandler:
             # Grid should be shifted by -50.0
             assert not np.array_equal(mock_parent_tab.grid, original_grid)
             mock_parent_tab.update_image.assert_called_once()
+            mock_parent_tab.update_histogram.assert_called_once()
             assert interactive_handler.zero_point_mode is False
     
     def test_handle_tilt_click_fits_plane(self, interactive_handler, mock_parent_tab):
@@ -294,7 +323,7 @@ class TestInteractiveHandler:
             
             # Should update grid and image
             mock_parent_tab.update_image.assert_called_once()
-            mock_parent_tab.histogram_manager.update_histogram.assert_called_once()
+            mock_parent_tab.update_histogram.assert_called_once()
             assert interactive_handler.tilt_mode is False
     
     def test_handle_tilt_click_handles_error(self, interactive_handler, mock_parent_tab):
@@ -508,3 +537,53 @@ class TestTransformOperations:
         assert np.isnan(result[0, 0])
         # Other values should be preserved
         assert not np.isnan(result[1, 1])
+
+
+class TestScanTabColormap:
+    """Test suite for ScanTab colormap selection helpers."""
+
+    @pytest.fixture
+    def scan_tab(self, qapp):
+        """Create ScanTab widget."""
+        tab = ScanTab()
+        try:
+            yield tab
+        finally:
+            tab.deleteLater()
+
+    def test_set_colormap_gray_disables_lookup(self, scan_tab):
+        """Gray mode should disable the color lookup table."""
+        scan_tab.update_image = Mock()
+        scan_tab.update_histogram = Mock()
+
+        scan_tab.set_colormap("Gray")
+
+        assert scan_tab.is_colormap is False
+        assert scan_tab.current_colormap is None
+        assert scan_tab.get_colormap_name() == "Gray"
+        scan_tab.update_histogram.assert_called_once()
+        scan_tab.update_image.assert_called_once()
+
+    def test_set_colormap_named_enables_lookup(self, scan_tab):
+        """Named colormap should enable lookup-table rendering."""
+        scan_tab.update_image = Mock()
+        scan_tab.update_histogram = Mock()
+
+        scan_tab.set_colormap("Metrology")
+
+        assert scan_tab.is_colormap is True
+        assert scan_tab.current_colormap == "metrology"
+        assert scan_tab.get_colormap_name() == "Metrology"
+        scan_tab.update_histogram.assert_called_once()
+        scan_tab.update_image.assert_called_once()
+
+    def test_histogram_uses_custom_view_box(self, scan_tab):
+        """Histogram widget should use the wheel-zoom-capable view box."""
+        assert isinstance(scan_tab.hist_widget.getViewBox(), HistogramViewBox)
+
+    def test_histogram_view_box_stores_bounds(self, scan_tab):
+        """Histogram view box should expose clamped data bounds."""
+        view_box = scan_tab.hist_widget.getViewBox()
+        view_box.set_data_bounds(-5.0, 10.0)
+        assert view_box._data_x_min == -5.0
+        assert view_box._data_x_max == 10.0

@@ -66,8 +66,8 @@ class SurfaceControlWidget(QtWidgets.QWidget):
             
         # Colormap combo
         self.combo_colormap = QtWidgets.QComboBox()
-        self.combo_colormap.addItems(["None", "RG", "B&W", "viridis", "plasma", "magma"])
-        self.combo_colormap.setCurrentText('RG')
+        self.combo_colormap.addItems(["None", "RG", "B&W", "Metrology", "viridis", "plasma", "magma"])
+        self.combo_colormap.setCurrentText('Metrology')
         
         layout.addWidget(QtWidgets.QLabel("mode:"))
         layout.addWidget(self.combo_mode)

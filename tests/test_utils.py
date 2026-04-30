@@ -1,11 +1,18 @@
-"""Tests for frasta.utils module (resources and decorators)."""
+"""Tests for frasta.utils module (resources, decorators, and colormaps)."""
 
 import pytest
 import time
 import sys
 from pathlib import Path
 from unittest.mock import patch
-from frasta.utils import resource_path, measure_time
+from frasta.utils import (
+    resource_path,
+    measure_time,
+    get_colormap,
+    get_lookup_table,
+    get_gradient_brush,
+    get_brushes_for_values,
+)
 
 
 class TestResourcePath:
@@ -118,3 +125,37 @@ class TestMeasureTimeDecorator:
         
         assert func1() == 1
         assert func2() == 2
+
+
+class TestColormaps:
+    """Test suite for custom colormap helpers."""
+
+    def test_get_metrology_colormap(self):
+        """Custom metrology colormap should be available."""
+        cmap = get_colormap("metrology")
+        assert cmap is not None
+
+    def test_get_lookup_table_shape(self):
+        """Lookup table should have requested shape and RGB channels."""
+        lut = get_lookup_table("metrology", 64)
+        assert lut.shape == (64, 3)
+
+    def test_get_builtin_colormap(self):
+        """Builtin pyqtgraph colormaps still work through helper."""
+        cmap = get_colormap("viridis")
+        assert cmap is not None
+
+    def test_get_difference_colormap(self):
+        """Custom diverging colormap should be available."""
+        cmap = get_colormap("difference")
+        assert cmap is not None
+
+    def test_get_gradient_brush(self):
+        """Gradient brush helper should build a brush."""
+        brush = get_gradient_brush("metrology")
+        assert brush is not None
+
+    def test_get_brushes_for_values(self):
+        """Per-bin brush helper should return one brush per sample."""
+        brushes = get_brushes_for_values("difference", [0.0, 0.5, 1.0])
+        assert len(brushes) == 3

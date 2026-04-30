@@ -1,4 +1,4 @@
-﻿"""Level-of-detail (LOD) surface rendering for 3D visualization.
+"""Level-of-detail (LOD) surface rendering for 3D visualization.
 
 This module provides automatic level-of-detail management for large 3D surface
 meshes, dynamically switching between different mesh densities based on camera
@@ -9,6 +9,8 @@ import numpy as np
 import pyqtgraph.opengl as gl
 from pyqtgraph.Qt import QtWidgets, QtGui, QtCore
 import pyqtgraph as pg
+
+from ...utils import get_colormap
 
 
 class LODSurface:
@@ -45,7 +47,7 @@ class LODSurface:
         self.items = {}
         self.data = None
         self.color = (0,1,0,1)
-        self.colormap = 'RG'
+        self.colormap = 'Metrology'
         self.lohi = None
         self.mode = 'surface'
         self.visible = True
@@ -229,8 +231,7 @@ class LODSurface:
                 else:  # B&W
                     C = np.stack([t, t, t, np.ones_like(t)], axis=1)
             else:
-                # kolormapy z pyqtgraph
-                cmap = pg.colormap.get(self.colormap)
+                cmap = get_colormap(self.colormap)
                 C = cmap.map(t, mode='float').astype(np.float32)
 
             # przezroczyste wierzchoĹ‚ki dla NaN
@@ -318,4 +319,3 @@ class LODSurface:
         # przeĹ‚Ä…cz widocznoĹ›Ä‡
         for k,it in self.items.items():
             it.setVisible(self.visible and (k == s))
-

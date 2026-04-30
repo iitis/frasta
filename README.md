@@ -32,7 +32,10 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
 1. Import one or more fracture-surface scans in CSV (XYZ grid) format.
 2. Apply basic preprocessing:
    - define region of interest (ROI),
-   - adjust value range using histogram thresholding,
+    - adjust value range using histogram thresholding,
+   - use the mouse wheel over the histogram to zoom its visible value range,
+   - drag the histogram background horizontally to pan the zoomed range,
+   - choose grayscale or a false-color palette directly from the main toolbar,
    - fill missing data if necessary.
 3. Apply advanced processing steps:
    - Use **Processing** menu for filtering, leveling, transforms

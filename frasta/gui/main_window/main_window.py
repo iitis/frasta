@@ -67,6 +67,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Connect tab changes to ROI controller
         self.tabs.currentChanged.connect(self.roi_controller.move_roi_to_current_tab)
+        self.tabs.currentChanged.connect(self.sync_colormap_selector)
 
     def close_tab(self, index: int):
         """Close a tab at given index.
@@ -99,6 +100,38 @@ class MainWindow(QtWidgets.QMainWindow):
         """Toggle colormap for current tab."""
         if tab := self.current_tab():
             tab.toggle_colormap()
+            self.sync_colormap_selector()
+
+    def set_current_tab_colormap(self, name: str):
+        """Apply selected 2D colormap to the current tab."""
+        if tab := self.current_tab():
+            tab.set_colormap(name)
+            self.sync_colormap_selector()
+
+    def sync_colormap_selector(self, _index: int | None = None):
+        """Synchronize toolbar colormap selector with the active tab."""
+        combo = getattr(self.toolbar_builder, "colormap_combo", None)
+        action = self.menu_builder.actions.get("colormap")
+        if combo is None:
+            return
+
+        combo.blockSignals(True)
+        try:
+            if tab := self.current_tab():
+                name = tab.get_colormap_name()
+                idx = combo.findText(name)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                if action is not None:
+                    action.setChecked(name != "Gray")
+            else:
+                idx = combo.findText("Gray")
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                if action is not None:
+                    action.setChecked(False)
+        finally:
+            combo.blockSignals(False)
 
     def set_zero_point_mode(self):
         """Enable zero point selection mode for current tab."""

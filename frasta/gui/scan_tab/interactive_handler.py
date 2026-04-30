@@ -96,7 +96,7 @@ class InteractiveHandler:
         min_val = vmin - value
         max_val = vmax - value
         
-        self.parent_tab.histogram_manager.update_histogram(self.parent_tab.grid)
+        self.parent_tab.update_histogram()
         self.parent_tab.histogram_manager.set_threshold_values(min_val, max_val)
     
     def _handle_tilt_click(self, x: int, y: int):
@@ -122,7 +122,7 @@ class InteractiveHandler:
             # Apply correction (note: adding, not subtracting!)
             self.parent_tab.grid = self.parent_tab.grid + plane
             self.parent_tab.update_image()
-            self.parent_tab.histogram_manager.update_histogram(self.parent_tab.grid)
+            self.parent_tab.update_histogram()
         except ValueError as e:
             QtWidgets.QMessageBox.warning(
                 self.parent_tab, "Error", 

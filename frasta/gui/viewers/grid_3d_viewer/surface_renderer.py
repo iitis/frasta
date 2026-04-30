@@ -10,6 +10,9 @@ This module handles:
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
+
+from ....utils import get_colormap
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -154,7 +157,7 @@ class SurfaceRenderer:
         
         logger.debug(f"place_surface({which}) - end")
     
-    def add_reference_surface(self, xs, ys, Z, colormap='RG'):
+    def add_reference_surface(self, xs, ys, Z, colormap='Metrology'):
         """Add or update the reference surface.
         
         Args:
@@ -167,7 +170,7 @@ class SurfaceRenderer:
         self.place_surface('surface_ref_item', xs, ys, Z, 
                           self.ref_surface_mode, kolor, colormap, 'ref')
     
-    def add_adjusted_surface(self, xs, ys, Z, colormap='RG'):
+    def add_adjusted_surface(self, xs, ys, Z, colormap='Metrology'):
         """Add or update the adjusted surface.
         
         Args:
@@ -288,7 +291,7 @@ class SurfaceRenderer:
             z_vals = verts[:, 2]
             z_min, z_max = np.nanmin(z_vals), np.nanmax(z_vals)
             normed = (z_vals - z_min) / (z_max - z_min + 1e-8)
-            cmap = pg.colormap.get(colormap)
+            cmap = get_colormap(colormap)
             vertex_colors = cmap.map(normed, mode='float')
         
         return gl.GLMeshItem(

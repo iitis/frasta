@@ -9,7 +9,8 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from ...core import Surface        
+from ...core import Surface
+from ...utils import get_colormap, get_brushes_for_values
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.
@@ -54,6 +55,7 @@ class OverlayViewer(QtWidgets.QWidget):
 
 
         self._last_diff_image = None   # original difference (before masking)
+        self._diff_hist_bars = None
 
         # Images
         self.img1 = pg.ImageItem(self.scan1)
@@ -375,6 +377,7 @@ class OverlayViewer(QtWidgets.QWidget):
     #     self.close()
 
     def update_difference_map(self):
+        """Redraw the signed difference map for the current scan alignment."""
         tx = self.slider_tx.value()
         ty = self.slider_ty.value()
 
@@ -409,12 +412,54 @@ class OverlayViewer(QtWidgets.QWidget):
         scan2_trans_cropped = scan2_trans[:h, :w]
 
         scan_diff = scan1_cropped - scan2_trans_cropped
+        finite_diff = scan_diff[np.isfinite(scan_diff)]
+        if finite_diff.size > 0:
+            max_abs = float(np.max(np.abs(finite_diff)))
+        else:
+            max_abs = 1.0
+        if max_abs <= 0.0:
+            max_abs = 1.0
 
-        self.diff_view.setImage(np.nan_to_num(scan_diff, nan=0), autoLevels=True)
+        self.diff_view.setImage(
+            np.nan_to_num(scan_diff, nan=0.0),
+            autoLevels=False,
+            levels=(-max_abs, max_abs),
+        )
 
         image_item = self.diff_view.getImageItem()
-        lut = pg.colormap.get("inferno").getLookupTable(0.0, 1.0, 512)
-        image_item.setLookupTable(lut)
+        diff_cmap = get_colormap("difference")
+        image_item.setLookupTable(diff_cmap.getLookupTable(0.0, 1.0, 512))
+        self.diff_view.setColorMap(diff_cmap)
+        self._update_difference_histogram(scan_diff, max_abs)
+
+    def _update_difference_histogram(self, scan_diff: np.ndarray, max_abs: float):
+        """Render difference histogram with individually colored bins."""
+        hist_item = self.diff_view.ui.histogram.item
+        hist_item.plot.setPen(pg.mkPen(255, 255, 255, 110))
+        hist_item.plot.setBrush(None)
+
+        if self._diff_hist_bars is not None:
+            hist_item.vb.removeItem(self._diff_hist_bars)
+            self._diff_hist_bars = None
+
+        finite_diff = scan_diff[np.isfinite(scan_diff)]
+        if finite_diff.size == 0:
+            return
+
+        y, x = np.histogram(finite_diff, bins=256, range=(-max_abs, max_abs))
+        centers = 0.5 * (x[:-1] + x[1:])
+        widths = np.diff(x)
+        normalized = (centers + max_abs) / (2.0 * max_abs)
+        brushes = get_brushes_for_values("difference", normalized)
+
+        self._diff_hist_bars = pg.BarGraphItem(
+            x=centers,
+            height=y,
+            width=widths,
+            brushes=brushes,
+            pen=pg.mkPen(255, 255, 255, 40),
+        )
+        hist_item.vb.addItem(self._diff_hist_bars)
 
     # def update_levels(self):
     #     if self._last_diff_image is None:
@@ -464,5 +509,3 @@ class OverlayViewer(QtWidgets.QWidget):
         transform.translate(-cx, -cy)          # wróć na miejsce
 
         self.img2.setTransform(transform)
-
-

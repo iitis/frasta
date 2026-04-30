@@ -2,8 +2,18 @@
 
 from .resources import resource_path
 from .decorators import measure_time
+from .colormaps import (
+    get_colormap,
+    get_lookup_table,
+    get_gradient_brush,
+    get_brushes_for_values,
+)
 
 __all__ = [
     'resource_path',
-    'measure_time'
+    'measure_time',
+    'get_colormap',
+    'get_lookup_table',
+    'get_gradient_brush',
+    'get_brushes_for_values',
 ]

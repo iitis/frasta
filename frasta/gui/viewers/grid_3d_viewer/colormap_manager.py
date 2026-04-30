@@ -19,8 +19,8 @@ class ColormapManager:
     def __init__(self):
         """Initialize colormap manager."""
         # Colormap selection
-        self.colormap_ref = 'RG'
-        self.colormap_adj = 'RG'
+        self.colormap_ref = 'Metrology'
+        self.colormap_adj = 'Metrology'
         
         # Range settings
         self.range_linked = False  # Link ref/adj ranges together

@@ -430,7 +430,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         
         m.addSeparator()
         sub_ref = m.addMenu("Ref colormap")
-        for name in ["None", "RG", "viridis", "plasma", "magma"]:
+        for name in ["None", "RG", "Metrology", "viridis", "plasma", "magma"]:
             act = sub_ref.addAction(name)
             act.setCheckable(True)
             act.setChecked((self.colormap_manager.colormap_ref or "None") == name)
@@ -438,7 +438,7 @@ class Grid3DViewer(QtWidgets.QWidget):
         
         if self.two_scans_mode:
             sub_adj = m.addMenu("Adj colormap")
-            for name in ["None", "RG", "viridis", "plasma", "magma"]:
+            for name in ["None", "RG", "Metrology", "viridis", "plasma", "magma"]:
                 act = sub_adj.addAction(name)
                 act.setCheckable(True)
                 act.setChecked((self.colormap_manager.colormap_adj or "None") == name)

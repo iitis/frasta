@@ -18,7 +18,9 @@ from scipy.interpolate import griddata
 import trimesh
 
 from ...core import Surface
+from ...utils import get_lookup_table
 from ...processing import fill_holes, remove_outliers, nan_aware_gaussian
+from ..widgets import HistogramViewBox
 
 from .histogram_manager import HistogramManager
 from .interactive_handler import InteractiveHandler
@@ -62,7 +64,7 @@ class ScanTab(QtWidgets.QWidget):
         self.image_view.ui.histogram.hide()
         self.image_view.getView().setMenuEnabled(False)
 
-        self.hist_widget = pg.PlotWidget()
+        self.hist_widget = pg.PlotWidget(viewBox=HistogramViewBox())
         self.hist_widget.setMaximumHeight(120)
         self.hist_widget.setMenuEnabled(False)
         self.hist_widget.setMouseEnabled(x=False, y=False)
@@ -83,7 +85,7 @@ class ScanTab(QtWidgets.QWidget):
 
         # Display settings
         self.is_colormap = False
-        self.current_colormap = 'gray'
+        self.current_colormap = None
 
         # Initialize managers and handlers
         self.histogram_manager = HistogramManager(self.hist_widget, self.update_image)
@@ -150,7 +152,10 @@ class ScanTab(QtWidgets.QWidget):
         logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
         
         # Update histogram first to set threshold lines
-        self.histogram_manager.update_histogram(self.grid)
+        self.histogram_manager.update_histogram(
+            self.grid,
+            colormap_name=self.get_colormap_name(),
+        )
         self.update_image()
         
         # Then set the threshold line values if provided
@@ -167,7 +172,11 @@ class ScanTab(QtWidgets.QWidget):
         Args:
             was_data_negated (bool): Whether data was recently inverted
         """
-        self.histogram_manager.update_histogram(self.grid, was_data_negated)
+        self.histogram_manager.update_histogram(
+            self.grid,
+            was_data_negated,
+            self.get_colormap_name(),
+        )
     
     def update_image(self, vmin: float = None, vmax: float = None):
         """Update the displayed image based on current grid and value range.
@@ -230,7 +239,8 @@ class ScanTab(QtWidgets.QWidget):
         # Apply colormap
         image_item = self.image_view.getImageItem()
         if self.is_colormap:
-            lut = pg.colormap.get('turbo').getLookupTable(0.0, 1.0, 256)
+            cmap_name = self.current_colormap or 'metrology'
+            lut = get_lookup_table(cmap_name, 256)
             image_item.setLookupTable(lut)
         else:
             image_item.setLookupTable(None)
@@ -241,7 +251,34 @@ class ScanTab(QtWidgets.QWidget):
     def toggle_colormap(self):
         """Toggle between grayscale and color display."""
         self.is_colormap = not self.is_colormap
+        if self.is_colormap and self.current_colormap is None:
+            self.current_colormap = 'metrology'
+        self.update_histogram()
         self.update_image()
+
+    def set_colormap(self, name: str):
+        """Set grayscale or a named colormap for the 2D scan view.
+
+        Args:
+            name (str): Display mode name. ``Gray`` disables the lookup table;
+                any other value is interpreted as a colormap name.
+        """
+        if name in ("Gray", "None", "", None):
+            self.is_colormap = False
+            self.current_colormap = None
+        else:
+            self.is_colormap = True
+            self.current_colormap = str(name).lower()
+        self.update_histogram()
+        self.update_image()
+
+    def get_colormap_name(self) -> str:
+        """Return current 2D display colormap label."""
+        if not self.is_colormap or self.current_colormap is None:
+            return "Gray"
+        if self.current_colormap == "metrology":
+            return "Metrology"
+        return self.current_colormap
 
     # ==========================================================================
     # Interactive Mode Methods
