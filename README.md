@@ -18,6 +18,15 @@ FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intend
 
 FRASTA-toolbox currently supports structured grid data exported as text-based XYZ files, where each row corresponds to a single grid point (X, Y, Z). Additional internal formats (NPZ, HDF5) are supported for faster reload and reproducible workflows.
 
+### Supported formats
+
+- **CSV, TXT, DAT**: Text-based XYZ data. Each row stores one point as `X Y Z`, `X,Y,Z`, `X;Y;Z`, or tab-separated values. Coordinates are converted to micrometers at import according to the units selected by the user.
+- **NPZ**: Compressed NumPy archive used for saving and reloading one or more gridded scans. Each scan stores `height`, `dx`, `dy`, `x0`, `y0`, and a scan name.
+- **HDF5**: Hierarchical storage for one or more gridded scans. Each scan is stored in a `tab_XX` group with datasets for `name`, `height`, `dx`, `dy`, `x0`, and `y0`.
+- **STL**: Mesh import/export support. On import, STL meshes are sampled into a regular height map; on export, valid grid cells are converted to a triangular mesh.
+
+The main FRASTA workflow assumes regular height-map data. Unstructured point clouds or volumetric scans should first be converted to a structured grid before analysis. This conversion may introduce interpolation or smoothing effects that should be considered when interpreting results.
+
 ## Typical workflow (GUI)
 
 1. Import one or more fracture-surface scans in CSV (XYZ grid) format.
@@ -58,6 +67,7 @@ FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-
 **Documentation:**
 - [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
 - [GUI Integration Guide](docs/GUI_INTEGRATION.md) - using advanced processing in the GUI
+- [Methods Overview](docs/METHODS.md) - computational workflow and assumptions
 - [Quick Reference](docs/QUICK_REFERENCE.md) - cheat sheet for all functions
 - [Examples](examples/) - interactive demos and visualizations
 
@@ -90,7 +100,25 @@ python examples/visualization.py          # Generate visualizations (saved to ex
 
 See [examples/README.md](examples/README.md) for details.
 
-## Configuration
+## Requirements
+
+FRASTA-toolbox is developed and tested primarily with Python 3.10 or newer. A standard desktop Python installation is sufficient for numerical processing and 2D views. The 3D views require an active desktop session with working OpenGL support.
+
+Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph, NumPy/SciPy-related packages, h5py, scikit-image, scikit-learn, trimesh, PyOpenGL, and OpenCV.
+
+### Operating systems
+
+- **Windows**: Primary development environment. Use the Windows installation commands below.
+- **Linux**: Supported when Qt and OpenGL desktop dependencies are available.
+- **macOS**: Supported in principle with a local Python/Qt installation. Run the application from the repository root so that icons and other resources are resolved correctly.
+
+### Hardware
+
+- CPU: standard desktop or laptop CPU.
+- RAM: depends on grid size; large scans require proportionally more memory.
+- GPU/OpenGL: required for interactive 3D visualization. The core numerical processing does not require a dedicated GPU.
+
+## Installation
 
 ### Windows
 
@@ -106,7 +134,7 @@ See [examples/README.md](examples/README.md) for details.
 * generate `requirements.txt`:
 `.venv\Scripts\pip.exe freeze > requirements.txt`
 
-### Linux
+### Linux and macOS
 
 * create virtual environment:
 `python -m venv .venv`
@@ -122,11 +150,38 @@ See [examples/README.md](examples/README.md) for details.
 
 ## Other useful commands:
 
-* create distribution package:
-`./.venv/bin/python -m PyInstaller --add-data "icons;icons" main.py`
+* create distribution package on Windows:
+`.venv\Scripts\python.exe -m PyInstaller --add-data "icons;icons" main.py`
+
+* create distribution package on Linux or macOS:
+`./.venv/bin/python -m PyInstaller --add-data "icons:icons" main.py`
 
 * run tests:
 `./.venv/bin/python -m pytest -v -s`
+
+## Troubleshooting
+
+### Icons or resources are missing
+
+Run the application from the repository root:
+
+```bash
+python main.py
+```
+
+When packaging with PyInstaller, include the `icons` directory using the platform-specific `--add-data` syntax shown above.
+
+### 3D views fail to open
+
+Check that the system has a working OpenGL-capable desktop session. Remote, headless, or software-rendered sessions may not provide the OpenGL features required by `pyqtgraph.opengl`.
+
+### Qt platform plugin errors
+
+Recreate the virtual environment and reinstall dependencies from `requirements.txt`. On Linux, also check that the system Qt/X11 or Wayland libraries required by PyQt5 are installed.
+
+### Large scans are slow
+
+Large regular grids increase both memory use and processing time. Crop invalid borders, downsample where appropriate, and use NPZ or HDF5 for repeated loading instead of re-importing text XYZ files.
 
 ## Developer documentation
 

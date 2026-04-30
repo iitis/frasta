@@ -15,7 +15,7 @@ Before editing code, read:
 ## Documentation Rules
 
 - Keep user-facing documentation free of agent-specific notes.
-- Use UTF-8 without BOM and Windows CRLF line endings.
+- Use UTF-8 without BOM and LF line endings.
 - Avoid decorative Unicode characters in Markdown. Prefer plain text labels such
   as `OK`, `BAD`, `NOTE`, and `WARNING`.
 - When behavior, public APIs, file formats, or workflow rules change, update the
