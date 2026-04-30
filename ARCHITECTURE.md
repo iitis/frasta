@@ -969,15 +969,6 @@ graph TD
 
 ---
 
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0 | 2026-02-18 | Initial architecture documentation |
-| 1.1 | 2026-02-19 | Updated to reflect Surface-based I/O, added x0/y0 positioning |
-
----
-
 ## Further Reading
 
 ### User Documentation
@@ -986,15 +977,3 @@ graph TD
 - [GUI Integration Guide](docs/GUI_INTEGRATION.md) - How to use processing in the GUI
 - [Quick Reference](docs/QUICK_REFERENCE.md) - Function cheat sheet
 
-### Developer Conventions
-- **[Conventions Index](agent-docs/conventions/README.md)** - Start here for detailed coding standards
-  - [Processing Algorithms](agent-docs/conventions/processing/algorithms.md) - required for adding filters/transforms
-  - [File I/O](agent-docs/conventions/io/file_formats.md) - format specifications and loader patterns
-  - [GUI Development](agent-docs/conventions/gui/development.md) - dialog and widget patterns
-  - [Data Structures](agent-docs/conventions/core/data_structures.md) - Surface and core types
-  - [General Standards](agent-docs/conventions/general/) - naming, imports, logging
-
----
-
-Keep this document and the convention files updated when architectural rules or
-module responsibilities change.
