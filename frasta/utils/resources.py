@@ -7,6 +7,9 @@ development and PyInstaller executable environments.
 import sys
 import os
 
+# Root of the frasta-toolbox package (two levels above this file: utils/ -> frasta/ -> frasta-toolbox/)
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def resource_path(relative_path):
     """Returns absolute path to a resource file.
@@ -21,4 +24,4 @@ def resource_path(relative_path):
     """
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+    return os.path.join(_PACKAGE_ROOT, relative_path)
