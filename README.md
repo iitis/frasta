@@ -23,9 +23,9 @@ FRASTA-toolbox currently supports structured grid data exported as text-based XY
 - **CSV, TXT, DAT**: Text-based XYZ data. Each row stores one point as `X Y Z`, `X,Y,Z`, `X;Y;Z`, or tab-separated values. Coordinates are converted to micrometers at import according to the units selected by the user.
 - **NPZ**: Compressed NumPy archive used for saving and reloading one or more gridded scans. Each scan stores `height`, `dx`, `dy`, `x0`, `y0`, and a scan name.
 - **HDF5**: Hierarchical storage for one or more gridded scans. Each scan is stored in a `tab_XX` group with datasets for `name`, `height`, `dx`, `dy`, `x0`, and `y0`.
-- **STL**: Mesh import/export support. On import, STL meshes are sampled into a regular height map; on export, valid grid cells are converted to a triangular mesh.
+- **STL**: Mesh import/export support. On import, STL meshes are sampled into a regular height map; on export, valid grid cells are converted to a triangular mesh. STL stores triangles rather than the original measurement grid, so it should be treated as an exchange or visualization format. It may not preserve all information about missing measurement points or local sampling neighborhoods.
 
-The main FRASTA workflow assumes regular height-map data. Unstructured point clouds or volumetric scans should first be converted to a structured grid before analysis. This conversion may introduce interpolation or smoothing effects that should be considered when interpreting results.
+The main FRASTA workflow assumes regular height-map data. This matches the typical output of optical surface measurement systems used for fracture topography, which commonly export regularly sampled height maps. Unstructured point clouds or volumetric scans should first be converted to a structured grid before analysis. This conversion may introduce interpolation or smoothing effects that should be considered when interpreting results.
 
 ## Typical workflow (GUI)
 

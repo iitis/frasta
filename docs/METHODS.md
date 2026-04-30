@@ -6,7 +6,10 @@ It is intended to make the implemented workflow easier to inspect and reproduce.
 ## Data Model
 
 FRASTA-toolbox represents a measured fracture surface as a regular two-dimensional
-height map. Internally, each scan is stored as a `Surface` object containing:
+height map. This representation matches the usual output of optical surface
+measurement systems used in fracture-surface studies, where the measured
+topography is commonly exported as a regularly sampled height field. Internally,
+each scan is stored as a `Surface` object containing:
 
 - `height`: a 2D NumPy array of height values.
 - `dx`, `dy`: pixel spacing in the X and Y directions.
@@ -27,7 +30,10 @@ points map to the same cell, their height values are averaged.
 The import dialog lets the user specify whether XY and Z values are in
 millimeters or micrometers. Values stored internally are converted to
 micrometers. STL files are handled differently: the mesh is sampled from above
-onto a regular XY grid and converted into a height map.
+onto a regular XY grid and converted into a height map. Because STL stores
+triangles rather than the original measurement grid, it does not preserve all
+sampling metadata and may lose information about missing measurement points or
+local neighborhoods that could not be measured reliably.
 
 ## Missing Data Interpolation
 
