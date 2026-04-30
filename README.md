@@ -1,10 +1,10 @@
 # FRASTA-toolbox
 
-FRASTA-toolbox is an open-source desktop application for fracture-surface topography analysis based on the FRASTA (Fracture Surface Topography Analysis) methodology. The software supports interactive import, preprocessing, alignment, and comparative analysis of opposing fracture surfaces represented as structured 3D grids.
+FRASTA-toolbox is an open-source desktop application for fracture-surface topography analysis based on the FRASTA (Fracture Surface Topography Analysis) approach. The software supports interactive data import, preprocessing, alignment, and comparative analysis of opposing fracture surfaces represented as structured height maps (regular 3D grids).
 
-The toolbox provides tools for masking, interpolation-based hole filling, manual surface alignment with live difference maps, and cross-sectional profile analysis with synchronized 2D and 3D visualization. It is designed to support reproducible fracture-surface analysis workflows and to translate established FRASTA concepts into a practical, accessible research tool.
+The toolbox provides tools for masking, interpolation-based hole filling, manual surface alignment with live difference maps, and cross-sectional profile analysis with synchronized 2D and 3D visualization. It is designed to support reproducible fracture-surface analysis workflows and to make established FRASTA concepts accessible as a practical research tool.
 
-FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intended for use in materials science, fracture mechanics, tribology, biomedical engineering, and related research domains.
+FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intended for applications in materials science, fracture mechanics, tribology, biomedical engineering, and related research domains.
 
 ## Project structure
 
@@ -16,7 +16,7 @@ FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intend
 
 ## Input data format
 
-FRASTA-toolbox currently supports structured grid data exported as text-based XYZ files, where each row corresponds to a single grid point (X, Y, Z). Additional internal formats (NPZ, HDF5) are supported for faster reload and reproducible workflows.
+FRASTA-toolbox currently operates on structured grid data exported as text-based XYZ files, where each row corresponds to a single grid point (X, Y, Z). Additional internal formats (NPZ, HDF5) are supported for faster reload and reproducible workflows.
 
 ### Supported formats
 
@@ -34,7 +34,7 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
    - define region of interest (ROI),
    - adjust value range using histogram thresholding,
    - fill missing data if necessary.
-3. Apply advanced processing:
+3. Apply advanced processing steps:
    - Use **Processing** menu for filtering, leveling, transforms
    - Interactive dialogs guide parameter selection
    - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
@@ -62,7 +62,7 @@ FRASTA-toolbox includes advanced processing algorithms for surface preparation a
 - **Rotation** - rotate surfaces with interpolation
 - **Rescaling** - change resolution (upsampling/downsampling)
 - **Cropping** - automatic crop to valid regions
-- **Auto-registration** - automatic surface alignment (ICP, cross-correlation)
+- **Auto-registration** - automatic surface alignment for height-map data (cross-correlation and simplified ICP-style translation/rotation estimation)
 - **Minimal roughness summaries** - basic amplitude parameters for grids
   (`Sa`, `Sq`, `Sz`) and extracted profiles (`Ra`, `Rq`, `Rz`) available from
   the Python processing API and from lightweight GUI summary dialogs
@@ -148,7 +148,7 @@ Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph,
 `python -m venv .venv`
 
 * activate:
-`sh .venv/bin/activate`
+`source .venv/bin/activate`
 
 * install packages:
 `./.venv/bin/pip install -r requirements.txt`
