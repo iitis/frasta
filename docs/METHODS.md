@@ -123,6 +123,26 @@ profile angles and angular differences between the surfaces.
 Profile data, selected points, contact maps, and related analysis metadata can
 be exported for later inspection.
 
+## Minimal Roughness Summaries
+
+The processing API includes a deliberately small set of amplitude-parameter
+helpers for quick
+roughness summaries. For regular height maps,
+`surface_roughness_parameters()` reports only `Sa`, `Sq`, and `Sz` from the
+valid, mean-centered grid values. For one-dimensional profiles,
+`profile_roughness_parameters()` reports only `Ra`, `Rq`, and `Rz`; `Rz` is
+computed from the mean of the five highest and five lowest valid profile
+points, with total profile height used as a fallback for profiles with fewer
+than ten valid points.
+
+These functions are intended as compact descriptive summaries that can be used
+from Python scripts, the surface summary dialog, or the profile summary dialog.
+They do not replace a full standardized ISO metrology workflow with explicitly
+specified filtering, evaluation lengths, and instrument-specific preprocessing.
+Extending this minimal subset toward a broader surface-metrology module is a
+planned direction for future development rather than part of the current
+FRASTA-toolbox scope.
+
 ## Reproducibility
 
 For a fixed input dataset and fixed user-defined parameters, the implemented

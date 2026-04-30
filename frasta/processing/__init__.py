@@ -46,6 +46,10 @@ from .plane_fitting import (
     fit_plane_local_ransac,
     fit_plane_local_median_filter
 )
+from .roughness import (
+    surface_roughness_parameters,
+    profile_roughness_parameters
+)
 
 __all__ = [
     # Alignment
@@ -81,4 +85,7 @@ __all__ = [
     'fit_plane_local_least_squares',
     'fit_plane_local_ransac',
     'fit_plane_local_median_filter',
+    # Roughness summaries
+    'surface_roughness_parameters',
+    'profile_roughness_parameters',
 ]

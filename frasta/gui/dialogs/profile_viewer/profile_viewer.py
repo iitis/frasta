@@ -122,6 +122,10 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.save_profiles_action = QtWidgets.QAction('Save profiles...', self)
         self.save_profiles_action.triggered.connect(self.data_manager.save_profiles)
         view_menu.addAction(self.save_profiles_action)
+
+        self.roughness_action = QtWidgets.QAction('Profile roughness summary...', self)
+        self.roughness_action.triggered.connect(self.show_profile_roughness_summary)
+        view_menu.addAction(self.roughness_action)
         
         view_menu.addSeparator()
         
@@ -216,6 +220,41 @@ class ProfileViewer(QtWidgets.QMainWindow):
     # ==========================================================================
     # Main Methods
     # ==========================================================================
+
+    def show_profile_roughness_summary(self):
+        """Show minimal roughness parameters for the current profiles."""
+        if not hasattr(self, 'reference_profile') or not hasattr(self, 'adjusted_profile'):
+            QtWidgets.QMessageBox.warning(self, "No data", "No profile data available.")
+            return
+
+        from ....processing import profile_roughness_parameters
+
+        try:
+            ref_metrics = profile_roughness_parameters(self.reference_profile)
+            adj_metrics = profile_roughness_parameters(self.adjusted_profile)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Profile roughness summary", str(exc))
+            return
+
+        lines = [
+            "Minimal profile roughness summary",
+            "",
+            "Values are in current height units.",
+            "",
+            "Reference profile:",
+        ]
+        for name in ("Ra", "Rq", "Rz"):
+            lines.append(f"{name}: {ref_metrics[name]:.6g}")
+
+        lines.extend(["", "Adjusted profile:"])
+        for name in ("Ra", "Rq", "Rz"):
+            lines.append(f"{name}: {adj_metrics[name]:.6g}")
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Profile roughness summary",
+            "\n".join(lines),
+        )
     
     def closeEvent(self, event):
         """Handle window close event.

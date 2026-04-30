@@ -54,6 +54,7 @@ class MenuBuilder:
             "morphology": QtWidgets.QAction("Morphology && Leveling...", self.main_window),
             "transform": QtWidgets.QAction("Geometric Transforms...", self.main_window),
             "register": QtWidgets.QAction("Auto-Register Surfaces...", self.main_window),
+            "roughness": QtWidgets.QAction("Surface roughness summary...", self.main_window),
             # ROI actions
             "del_outside": QtWidgets.QAction("outside of the mask", self.main_window),
             "del_inside": QtWidgets.QAction("inside of the mask", self.main_window),
@@ -91,6 +92,7 @@ class MenuBuilder:
         self.actions["morphology"].setToolTip("Level surface and remove polynomial forms")
         self.actions["transform"].setToolTip("Rotate, rescale, or crop grid")
         self.actions["register"].setToolTip("Automatically align two surfaces")
+        self.actions["roughness"].setToolTip("Show minimal Sa, Sq, and Sz summary for the current scan")
     
     def connect_actions(self):
         """Connect all actions to their respective handlers."""
@@ -116,6 +118,7 @@ class MenuBuilder:
         self.actions["filter"].triggered.connect(proc_ctrl.apply_advanced_filter)
         self.actions["morphology"].triggered.connect(proc_ctrl.apply_morphology)
         self.actions["transform"].triggered.connect(proc_ctrl.apply_transform)
+        self.actions["roughness"].triggered.connect(proc_ctrl.show_surface_roughness_summary)
         
         # Registration actions
         self.actions["compare"].triggered.connect(reg_ctrl.compare_scans)
@@ -159,7 +162,7 @@ class MenuBuilder:
                 "fill", "repair", "flipUD", "flipLR", "rot90", "inverse", "zero", "colormap"
             ]),
             ("&Processing", [
-                "filter", "morphology", "transform", "separator", "register"
+                "filter", "morphology", "transform", "roughness", "separator", "register"
             ]),
             ("&Tools", [
                 "compare", "profile"

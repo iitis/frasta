@@ -44,7 +44,7 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
 
 ## Advanced processing
 
-FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-toolbox project:
+FRASTA-toolbox includes advanced processing algorithms for surface preparation and alignment:
 
 ### Advanced filtering
 - **Bilateral filter** - edge-preserving smoothing (preserves fracture edges)
@@ -63,6 +63,9 @@ FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-
 - **Rescaling** - change resolution (upsampling/downsampling)
 - **Cropping** - automatic crop to valid regions
 - **Auto-registration** - automatic surface alignment (ICP, cross-correlation)
+- **Minimal roughness summaries** - basic amplitude parameters for grids
+  (`Sa`, `Sq`, `Sz`) and extracted profiles (`Ra`, `Rq`, `Rz`) available from
+  the Python processing API and from lightweight GUI summary dialogs
 
 **Documentation:**
 - [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
@@ -74,6 +77,7 @@ FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-
 **Quick Example:**
 ```python
 from frasta.processing import bilateral_filter, level_by_plane, auto_register_surfaces
+from frasta.processing import surface_roughness_parameters, profile_roughness_parameters
 
 # Edge-preserving smoothing
 smoothed = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, px_x=1.0, px_y=1.0)
@@ -83,6 +87,10 @@ leveled = level_by_plane(grid, method='robust')
 
 # Automatic surface alignment
 params = auto_register_surfaces(surface1, surface2, method='icp')
+
+# Basic roughness summaries
+surface_metrics = surface_roughness_parameters(surface1)
+profile_metrics = profile_roughness_parameters(profile_heights)
 ```
 
 ## Examples

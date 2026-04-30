@@ -60,6 +60,31 @@ class ProcessingController:
         h, w = tab.grid.shape
         mask = self.main_window.roi_controller.create_mask(h, w)
         tab.repair_grid(mask=mask)
+
+    def show_surface_roughness_summary(self):
+        """Show minimal roughness parameters for the current scan."""
+        tab = self.main_window.current_tab()
+        if tab is None or tab.grid is None:
+            QtWidgets.QMessageBox.warning(self.main_window, "No data", "Please load a scan first!")
+            return
+
+        from ...processing import surface_roughness_parameters
+
+        try:
+            metrics = surface_roughness_parameters(tab.get_surface())
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self.main_window, "Roughness summary", str(exc))
+            return
+
+        lines = ["Minimal surface roughness summary", "", "Values are in current height units."]
+        for name in ("Sa", "Sq", "Sz"):
+            lines.append(f"{name}: {metrics[name]:.6g}")
+
+        QtWidgets.QMessageBox.information(
+            self.main_window,
+            "Surface roughness summary",
+            "\n".join(lines),
+        )
     
     def apply_advanced_filter(self):
         """Apply advanced filtering to current scan."""
