@@ -6,7 +6,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Function Signature Pattern](#function-signature-pattern)
 2. [Handling NaN Values](#handling-nan-values)
@@ -74,20 +74,20 @@ def my_processing_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
 2. **Algorithm parameters come next** (required, no defaults)
 3. **Physical parameters** (`px_x`, `px_y`) always have default=1.0
 4. **`mask` parameter always last**, default=None
-5. **Return type matches input type** (ndarray → ndarray, None → None)
+5. **Return type matches input type** (ndarray -> ndarray, None -> None)
 
 ### Parameter Ordering Priority
 
 ```python
-# CORRECT ✅ - Follows standard order
+# CORRECT OK - Follows standard order
 def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=None):
     pass
 
-# WRONG ❌ - Mask not last
+# WRONG BAD - Mask not last
 def bilateral_filter(grid, sigma_spatial, sigma_range, mask=None, px_x=1.0, px_y=1.0):
     pass
 
-# WRONG ❌ - Physical params are required instead of optional
+# WRONG BAD - Physical params are required instead of optional
 def bilateral_filter(grid, sigma_spatial, sigma_range, px_x, px_y, mask=None):
     pass
 ```
@@ -150,14 +150,14 @@ def fill_holes(grid, mask=None):
 ### Rule 3: NaN-Aware Operations
 
 ```python
-# CORRECT ✅ - Use np.nanmean, np.nanstd, etc.
+# CORRECT OK - Use np.nanmean, np.nanstd, etc.
 mean_val = np.nanmean(grid[mask])
 std_val = np.nanstd(grid[mask])
 
-# WRONG ❌ - Regular mean propagates NaN
+# WRONG BAD - Regular mean propagates NaN
 mean_val = np.mean(grid[mask])  # Returns NaN if any element is NaN!
 
-# CORRECT ✅ - Check for all-NaN before computing
+# CORRECT OK - Check for all-NaN before computing
 if np.all(np.isnan(grid[mask])):
     logger.warning("No valid data in masked region")
     return grid  # or handle appropriately
@@ -357,7 +357,7 @@ def my_filter(grid, sigma_spatial, px_x=1.0, px_y=1.0, mask=None):
     # Warn if sigma is too small
     if sigma_x_pixels < 1.0 or sigma_y_pixels < 1.0:
         logger.warning(
-            f"sigma_spatial ({sigma_spatial} μm) is smaller than pixel size "
+            f"sigma_spatial ({sigma_spatial} um) is smaller than pixel size "
             f"(px_x={px_x}, px_y={px_y}). Results may be inaccurate."
         )
     
@@ -503,22 +503,22 @@ def my_robust_function(grid, param, px_x=1.0, px_y=1.0, mask=None):
 ### Rule 2: Use Appropriate Exception Types
 
 ```python
-# Input validation errors (user's fault) → ValueError
+# Input validation errors (user's fault) -> ValueError
 if sigma <= 0:
     raise ValueError(f"sigma must be positive, got {sigma}")
 
-# Shape mismatches → ValueError
+# Shape mismatches -> ValueError
 if mask.shape != grid.shape:
     raise ValueError(f"Shape mismatch: mask {mask.shape} vs grid {grid.shape}")
 
-# Missing dependencies (installation issue) → ImportError or skip gracefully
+# Missing dependencies (installation issue) -> ImportError or skip gracefully
 try:
     import cv2
 except ImportError:
     logger.warning("OpenCV not available, using slower Python implementation")
     # Continue with fallback
 
-# Numerical issues → RuntimeError or RuntimeWarning
+# Numerical issues -> RuntimeError or RuntimeWarning
 if np.all(np.isnan(result)):
     raise RuntimeError("Algorithm produced all-NaN result")
 ```
@@ -526,10 +526,10 @@ if np.all(np.isnan(result)):
 ### Rule 3: Informative Error Messages
 
 ```python
-# WRONG ❌
+# WRONG BAD
 raise ValueError("Invalid input")
 
-# CORRECT ✅
+# CORRECT OK
 raise ValueError(
     f"sigma_spatial ({sigma_spatial}) must be positive and less than "
     f"grid dimensions ({grid.shape[0]} x {grid.shape[1]} pixels)"
@@ -543,12 +543,12 @@ raise ValueError(
 ### Rule 1: Prefer Vectorized NumPy Operations
 
 ```python
-# SLOW ❌ - Explicit Python loops
+# SLOW BAD - Explicit Python loops
 for i in range(rows):
     for j in range(cols):
         result[i, j] = grid[i, j] ** 2 + 2 * grid[i, j]
 
-# FAST ✅ - Vectorized NumPy
+# FAST OK - Vectorized NumPy
 result = grid ** 2 + 2 * grid
 ```
 
@@ -618,20 +618,20 @@ def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0,
 ### Rule 5: Avoid Unnecessary Copies
 
 ```python
-# WASTEFUL ❌
+# WASTEFUL BAD
 def bad_function(grid):
     grid1 = grid.copy()
     grid2 = grid1.copy()
     grid3 = grid2.copy()  # Why 3 copies?
     return process(grid3)
 
-# EFFICIENT ✅
+# EFFICIENT OK
 def good_function(grid):
     result = grid.copy()  # One copy to preserve input
     process_inplace(result)  # Modify the copy
     return result
 
-# EVEN BETTER ✅ (if algorithm allows)
+# EVEN BETTER OK (if algorithm allows)
 def best_function(grid):
     # Create new array only for result
     result = np.zeros_like(grid)
@@ -806,7 +806,7 @@ class TestMyFunction:
         result1 = my_function(grid, param=10.0, px_x=1.0, px_y=1.0)
         result2 = my_function(grid, param=10.0, px_x=2.0, px_y=2.0)
         
-        # Results should differ (10μm is 10px vs 5px)
+        # Results should differ (10um is 10px vs 5px)
         assert not np.allclose(result1, result2, equal_nan=True)
     
     def test_invalid_parameters(self):
@@ -1061,7 +1061,7 @@ Before submitting a new processing function, verify:
 
 - [ ] Function signature follows standard pattern
 - [ ] Accepts `np.ndarray`, not `Surface`
-- [ ] Returns same type as input (None → None, array → array)
+- [ ] Returns same type as input (None -> None, array -> array)
 - [ ] Handles NaN values gracefully (preserves or fills appropriately)
 - [ ] Implements `mask` parameter correctly
 - [ ] Uses physical units (micrometers) with `px_x`, `px_y` conversion

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 ```python
 logger.debug(f"Processing grid of shape {grid.shape}")
-logger.debug(f"Converted sigma: {sigma_um}μm = {sigma_pixels}px")
+logger.debug(f"Converted sigma: {sigma_um}um = {sigma_pixels}px")
 logger.debug(f"Iteration {i}/{max_iter}: residual = {residual:.6f}")
 ```
 
@@ -32,7 +32,7 @@ logger.debug(f"Iteration {i}/{max_iter}: residual = {residual:.6f}")
 ### INFO - Confirmations
 
 ```python
-logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}μm")
+logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}um")
 logger.info(f"Applied bilateral filter: sigma_spatial={sigma_spatial}, sigma_range={sigma_range}")
 logger.info(f"RANSAC plane fit: {n_inliers}/{n_total} inliers ({100*n_inliers/n_total:.1f}%)")
 ```
@@ -65,30 +65,30 @@ logger.error(f"All algorithms failed for grid {grid.shape}: {e}")
 ### Include Context
 
 ```python
-# GOOD ✅
-logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}μm")
+# GOOD OK
+logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}um")
 
-# BAD ❌
+# BAD BAD
 logger.info("Loaded file")
 ```
 
 ### Use f-strings
 
 ```python
-# MODERN ✅
+# MODERN OK
 logger.debug(f"Processing {n_points} points")
 
-# OLD ❌
+# OLD BAD
 logger.debug("Processing %d points" % n_points)
 ```
 
 ### Show Units
 
 ```python
-# GOOD ✅
-logger.info(f"Filter radius: {radius_um:.2f}μm ({radius_px:.1f}px)")
+# GOOD OK
+logger.info(f"Filter radius: {radius_um:.2f}um ({radius_px:.1f}px)")
 
-# UNCLEAR ❌
+# UNCLEAR BAD
 logger.info(f"Filter radius: {radius}")
 ```
 
@@ -97,11 +97,11 @@ logger.info(f"Filter radius: {radius}")
 ## Avoid Logging in Tight Loops
 
 ```python
-# BAD ❌ - Logs millions of times
+# BAD BAD - Logs millions of times
 for i in range(1000000):
     logger.debug(f"Processing {i}")
 
-# GOOD ✅ - Log at milestones
+# GOOD OK - Log at milestones
 for i in range(1000000):
     if i % 100000 == 0:
         logger.debug(f"Processed {i}/1000000")

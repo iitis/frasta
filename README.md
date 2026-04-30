@@ -6,7 +6,7 @@ The toolbox provides tools for masking, interpolation-based hole filling, manual
 
 FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intended for use in materials science, fracture mechanics, tribology, biomedical engineering, and related research domains.
 
-## Project Structure (NEW!)
+## Project structure
 
 - **Data structures**: `frasta/core/`
 - **Analysis algorithms**: `frasta/processing/`
@@ -25,7 +25,7 @@ FRASTA-toolbox currently supports structured grid data exported as text-based XY
    - define region of interest (ROI),
    - adjust value range using histogram thresholding,
    - fill missing data if necessary.
-3. **Apply advanced processing** (NEW!):
+3. Apply advanced processing:
    - Use **Processing** menu for filtering, leveling, transforms
    - Interactive dialogs guide parameter selection
    - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
@@ -33,33 +33,33 @@ FRASTA-toolbox currently supports structured grid data exported as text-based XY
 5. Place cross-sectional profiles to inspect local deviations and contacts.
 6. Export aligned data, profiles, and measurements for further analysis or documentation.
 
-## Advanced Processing (NEW!)
+## Advanced processing
 
 FRASTA-toolbox now includes advanced processing algorithms adapted from the EFS-toolbox project:
 
-### 🔹 Advanced Filtering
+### Advanced filtering
 - **Bilateral filter** - edge-preserving smoothing (preserves fracture edges)
 - **Median filter** - robust outlier removal (removes measurement spikes)
 - **Morphological operations** - opening/closing for structural processing
 - **Robust Gaussian** - smoothing with iterative outlier rejection
 
-### 🔹 Morphology & Leveling
+### Morphology and leveling
 - **Plane leveling** - remove tilt (least-squares or RANSAC-robust)
 - **Polynomial form removal** - remove bending, warping, curvature (order 1-5)
 - **Three-point leveling** - level by reference points
 - **Thresholding** - value-based masking
 
-### 🔹 Geometric Transformations
+### Geometric transformations
 - **Rotation** - rotate surfaces with interpolation
 - **Rescaling** - change resolution (upsampling/downsampling)
 - **Cropping** - automatic crop to valid regions
 - **Auto-registration** - automatic surface alignment (ICP, cross-correlation)
 
-**Documentation:** 
-- 📖 [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
-- �️ [GUI Integration Guide](docs/GUI_INTEGRATION.md) - using advanced processing in the GUI
-- �📋 [Quick Reference](docs/QUICK_REFERENCE.md) - cheat sheet for all functions
-- 💡 [Examples](examples/) - interactive demos and visualizations
+**Documentation:**
+- [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
+- [GUI Integration Guide](docs/GUI_INTEGRATION.md) - using advanced processing in the GUI
+- [Quick Reference](docs/QUICK_REFERENCE.md) - cheat sheet for all functions
+- [Examples](examples/) - interactive demos and visualizations
 
 **Quick Example:**
 ```python
@@ -100,10 +100,10 @@ See [examples/README.md](examples/README.md) for details.
 * activate:
 `.venv\Scripts\activate.bat`
 
-* instal packages:
+* install packages:
 `.venv\Scripts\pip.exe install -r requirements.txt`
 
-* generating of requirements.txt:
+* generate `requirements.txt`:
 `.venv\Scripts\pip.exe freeze > requirements.txt`
 
 ### Linux
@@ -114,26 +114,26 @@ See [examples/README.md](examples/README.md) for details.
 * activate:
 `sh .venv/bin/activate`
 
-* instal packages:
+* install packages:
 `./.venv/bin/pip install -r requirements.txt`
 
-* generating of requirements.txt:
+* generate `requirements.txt`:
 `./.venv/bin/pip freeze > requirements.txt`
 
 ## Other useful commands:
 
-* creating distribution package:
+* create distribution package:
 `./.venv/bin/python -m PyInstaller --add-data "icons;icons" main.py`
 
-* running tests:
+* run tests:
 `./.venv/bin/python -m pytest -v -s`
 
-## Developer Documentation
+## Developer documentation
 
 For contributors and developers:
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design principles
-- **[Conventions](docs/conventions/README.md)** - Detailed coding standards by module
-  - [Processing algorithms](docs/conventions/processing/algorithms.md) - Required reading for algorithm development
-  - [File I/O patterns](docs/conventions/io/) - Loader/exporter conventions
-  - [GUI development](docs/conventions/gui/) - Dialog and widget patterns
-  - [General standards](docs/conventions/general/) - Naming, imports, logging
+- **[Coding conventions](agent-docs/conventions/README.md)** - Detailed coding standards by module
+  - [Processing algorithms](agent-docs/conventions/processing/algorithms.md) - Required reading for algorithm development
+  - [File I/O patterns](agent-docs/conventions/io/) - Loader/exporter conventions
+  - [GUI development](agent-docs/conventions/gui/) - Dialog and widget patterns
+  - [General standards](agent-docs/conventions/general/) - Naming, imports, logging

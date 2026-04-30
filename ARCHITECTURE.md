@@ -4,7 +4,7 @@ This document describes the architecture, design patterns, and conventions used 
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Overview](#overview)
 2. [Core Principles](#core-principles)
@@ -36,9 +36,9 @@ FRASTA-toolbox is a modular desktop application for fracture surface analysis bu
 
 **No Circular Dependencies**: Dependencies flow one way:
 ```
-gui → processing → core
-  ↓       ↓
-  io  →  core
+gui -> processing -> core
+  v       v
+  io  ->  core
 ```
 
 **Pure Functions**: Processing functions don't modify input data in-place, always return new arrays/objects.
@@ -50,20 +50,20 @@ gui → processing → core
 ### 1. **Immutability in Processing**
 
 All functions in `processing/` are **pure functions** - they:
-- ✅ Take input arrays and parameters
-- ✅ Return new arrays/tuples without side effects
-- ❌ Never modify input arrays in-place
-- ❌ Never call GUI functions or access global state
+- OK Take input arrays and parameters
+- OK Return new arrays/tuples without side effects
+- BAD Never modify input arrays in-place
+- BAD Never call GUI functions or access global state
 
 **Example:**
 ```python
-# CORRECT ✅
+# CORRECT OK
 def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=None):
     grid = grid.copy()  # Work on copy
     # ... processing ...
     return result
 
-# WRONG ❌
+# WRONG BAD
 def bilateral_filter(grid, sigma_spatial, sigma_range):
     grid[mask] = filtered_values  # Modifying input!
     return grid
@@ -74,10 +74,10 @@ def bilateral_filter(grid, sigma_spatial, sigma_range):
 `Surface` is a simple data holder with no business logic:
 ```python
 class Surface:
-    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="µm", metadata=None, vmin=None, vmax=None):
+    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="um", metadata=None, vmin=None, vmax=None):
         self.height = height  # 2D numpy array
-        self.dx = dx          # Pixel size in x (µm)
-        self.dy = dy          # Pixel size in y (µm)
+        self.dx = dx          # Pixel size in x (um)
+        self.dy = dy          # Pixel size in y (um)
         self.x0 = x0          # Origin/offset for X coordinates
         self.y0 = y0          # Origin/offset for Y coordinates
         self.mask = mask      # Boolean mask
@@ -96,14 +96,14 @@ class Surface:
 ```
 
 **Use it for:**
-- ✅ Passing scan data between GUI components
-- ✅ Storing visualization metadata (vmin/vmax)
-- ✅ Simple utility methods (crop, copy)
+- OK Passing scan data between GUI components
+- OK Storing visualization metadata (vmin/vmax)
+- OK Simple utility methods (crop, copy)
 
 **Don't use it for:**
-- ❌ Processing algorithms (use numpy arrays instead)
-- ❌ Business logic (filtering, leveling, etc.)
-- ❌ Complex state management
+- BAD Processing algorithms (use numpy arrays instead)
+- BAD Business logic (filtering, leveling, etc.)
+- BAD Complex state management
 
 ### 3. **Lazy Imports in GUI**
 
@@ -121,15 +121,15 @@ def apply_bilateral_filter(self):
 
 ### 4. **Units Convention**
 
-All spatial measurements use **micrometers (μm)** as the standard unit:
-- `px_x, px_y` - pixel sizes in μm
-- `xi, yi` - coordinate arrays in μm
-- `grid` - height values in μm
+All spatial measurements use **micrometers (um)** as the standard unit:
+- `px_x, px_y` - pixel sizes in um
+- `xi, yi` - coordinate arrays in um
+- `grid` - height values in um
 
 Conversions happen **only at I/O boundaries**:
-- `load_stl_data()` converts from mm → μm
-- `save_stl()` converts from μm → mm
-- All internal processing stays in μm
+- `load_stl_data()` converts from mm -> um
+- `save_stl()` converts from um -> mm
+- All internal processing stays in um
 
 ---
 
@@ -137,57 +137,57 @@ Conversions happen **only at I/O boundaries**:
 
 ```
 frasta/
-├── core/           # Data structures
-│   └── grid_data.py
-├── io/             # File I/O (loaders & exporters)
-│   ├── loaders.py
-│   └── exporters.py
-├── processing/     # Analysis algorithms (pure functions)
-│   ├── filtering.py
-│   ├── advanced_filtering.py
-│   ├── morphology.py
-│   ├── alignment.py
-│   ├── transforms.py
-│   ├── interpolation.py
-│   └── plane_fitting.py
-├── gui/            # User interface
-│   ├── main_window/
-│   │   ├── main_window.py
-│   │   ├── roi_controller.py
-│   │   ├── file_controller.py
-│   │   ├── processing_controller.py
-│   │   ├── registration_controller.py
-│   │   ├── menu_builder.py
-│   │   └── toolbar_builder.py
-│   ├── scan_tab/
-│   │   ├── scan_tab.py
-│   │   ├── histogram_manager.py
-│   │   ├── interactive_handler.py
-│   │   └── transform_operations.py
-│   ├── dialogs/
-│   │   ├── processing_dialog.py
-│   │   ├── profile_viewer/
-│   │   ├── overlay_viewer.py
-│   │   └── about.py
-│   ├── viewers/
-│   │   ├── grid_3d_viewer/
-│   │   │   ├── grid_3d_viewer.py
-│   │   │   ├── lod_manager.py
-│   │   │   ├── colormap_manager.py
-│   │   │   ├── surface_renderer.py
-│   │   │   ├── profile_manager.py
-│   │   │   └── camera_controller.py
-│   │   ├── lod_surface.py
-│   │   └── limited_gl_view.py
-│   ├── widgets/
-│   │   ├── surface_control_panel.py
-│   │   └── responsive_infinite_line.py
-│   └── workers/
-│       ├── csv_loader_worker.py
-│       └── profile_loader_worker.py
-└── utils/          # Shared utilities
-    ├── decorators.py
-    └── resources.py
++-- core/           # Data structures
+|   +-- grid_data.py
++-- io/             # File I/O (loaders & exporters)
+|   +-- loaders.py
+|   +-- exporters.py
++-- processing/     # Analysis algorithms (pure functions)
+|   +-- filtering.py
+|   +-- advanced_filtering.py
+|   +-- morphology.py
+|   +-- alignment.py
+|   +-- transforms.py
+|   +-- interpolation.py
+|   +-- plane_fitting.py
++-- gui/            # User interface
+|   +-- main_window/
+|   |   +-- main_window.py
+|   |   +-- roi_controller.py
+|   |   +-- file_controller.py
+|   |   +-- processing_controller.py
+|   |   +-- registration_controller.py
+|   |   +-- menu_builder.py
+|   |   +-- toolbar_builder.py
+|   +-- scan_tab/
+|   |   +-- scan_tab.py
+|   |   +-- histogram_manager.py
+|   |   +-- interactive_handler.py
+|   |   +-- transform_operations.py
+|   +-- dialogs/
+|   |   +-- processing_dialog.py
+|   |   +-- profile_viewer/
+|   |   +-- overlay_viewer.py
+|   |   +-- about.py
+|   +-- viewers/
+|   |   +-- grid_3d_viewer/
+|   |   |   +-- grid_3d_viewer.py
+|   |   |   +-- lod_manager.py
+|   |   |   +-- colormap_manager.py
+|   |   |   +-- surface_renderer.py
+|   |   |   +-- profile_manager.py
+|   |   |   +-- camera_controller.py
+|   |   +-- lod_surface.py
+|   |   +-- limited_gl_view.py
+|   +-- widgets/
+|   |   +-- surface_control_panel.py
+|   |   +-- responsive_infinite_line.py
+|   +-- workers/
+|       +-- csv_loader_worker.py
+|       +-- profile_loader_worker.py
++-- utils/          # Shared utilities
+    +-- decorators.py
+    +-- resources.py
 ```
 
 ### Detailed Module Responsibilities
@@ -213,7 +213,7 @@ frasta/
 **Contract:**
 - **Loaders return:** `Surface` object or list of `Surface` objects
 - **Exporters take:** list of tuples `[(name, Surface), ...]`
-- Handle unit conversions at file boundary (mm ↔ μm)
+- Handle unit conversions at file boundary (mm <-> um)
 - **Never** perform data processing (filtering, leveling, etc.)
 - Preserve spatial positioning (`x0`, `y0`) when loading data
 
@@ -222,8 +222,8 @@ frasta/
 - New unit conversion
 
 **When NOT to add:**
-- Data validation → use `processing/`
-- Coordinate transformations → use `processing/transforms.py`
+- Data validation -> use `processing/`
+- Coordinate transformations -> use `processing/transforms.py`
 
 ---
 
@@ -255,7 +255,7 @@ def process_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
     Returns:
         np.ndarray: Processed result (new array, input unchanged)
     """
-    grid = grid.copy()  # или создавай новую
+    grid = grid.copy()  # Work on a copy
     # ... processing logic ...
     return result
 ```
@@ -280,46 +280,46 @@ def process_function(grid, param1, param2, px_x=1.0, px_y=1.0, mask=None):
 
 ```
 gui/
-├── main_window/            # Main application window (refactored into controllers)
-│   ├── main_window.py          # Main window class with routing
-│   ├── roi_controller.py       # ROI operations
-│   ├── file_controller.py      # File I/O operations
-│   ├── processing_controller.py # Data processing
-│   ├── registration_controller.py # Scan comparison/registration
-│   ├── menu_builder.py         # Menu and action creation
-│   └── toolbar_builder.py      # Toolbar setup
-├── scan_tab/               # Individual scan display (refactored into components)
-│   ├── scan_tab.py             # Main scan widget
-│   ├── histogram_manager.py    # Histogram display and threshold controls
-│   ├── interactive_handler.py  # Mouse event handling (zero point, tilt, seeds)
-│   └── transform_operations.py # Geometric transformations
-├── dialogs/                # Modal dialogs for parameters & results
-│   ├── processing_dialog.py   # Parameter input for filtering/morphology/transforms
-│   ├── profile_viewer/         # Cross-section profile analysis (refactored)
-│   │   ├── profile_viewer.py      # Main profile viewer window
-│   │   ├── data_manager.py        # Load/save profiles and scans
-│   │   ├── profile_analyzer.py    # Linear fit, angle, tilt corrections
-│   │   ├── roi_handler.py         # Profile line placement and ROI
-│   │   ├── plot_interactions.py   # Plot mouse events and annotations
-│   │   └── visualization_manager.py # 3D view, statistics, volume calc
-│   ├── overlay_viewer.py      # Scan-to-scan comparison
-│   └── about.py              # About dialog
-├── viewers/                # 3D visualization
-│   ├── grid_3d_viewer/         # OpenGL-based 3D surface viewer (refactored)
-│   │   ├── grid_3d_viewer.py      # Main 3D viewer widget
-│   │   ├── lod_manager.py         # Level-of-detail management
-│   │   ├── colormap_manager.py    # Colormap and range controls
-│   │   ├── surface_renderer.py    # Surface geometry and rendering
-│   │   ├── profile_manager.py     # Profile lines and cross-sections
-│   │   └── camera_controller.py   # Camera positioning
-│   ├── lod_surface.py        # Level-of-detail mesh for performance
-│   └── limited_gl_view.py    # Custom view with limited controls
-├── widgets/                # Reusable UI components
-│   ├── surface_control_panel.py
-│   └── responsive_infinite_line.py
-└── workers/                # Background threads for long operations
-    ├── csv_loader_worker.py
-    └── profile_loader_worker.py
++-- main_window/            # Main application window (refactored into controllers)
+|   +-- main_window.py          # Main window class with routing
+|   +-- roi_controller.py       # ROI operations
+|   +-- file_controller.py      # File I/O operations
+|   +-- processing_controller.py # Data processing
+|   +-- registration_controller.py # Scan comparison/registration
+|   +-- menu_builder.py         # Menu and action creation
+|   +-- toolbar_builder.py      # Toolbar setup
++-- scan_tab/               # Individual scan display (refactored into components)
+|   +-- scan_tab.py             # Main scan widget
+|   +-- histogram_manager.py    # Histogram display and threshold controls
+|   +-- interactive_handler.py  # Mouse event handling (zero point, tilt, seeds)
+|   +-- transform_operations.py # Geometric transformations
++-- dialogs/                # Modal dialogs for parameters & results
+|   +-- processing_dialog.py   # Parameter input for filtering/morphology/transforms
+|   +-- profile_viewer/         # Cross-section profile analysis (refactored)
+|   |   +-- profile_viewer.py      # Main profile viewer window
+|   |   +-- data_manager.py        # Load/save profiles and scans
+|   |   +-- profile_analyzer.py    # Linear fit, angle, tilt corrections
+|   |   +-- roi_handler.py         # Profile line placement and ROI
+|   |   +-- plot_interactions.py   # Plot mouse events and annotations
+|   |   +-- visualization_manager.py # 3D view, statistics, volume calc
+|   +-- overlay_viewer.py      # Scan-to-scan comparison
+|   +-- about.py              # About dialog
++-- viewers/                # 3D visualization
+|   +-- grid_3d_viewer/         # OpenGL-based 3D surface viewer (refactored)
+|   |   +-- grid_3d_viewer.py      # Main 3D viewer widget
+|   |   +-- lod_manager.py         # Level-of-detail management
+|   |   +-- colormap_manager.py    # Colormap and range controls
+|   |   +-- surface_renderer.py    # Surface geometry and rendering
+|   |   +-- profile_manager.py     # Profile lines and cross-sections
+|   |   +-- camera_controller.py   # Camera positioning
+|   +-- lod_surface.py        # Level-of-detail mesh for performance
+|   +-- limited_gl_view.py    # Custom view with limited controls
++-- widgets/                # Reusable UI components
+|   +-- surface_control_panel.py
+|   +-- responsive_infinite_line.py
++-- workers/                # Background threads for long operations
+    +-- csv_loader_worker.py
+    +-- profile_loader_worker.py
 ```
 
 **Responsibilities:**
@@ -392,8 +392,8 @@ sequenceDiagram
     participant Loader
     participant ScanTab
     
-    User->>MainWindow: File → Open CSV
-    MainWindow->>MainWindow: Show unit dialog (mm/μm)
+    User->>MainWindow: File -> Open CSV
+    MainWindow->>MainWindow: Show unit dialog (mm/um)
     MainWindow->>Worker: GridWorker(fname, units)
     Worker->>Loader: load_csv_data(fname, units)
     Loader->>Loader: Parse CSV, grid data, create Surface
@@ -416,7 +416,7 @@ sequenceDiagram
     participant Processing
     participant ScanTab
     
-    User->>MainWindow: Processing → Advanced Filtering
+    User->>MainWindow: Processing -> Advanced Filtering
     MainWindow->>FilterDialog: Show dialog
     FilterDialog->>FilterDialog: User selects "Bilateral Filter"
     FilterDialog->>FilterDialog: User sets sigma_spatial=5.0, sigma_range=10.0
@@ -691,7 +691,7 @@ def load_my_format(fname, progress_callback=None):
         dy=dy,
         x0=xi[0] if len(xi) > 0 else 0.0,
         y0=yi[0] if len(yi) > 0 else 0.0,
-        unit="µm",
+        unit="um",
         metadata={"name": name}
     )
     return surface
@@ -743,9 +743,9 @@ Follow same pattern as filters, but use `TransformDialog` and `processing/transf
 ### Adding a New 3D Visualization Mode
 
 **1. Implement in `gui/viewers/grid_3d_viewer/` modules:**
-   - New rendering modes → `surface_renderer.py`
-   - LOD adjustments → `lod_manager.py`
-   - Colormap schemes → `colormap_manager.py`
+   - New rendering modes -> `surface_renderer.py`
+   - LOD adjustments -> `lod_manager.py`
+   - Colormap schemes -> `colormap_manager.py`
 
 **2. Add menu option in `main_window.py`**
 
@@ -801,65 +801,65 @@ def test_npz_roundtrip():
 ### GUI Tests (Optional)
 
 Test **end-to-end workflows** using pytest-qt or manual testing:
-- Load CSV → Apply filter → Export NPZ
-- Load two scans → Overlay view → Profile extraction
+- Load CSV -> Apply filter -> Export NPZ
+- Load two scans -> Overlay view -> Profile extraction
 
 ---
 
 ## Common Pitfalls
 
-### ❌ Modifying Arrays In-Place
+### BAD Modifying Arrays In-Place
 
 ```python
-# WRONG ❌
+# WRONG BAD
 def bad_filter(grid):
     grid[grid > 100] = 100  # Modifies input!
     return grid
 
-# CORRECT ✅
+# CORRECT OK
 def good_filter(grid):
     result = grid.copy()
     result[result > 100] = 100
     return result
 ```
 
-### ❌ Mixing Surface and np.ndarray
+### BAD Mixing Surface and np.ndarray
 
 ```python
-# WRONG ❌
+# WRONG BAD
 from ..processing import bilateral_filter
 result = bilateral_filter(grid_data, ...)  # Surface has no __array__ interface
 
-# CORRECT ✅
+# CORRECT OK
 result = bilateral_filter(grid_data.height, px_x=grid_data.dx, ...)
 ```
 
-### ❌ Putting Algorithms in GUI
+### BAD Putting Algorithms in GUI
 
 ```python
-# WRONG ❌ - in main_window.py
+# WRONG BAD - in main_window.py
 def apply_filter(self):
     grid = self.current_tab.grid
     for i in range(grid.shape[0]):  # Complex algorithm in GUI!
         for j in range(grid.shape[1]):
             grid[i,j] = ...
 
-# CORRECT ✅
+# CORRECT OK
 def apply_filter(self):
     from ..processing import my_algorithm
     result = my_algorithm(self.current_tab.grid, ...)
     self.current_tab.grid = result
 ```
 
-### ❌ Ignoring pixel_size Parameters
+### BAD Ignoring pixel_size Parameters
 
 ```python
-# WRONG ❌
+# WRONG BAD
 def spatial_filter(grid, radius_pixels):
     # Assumes pixels are square and uniform
     kernel_size = 2 * radius_pixels + 1
 
-# CORRECT ✅
+# CORRECT OK
 def spatial_filter(grid, radius_physical, px_x=1.0, px_y=1.0):
     # Convert physical radius to pixels
     radius_x_pixels = radius_physical / px_x
@@ -867,14 +867,14 @@ def spatial_filter(grid, radius_physical, px_x=1.0, px_y=1.0):
     # Use anisotropic kernel if px_x != px_y
 ```
 
-### ❌ Forgetting to Handle NaN Values
+### BAD Forgetting to Handle NaN Values
 
 ```python
-# WRONG ❌
+# WRONG BAD
 def mean_filter(grid):
     return scipy.ndimage.uniform_filter(grid, size=5)  # Propagates NaNs!
 
-# CORRECT ✅
+# CORRECT OK
 def mean_filter(grid):
     # Use weighted approach to ignore NaNs
     valid = ~np.isnan(grid)
@@ -889,15 +889,15 @@ def mean_filter(grid):
     return result
 ```
 
-### ❌ Not Using Mask Parameter
+### BAD Not Using Mask Parameter
 
 ```python
-# WRONG ❌
+# WRONG BAD
 def filter_function(grid, sigma):
     # Processes entire grid, ignoring user's ROI selection
     return gaussian_filter(grid, sigma)
 
-# CORRECT ✅
+# CORRECT OK
 def filter_function(grid, sigma, mask=None):
     if mask is not None:
         result = grid.copy()
@@ -956,16 +956,16 @@ graph TD
 
 ## Questions to Ask Before Coding
 
-1. **Is this a new algorithm?** → `processing/`
-2. **Is this about loading/saving data?** → `io/`
-3. **Is this a GUI interaction?** → `gui/`
-4. **Does it modify the fundamental data structure?** → `core/` (rare)
-5. **Is it used everywhere?** → `utils/`
+1. **Is this a new algorithm?** -> `processing/`
+2. **Is this about loading/saving data?** -> `io/`
+3. **Is this a GUI interaction?** -> `gui/`
+4. **Does it modify the fundamental data structure?** -> `core/` (rare)
+5. **Is it used everywhere?** -> `utils/`
 
 **When in doubt, ask:**
 - Would this function make sense in a command-line script (no GUI)?
-  - **Yes** → `processing/` or `io/`
-  - **No** → `gui/`
+  - **Yes** -> `processing/` or `io/`
+  - **No** -> `gui/`
 
 ---
 
@@ -986,20 +986,15 @@ graph TD
 - [GUI Integration Guide](docs/GUI_INTEGRATION.md) - How to use processing in the GUI
 - [Quick Reference](docs/QUICK_REFERENCE.md) - Function cheat sheet
 
-### Developer Conventions ⭐ ESSENTIAL
-- **[Conventions Index](docs/conventions/README.md)** - Start here for detailed coding standards
-  - [Processing Algorithms](docs/conventions/processing/algorithms.md) - **Required** for adding filters/transforms
-  - [File I/O](docs/conventions/io/file_formats.md) - Format specifications and loader patterns
-  - [GUI Development](docs/conventions/gui/development.md) - Dialog and widget patterns
-  - [Data Structures](docs/conventions/core/data_structures.md) - Surface and core types
-  - [General Standards](docs/conventions/general/) - Naming, imports, logging
+### Developer Conventions
+- **[Conventions Index](agent-docs/conventions/README.md)** - Start here for detailed coding standards
+  - [Processing Algorithms](agent-docs/conventions/processing/algorithms.md) - required for adding filters/transforms
+  - [File I/O](agent-docs/conventions/io/file_formats.md) - format specifications and loader patterns
+  - [GUI Development](agent-docs/conventions/gui/development.md) - dialog and widget patterns
+  - [Data Structures](agent-docs/conventions/core/data_structures.md) - Surface and core types
+  - [General Standards](agent-docs/conventions/general/) - naming, imports, logging
 
 ---
 
-**🎯 Remember:** When collaborating with AI assistants (like GitHub Copilot), share this document so they understand:
-- Where to put new code
-- Function signature conventions
-- Data flow patterns
-- Testing expectations
-
-This ensures consistent, maintainable code across the project!
+Keep this document and the convention files updated when architectural rules or
+module responsibilities change.

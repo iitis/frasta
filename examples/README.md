@@ -2,7 +2,7 @@
 
 This directory contains example scripts demonstrating the advanced processing capabilities of FRASTA-toolbox.
 
-## 📁 Contents
+## Contents
 
 ### [`advanced_processing.py`](advanced_processing.py)
 Interactive examples showing usage of advanced filtering, morphology, and transformation functions:
@@ -39,7 +39,7 @@ python examples/visualization.py
 
 ---
 
-## 🎯 Quick Start
+## Quick Start
 
 ```bash
 # From project root directory
@@ -57,7 +57,7 @@ ls output/
 
 ---
 
-## 📊 Generated Visualizations
+## Generated Visualizations
 
 After running `visualization.py`, you'll find in `output/`:
 
@@ -69,7 +69,7 @@ After running `visualization.py`, you'll find in `output/`:
 
 ---
 
-## 🔧 Requirements
+## Requirements
 
 All examples require the standard FRASTA dependencies:
 - numpy
@@ -81,7 +81,7 @@ These are installed automatically with `pip install -r requirements.txt` from th
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 For detailed documentation on the processing functions used in these examples, see:
 - [Advanced Processing Guide](../docs/ADVANCED_PROCESSING.md)
@@ -89,7 +89,7 @@ For detailed documentation on the processing functions used in these examples, s
 
 ---
 
-## 💡 Extending Examples
+## Extending Examples
 
 Feel free to modify these scripts to test with your own data:
 
@@ -106,7 +106,7 @@ filtered = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0,
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 **Import errors:** Make sure to run from examples directory or add parent to path:
 ```python
@@ -123,6 +123,6 @@ matplotlib.use('TkAgg')  # or 'Qt5Agg'
 
 ---
 
-## 📝 License
+## License
 
 Same as FRASTA-toolbox main project (see [LICENSE](../LICENSE)).

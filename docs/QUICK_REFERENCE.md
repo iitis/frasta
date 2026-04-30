@@ -1,6 +1,6 @@
 # FRASTA Advanced Processing - Quick Reference
 
-## 🚀 Szybka ściągawka
+## Szybka ściągawka
 
 ### Filtracja
 
@@ -83,7 +83,7 @@ aligned, xi, yi, px_x, px_y = apply_registration(
 
 ---
 
-## 🎯 Typowe scenariusze
+## Typowe scenariusze
 
 ### Scenario 1: Czyszczenie surowych danych
 
@@ -137,15 +137,15 @@ params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 
 ---
 
-## ⚙️ Parametry - kiedy co używać?
+## Parametry - kiedy co używać?
 
 ### Bilateral filter
-- `sigma_spatial`: ~5-10 × pixel size (skala przestrzenna)
-- `sigma_range`: ~1-2 × noise level (tolerancja wysokości)
+- `sigma_spatial`: ~5-10 x pixel size (skala przestrzenna)
+- `sigma_range`: ~1-2 x noise level (tolerancja wysokości)
 - **Mniejsze sigma_range** = ostrzejsze krawędzie
 
 ### Median filter
-- `size`: 3-5 × pixel size dla spike removal
+- `size`: 3-5 x pixel size dla spike removal
 - Zwiększaj size jeśli szum jest większy
 
 ### Polynomial removal
@@ -160,7 +160,7 @@ params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 
 ---
 
-## 💡 Pro Tips
+## Pro Tips
 
 1. **Zawsze sprawdzaj wynik wizualnie** - nie ufaj ślepo algorytmom
 2. **Zapisuj parametry** dla reprodukowalności
@@ -171,7 +171,7 @@ params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 
 ---
 
-## 📊 Porównanie wydajności (dla 500×500 grid)
+## Porównanie wydajności (dla 500x500 grid)
 
 | Funkcja | Czas | Uwagi |
 |---------|------|-------|
@@ -184,16 +184,16 @@ params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 
 ---
 
-## 📝 Przykłady w akcji
+## Przykłady w akcji
 
-Zobacz: `examples_advanced_processing.py`
+Zobacz: `examples/advanced_processing.py`
 
 ```bash
-python examples_advanced_processing.py
+python examples/advanced_processing.py
 ```
 
 ---
 
-## 🔗 Pełna dokumentacja
+## Pełna dokumentacja
 
 [docs/ADVANCED_PROCESSING.md](ADVANCED_PROCESSING.md)

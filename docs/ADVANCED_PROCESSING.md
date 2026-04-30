@@ -2,7 +2,7 @@
 
 Moduły `advanced_filtering`, `morphology` i `transforms` zawierają zaawansowane funkcje przetwarzania adaptowane z projektu EFS-toolbox.
 
-## 📦 Moduły
+## Moduły
 
 ### 1. Zaawansowana filtracja (`advanced_filtering.py`)
 
@@ -255,7 +255,7 @@ params = auto_register_surfaces(
 )
 
 print(f"Translacja: {params['translation']}")
-print(f"Rotacja: {params['rotation']}°")
+print(f"Rotacja: {params['rotation']} deg")
 print(f"RMSE: {params['rmse']}")
 
 # Zastosuj wyrównanie
@@ -277,7 +277,7 @@ aligned, xi, yi, px_x, px_y = apply_registration(
 
 ---
 
-## 🔄 Typowe workflow
+## Typowe workflow
 
 ### Workflow 1: Czyszczenie danych surowych
 
@@ -360,7 +360,7 @@ aligned_corrected = remove_relative_offset(surf1, aligned[0], mask)
 
 ---
 
-## 📊 Porównanie z istniejącymi funkcjami
+## Porównanie z istniejącymi funkcjami
 
 | Funkcja | Stara (basic) | Nowa (advanced) | Zaleta |
 |---------|---------------|-----------------|--------|
@@ -371,7 +371,7 @@ aligned_corrected = remove_relative_offset(surf1, aligned[0], mask)
 
 ---
 
-## ⚠️ Uwagi
+## WARNING Uwagi
 
 1. **Wydajność bilateral filter**: Python implementation jest wolniejszy. Dla dużych danych rozważ downsampling lub podziel na tile'y.
 
@@ -392,7 +392,7 @@ aligned_corrected = remove_relative_offset(surf1, aligned[0], mask)
 
 ---
 
-## 📚 Źródła
+## Źródła
 
 Funkcje adaptowane z projektu **EFS-toolbox** (Enhanced Fracture Surface Toolbox):
 - `efs/filters/` - advanced filtering
@@ -401,10 +401,11 @@ Funkcje adaptowane z projektu **EFS-toolbox** (Enhanced Fracture Surface Toolbox
 
 ---
 
-## 🔍 Zobacz przykłady
+## Zobacz przykłady
 
-Pełne działające przykłady w pliku: [`examples_advanced_processing.py`](../examples_advanced_processing.py)
+Pełne działające przykłady znajdują się w pliku
+[`examples/advanced_processing.py`](../examples/advanced_processing.py).
 
 ```bash
-python examples_advanced_processing.py
+python examples/advanced_processing.py
 ```

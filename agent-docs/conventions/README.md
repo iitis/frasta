@@ -2,29 +2,29 @@
 
 This directory contains detailed coding standards, patterns, and best practices for FRASTA-toolbox development organized by module structure.
 
-**Purpose:** Ensure consistency, maintainability, and effective collaboration (human-to-human and human-to-AI).
+**Purpose:** Ensure consistency and maintainability across manual and automated code changes.
 
 ---
 
-## 📂 Organization
+## Organization
 
 Conventions are organized to mirror the project structure:
 
 ```
 conventions/
-├── processing/     # Algorithm implementation standards
-├── io/            # File I/O conventions and format specs
-├── gui/           # GUI development patterns and widgets
-├── core/          # Data structure conventions
-└── general/       # Cross-cutting concerns (naming, imports, logging)
++-- processing/     # Algorithm implementation standards
++-- io/            # File I/O conventions and format specs
++-- gui/           # GUI development patterns and widgets
++-- core/          # Data structure conventions
++-- general/       # Cross-cutting concerns (naming, imports, logging)
 ```
 
 ---
 
-## 📋 Quick Index
+## Quick Index
 
 ### For Algorithm Development
-- **[Processing Algorithms](processing/algorithms.md)** ⭐ ESSENTIAL
+- **[Processing Algorithms](processing/algorithms.md)** - essential
   - Function signatures, NaN handling, masking, units, testing
   - Templates and complete examples
   - Start here when adding new filters/transforms/analysis functions
@@ -59,7 +59,7 @@ conventions/
 
 ---
 
-## 🎯 When to Use Which Document
+## When to Use Which Document
 
 | **You Want To...** | **Read This** |
 |-------------------|---------------|
@@ -75,7 +75,7 @@ conventions/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 **New to the project?** Read in this order:
 1. [ARCHITECTURE.md](../../ARCHITECTURE.md) - Understand overall structure
@@ -88,14 +88,14 @@ conventions/
 2. Read the relevant convention document for that module
 3. Copy templates, follow patterns, verify checklist
 
-**Working with AI assistants?**
-- Share relevant convention files to ensure consistent code generation
-- AI assistants should consult these before making changes
-- Conventions contain templates specifically designed for AI code generation
+**Automated coding agents**
+- Start from `AGENTS.md` in the repository root.
+- Consult the relevant convention file before changing code.
+- Keep user-facing documentation free of agent-specific notes.
 
 ---
 
-## 📝 Contributing to Conventions
+## Contributing to Conventions
 
 These documents are living references. When you:
 - Discover a new pattern that works well
@@ -107,16 +107,16 @@ These documents are living references. When you:
 
 ---
 
-## 🔗 Related Documentation
+## Related Documentation
 
 - **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - System architecture and design principles
-- **[ADVANCED_PROCESSING.md](../ADVANCED_PROCESSING.md)** - API reference for processing functions
-- **[GUI_INTEGRATION.md](../GUI_INTEGRATION.md)** - Using processing functions in GUI
-- **[QUICK_REFERENCE.md](../QUICK_REFERENCE.md)** - Function cheat sheet
+- **[ADVANCED_PROCESSING.md](../../docs/ADVANCED_PROCESSING.md)** - API reference for processing functions
+- **[GUI_INTEGRATION.md](../../docs/GUI_INTEGRATION.md)** - Using processing functions in GUI
+- **[QUICK_REFERENCE.md](../../docs/QUICK_REFERENCE.md)** - Function cheat sheet
 - **[README.md](../../README.md)** - Project overview and quick start
 
 ---
 
 **Last Updated:** 2026-02-18
 
-**Maintained By:** Project contributors (human and AI)
+**Maintained By:** Project contributors

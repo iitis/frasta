@@ -2,7 +2,7 @@
 
 This document describes the GUI integration of advanced processing features in FRASTA-toolbox.
 
-## 📋 Overview
+## Overview
 
 Advanced processing functions have been integrated into the main FRASTA-toolbox GUI with:
 - **New menu**: "Processing" menubar with 4 operations
@@ -12,7 +12,7 @@ Advanced processing functions have been integrated into the main FRASTA-toolbox 
 
 ---
 
-## 🎯 New GUI Features
+## New GUI Features
 
 ### Menu Structure
 
@@ -21,27 +21,27 @@ A new **"Processing"** menu has been added between "Scan Actions" and "Tools":
 ```
 File | Edit | Scan Actions | Processing | Tools | Help
                                    |
-                                   ├── Advanced Filtering...
-                                   ├── Morphology & Leveling...
-                                   ├── Geometric Transforms...
-                                   ├── ──────────────────────
-                                   └── Auto-Register Surfaces...
+                                   +-- Advanced Filtering...
+                                   +-- Morphology & Leveling...
+                                   +-- Geometric Transforms...
+                                   +-- ----------------------
+                                   +-- Auto-Register Surfaces...
 ```
 
 ### Toolbar
 
 Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
-- 🔹 **Advanced Filtering** - Opens filter selection dialog
-- 🔹 **Morphology & Leveling** - Opens morphology operations dialog
-- 🔹 **Geometric Transforms** - Opens transform dialog
+- **Advanced Filtering** - Opens filter selection dialog
+- **Morphology & Leveling** - Opens morphology operations dialog
+- **Geometric Transforms** - Opens transform dialog
 
 ---
 
-## 🔧 Feature Dialogs
+## Feature Dialogs
 
 ### 1. Advanced Filtering Dialog
 
-**Access**: `Processing → Advanced Filtering...` or toolbar button
+**Access**: `Processing -> Advanced Filtering...` or toolbar button
 
 **Available Filters**:
 - **Bilateral Filter** - Edge-preserving smoothing
@@ -61,7 +61,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
   - Use for: Filling small valleys and holes
   
 - **Robust Gaussian Filter** - Outlier-resistant smoothing
-  - Parameters: Sigma (0.5-10), Max Iterations (1-10), Threshold (1-5σ)
+  - Parameters: Sigma (0.5-10), Max Iterations (1-10), Threshold (1-5sigma)
   - Use for: Gaussian smoothing with automatic outlier rejection
 
 **Workflow**:
@@ -77,7 +77,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ### 2. Morphology & Leveling Dialog
 
-**Access**: `Processing → Morphology & Leveling...` or toolbar button
+**Access**: `Processing -> Morphology & Leveling...` or toolbar button
 
 **Available Operations**:
 - **Level by Plane (Least Squares)** - Fast tilt removal
@@ -98,7 +98,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
   - Use for: Masking extreme values (become NaN)
 
 **Options**:
-- ☑ Show preview - (Not yet implemented, placeholder for future)
+- [x] Show preview - (Not yet implemented, placeholder for future)
 
 **Workflow**:
 1. Load a scan
@@ -113,11 +113,11 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ### 3. Geometric Transforms Dialog
 
-**Access**: `Processing → Geometric Transforms...` or toolbar button
+**Access**: `Processing -> Geometric Transforms...` or toolbar button
 
 **Available Transforms**:
 - **Rotate Grid** - Rotate surface by angle
-  - Parameters: Angle (-180° to +180°), Interpolation (Nearest/Linear/Cubic)
+  - Parameters: Angle (-180 deg to +180 deg), Interpolation (Nearest/Linear/Cubic)
   - Use for: Aligning surface orientation
   - Cubic interpolation recommended for best quality
   
@@ -148,7 +148,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ### 4. Auto-Register Surfaces Dialog
 
-**Access**: `Processing → Auto-Register Surfaces...`
+**Access**: `Processing -> Auto-Register Surfaces...`
 
 **Requirements**: At least 2 loaded scans
 
@@ -161,7 +161,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 **Workflow**:
 1. Load 2+ scans in different tabs
-2. Click `Processing → Auto-Register Surfaces...`
+2. Click `Processing -> Auto-Register Surfaces...`
 3. Select reference surface (stays fixed)
 4. Select moving surface (will be transformed)
 5. Choose registration method
@@ -182,10 +182,10 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ---
 
-## 💡 Usage Tips
+## Usage Tips
 
 ### General Workflow
-1. **Load scan** - Use File → Open or toolbar
+1. **Load scan** - Use File -> Open or toolbar
 2. **Pre-process** (optional) - Remove outliers, fill holes
 3. **Apply processing** - Use new Processing menu
 4. **Visualize** - View 3D, profiles, or comparisons
@@ -211,15 +211,15 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ### Error Handling
 All operations include:
-- ✓ Wait cursor during processing
-- ✓ Error dialogs with details
-- ✓ Success confirmations
-- ✓ Parameter validation
-- ✓ Safe failure (data preserved on error)
+- OK Wait cursor during processing
+- OK Error dialogs with details
+- OK Success confirmations
+- OK Parameter validation
+- OK Safe failure (data preserved on error)
 
 ---
 
-## 🚀 Keyboard Shortcuts
+## Keyboard Shortcuts
 
 Currently, advanced processing features have no keyboard shortcuts assigned. You can add them by modifying the action definitions in `main_window.py`:
 
@@ -231,7 +231,7 @@ self.actions["transform"].setShortcut("Ctrl+Shift+T")
 
 ---
 
-## 🔧 Technical Details
+## Technical Details
 
 ### Code Structure
 
@@ -250,19 +250,19 @@ self.actions["transform"].setShortcut("Ctrl+Shift+T")
 ### Data Flow
 ```
 User clicks button/menu
-    ↓
+    v
 Dialog opens (parameter input)
-    ↓
+    v
 User clicks OK
-    ↓
+    v
 get_*_config() extracts parameters
-    ↓
+    v
 Processing function called
-    ↓
+    v
 tab.grid updated
-    ↓
+    v
 tab.update_histogram() refreshes display
-    ↓
+    v
 Success message shown
 ```
 
@@ -274,7 +274,7 @@ Success message shown
 
 ---
 
-## 🎨 Future Enhancements
+## Future Enhancements
 
 Potential improvements:
 - [ ] Preview mode (show before/after comparison)
@@ -290,7 +290,7 @@ Potential improvements:
 
 ---
 
-## 🐛 Known Issues
+## Known Issues
 
 1. **No undo** - Processing operations directly modify the scan. Save backups before processing.
 2. **No preview** - "Show preview" checkbox in Morphology dialog is not yet implemented.
@@ -299,7 +299,7 @@ Potential improvements:
 
 ---
 
-## 📚 Related Documentation
+## Related Documentation
 
 - [Advanced Processing API](ADVANCED_PROCESSING.md) - Full function reference
 - [Quick Reference](QUICK_REFERENCE.md) - Function cheat sheet
@@ -307,7 +307,7 @@ Potential improvements:
 
 ---
 
-## 📞 Support
+## Support
 
 For issues or questions:
 1. Check [ADVANCED_PROCESSING.md](ADVANCED_PROCESSING.md) for function details

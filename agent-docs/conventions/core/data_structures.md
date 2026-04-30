@@ -14,11 +14,11 @@
 
 ```python
 class Surface:
-    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="µm", 
+    def __init__(self, height, dx, dy, x0=0.0, y0=0.0, mask=None, unit="um", 
                  metadata=None, vmin=None, vmax=None):
         self.height = height  # 2D numpy array
-        self.dx = dx          # Pixel size in x (µm)
-        self.dy = dy          # Pixel size in y (µm)
+        self.dx = dx          # Pixel size in x (um)
+        self.dy = dy          # Pixel size in y (um)
         self.x0 = x0          # Origin/offset for X coordinates
         self.y0 = y0          # Origin/offset for Y coordinates
         self.mask = mask      # Boolean mask (optional)
@@ -38,17 +38,17 @@ class Surface:
 
 ### When to Use
 
-- ✅ **Loading/Saving:** Loaders return Surface, exporters accept (name, Surface) tuples
-- ✅ **GUI components:** Pass Surface between tabs and dialogs
-- ✅ **Storing visualization parameters:** vmin/vmax for display ranges
-- ✅ **Simple utility methods:** crop, copy
-- ✅ **Preserving spatial positioning:** x0, y0 for alignment and comparison
+- OK **Loading/Saving:** Loaders return Surface, exporters accept (name, Surface) tuples
+- OK **GUI components:** Pass Surface between tabs and dialogs
+- OK **Storing visualization parameters:** vmin/vmax for display ranges
+- OK **Simple utility methods:** crop, copy
+- OK **Preserving spatial positioning:** x0, y0 for alignment and comparison
 
 ### When NOT to Use
 
-- ❌ Processing functions (use `np.ndarray` instead)
-- ❌ Business logic / algorithms
-- ❌ Complex state management
+- BAD Processing functions (use `np.ndarray` instead)
+- BAD Business logic / algorithms
+- BAD Complex state management
 
 ### Spatial Coordinates
 

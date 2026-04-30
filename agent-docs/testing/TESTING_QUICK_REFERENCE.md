@@ -464,7 +464,7 @@ pytest --lf -v
 ---
 
 **For more examples, see:**
-- [test_gui_viewers.py](tests/test_gui_viewers.py) - Manager class testing
-- [test_gui_scan_tab.py](tests/test_gui_scan_tab.py) - Data processing testing
-- [test_gui_main_window.py](tests/test_gui_main_window.py) - Controller testing
-- [test_gui_profile_viewer.py](tests/test_gui_profile_viewer.py) - Integration patterns
+- [test_gui_viewers.py](../../tests/test_gui_viewers.py) - Manager class testing
+- [test_gui_scan_tab.py](../../tests/test_gui_scan_tab.py) - Data processing testing
+- [test_gui_main_window.py](../../tests/test_gui_main_window.py) - Controller testing
+- [test_gui_profile_viewer.py](../../tests/test_gui_profile_viewer.py) - Integration patterns

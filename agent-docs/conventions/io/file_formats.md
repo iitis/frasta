@@ -6,7 +6,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [NPZ Format](#npz-format)
 2. [HDF5 Format](#hdf5-format)
@@ -41,7 +41,7 @@
 ### Conventions
 
 - **Key naming:** `{field}_{index:02d}` (e.g., `grid_03`)
-- **Coordinates in micrometers (μm)**
+- **Coordinates in micrometers (um)**
 - **NaN values preserved** in grid arrays
 - **Compression:** Always use `np.savez_compressed()`
 
@@ -75,18 +75,18 @@ def save_npz(fname, scans):
 
 ```
 /
-├── @frasta_info = 1           # Root attribute
-├── @frasta_cnt = N            # Number of scans
-├── tab_00/                    # Group for scan 0
-│   ├── name (dataset)         # UTF-8 encoded string
-│   ├── grid (dataset)         # 2D float array, gzip compressed
-│   ├── xi (dataset)           # 1D float array
-│   ├── yi (dataset)           # 1D float array
-│   ├── px_x (scalar)          # Float
-│   └── px_y (scalar)          # Float
-├── tab_01/
-│   └── ...
-└── ...
++-- @frasta_info = 1           # Root attribute
++-- @frasta_cnt = N            # Number of scans
++-- tab_00/                    # Group for scan 0
+|   +-- name (dataset)         # UTF-8 encoded string
+|   +-- grid (dataset)         # 2D float array, gzip compressed
+|   +-- xi (dataset)           # 1D float array
+|   +-- yi (dataset)           # 1D float array
+|   +-- px_x (scalar)          # Float
+|   +-- px_y (scalar)          # Float
++-- tab_01/
+|   +-- ...
++-- ...
 ```
 
 ### Conventions
@@ -94,7 +94,7 @@ def save_npz(fname, scans):
 - **Group naming:** `tab_{index:02d}`
 - **Compression:** Use gzip for all datasets
 - **String encoding:** UTF-8 for names
-- **Coordinates in micrometers (μm)**
+- **Coordinates in micrometers (um)**
 - **Optional metadata:** Can add custom attributes to groups
 
 ### Example Implementation
@@ -141,9 +141,9 @@ X,Y,Z
 - **Delimiter:** Auto-detect (`,`, `;`, tab, space)
 - **Header:** Optional, if present should be in first non-comment line
 - **Column order:** X, Y, Z (height/depth)
-- **Input units:** User-specified (mm or μm), converted to μm internally
+- **Input units:** User-specified (mm or um), converted to um internally
 - **Grid structure:** Assumed regular grid, coordinates sorted
-- **Missing values:** Empty cells or non-numeric → NaN
+- **Missing values:** Empty cells or non-numeric -> NaN
 
 ### Parsing Algorithm
 
@@ -152,7 +152,7 @@ X,Y,Z
 3. Parse all numeric columns as X, Y, Z
 4. Determine grid structure from unique X, Y values
 5. Fill grid with Z values at corresponding (X, Y)
-6. Missing grid cells → NaN
+6. Missing grid cells -> NaN
 
 ### Example
 
@@ -179,7 +179,7 @@ def load_csv_data(fname, xy_units='um', z_units='um', progress_callback=None):
         dy=px_y,
         x0=xi[0],
         y0=yi[0],
-        unit="µm"
+        unit="um"
     )
 ```
 
@@ -194,20 +194,20 @@ def load_csv_data(fname, xy_units='um', z_units='um', progress_callback=None):
 ### Conventions for Import
 
 - **Units in STL:** Assumed millimeters
-- **Conversion to internal:** Multiply by 1000 → micrometers
+- **Conversion to internal:** Multiply by 1000 -> micrometers
 - **Grid creation:** Ray-casting from above, sample Z at regular XY grid
 - **Resolution:** Auto-determined or user-specified
 
 ### Conventions for Export
 
-- **Units in STL:** Millimeters (divide internal μm by 1000)
+- **Units in STL:** Millimeters (divide internal um by 1000)
 - **Mesh generation:** Create triangular mesh from 2D height map
 - **NaN handling:** Exclude NaN regions from mesh
 - **Format:** Binary STL preferred (smaller files)
 - **Downsampling:** Large grids are automatically downsampled
   - Based on **valid (non-NaN) points count**, not total grid size
   - Default: max 500k valid points
-  - Example: 10M grid with 50% NaN → 5M valid → downsampled only if >500k valid
+  - Example: 10M grid with 50% NaN -> 5M valid -> downsampled only if >500k valid
 
 ### Example Export
 
@@ -227,7 +227,7 @@ def save_stl(fname, surface, binary=True, max_points=500000):
         xi = xi[::stride]
         yi = yi[::stride]
     
-    # Convert μm to mm
+    # Convert um to mm
     xi_mm = xi / 1000.0
     yi_mm = yi / 1000.0
     grid_mm = grid / 1000.0
@@ -251,17 +251,17 @@ def save_stl(fname, surface, binary=True, max_points=500000):
 
 ## Unit Conventions
 
-### Universal Standard: Micrometers (μm)
+### Universal Standard: Micrometers (um)
 
 **All internal processing uses micrometers.**
 
 | Quantity | Internal Unit | Common Input Units |
 |----------|---------------|-------------------|
-| X/Y coordinates | μm | mm, μm |
-| Z heights | μm | mm, μm |
-| Pixel sizes (px_x, px_y) | μm | mm, μm |
-| Filter sigmas | μm | μm |
-| Physical dimensions | μm | μm |
+| X/Y coordinates | um | mm, um |
+| Z heights | um | mm, um |
+| Pixel sizes (px_x, px_y) | um | mm, um |
+| Filter sigmas | um | um |
+| Physical dimensions | um | um |
 
 ### Conversion Rules
 
@@ -291,7 +291,7 @@ def suggest_units(fname):
     px_x_raw = median_step(sample['x'])
     px_y_raw = median_step(sample['y'])
     
-    # If step < 0.1, likely mm; if step > 1, likely μm
+    # If step < 0.1, likely mm; if step > 1, likely um
     suggested_xy = 'mm' if px_x_raw < 0.1 else 'um'
     
     # Check Z range
@@ -362,7 +362,7 @@ def load_format(fname):
 Every format should have tests for:
 
 - **Round-trip:** Save then load, verify data matches
-- **Unit conversion:** Verify mm ↔ μm conversion
+- **Unit conversion:** Verify mm <-> um conversion
 - **NaN preservation:** NaN values survive save/load
 - **Edge cases:** Empty arrays, single-point grids
 - **Corrupted files:** Graceful error messages

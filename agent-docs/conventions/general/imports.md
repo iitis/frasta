@@ -51,10 +51,10 @@ GUI modules should import processing functions **only when needed**:
 ```python
 # In main_window.py
 
-# DON'T do this at module level ❌
+# DON'T do this at module level BAD
 from ..processing import bilateral_filter, median_filter, ...  # 20+ imports
 
-# DO this in methods ✅
+# DO this in methods OK
 def apply_bilateral_filter(self):
     from ..processing import bilateral_filter  # Import on demand
     result = bilateral_filter(...)
@@ -69,18 +69,18 @@ def apply_bilateral_filter(self):
 ### Standard Aliases (Use These)
 
 ```python
-import numpy as np                    ✅
-import pandas as pd                   ✅
-import matplotlib.pyplot as plt       ✅
-from PyQt5 import QtWidgets, QtCore   ✅
+import numpy as np                    OK
+import pandas as pd                   OK
+import matplotlib.pyplot as plt       OK
+from PyQt5 import QtWidgets, QtCore   OK
 ```
 
 ### Avoid Ambiguous Aliases
 
 ```python
-import numpy as n              ❌
-import pandas as p             ❌
-from scipy import *            ❌ (star imports)
+import numpy as n              BAD
+import pandas as p             BAD
+from scipy import *            BAD (star imports)
 ```
 
 ---
@@ -91,15 +91,15 @@ from scipy import *            ❌ (star imports)
 
 ```python
 # In frasta/processing/advanced_filtering.py
-from ..core import Surface           ✅ (relative)
-from frasta.core import Surface      ❌ (absolute in package)
+from ..core import Surface           OK (relative)
+from frasta.core import Surface      BAD (absolute in package)
 ```
 
 ### From External Code (Use Absolute)
 
 ```python
 # In examples/ or tests/
-from frasta.processing import bilateral_filter   ✅
+from frasta.processing import bilateral_filter   OK
 ```
 
 ---

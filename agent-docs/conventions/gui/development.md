@@ -6,7 +6,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Parameter Dialog Pattern](#parameter-dialog-pattern)
 2. [Worker Thread Pattern](#worker-thread-pattern)
@@ -252,11 +252,11 @@ def on_my_filter(self):
 ### Rule 1: Use Typed Signals
 
 ```python
-# GOOD ✅
+# GOOD OK
 class MyWidget(QtWidgets.QWidget):
     value_changed = QtCore.pyqtSignal(float)  # Explicit type
     
-# BAD ❌
+# BAD BAD
 class MyWidget(QtWidgets.QWidget):
     value_changed = QtCore.pyqtSignal()  # No type info
 ```

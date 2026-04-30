@@ -6,7 +6,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Loader Function Pattern](#loader-function-pattern)
 2. [Exporter Function Pattern](#exporter-function-pattern)
@@ -92,14 +92,14 @@ def load_my_format(fname, progress_callback=None):
             dy=px_y,
             x0=xi[0] if len(xi) > 0 else 0.0,
             y0=yi[0] if len(yi) > 0 else 0.0,
-            unit="µm",
+            unit="um",
             metadata={"name": name}
         )
         
         if progress_callback:
             progress_callback(100)
         
-        logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}μm")
+        logger.info(f"Loaded {name}: {grid.shape} grid, px={px_x:.2f}um")
         
         return surface
         
@@ -164,7 +164,7 @@ def save_my_format(fname, scans, compression=True):
             
             for name, surface in scans:
                 # Convert units if necessary for format
-                grid_mm = surface.height / 1000.0  # example: μm -> mm
+                grid_mm = surface.height / 1000.0  # example: um -> mm
                 xi_mm = surface.xi / 1000.0
                 yi_mm = surface.yi / 1000.0
                 
@@ -182,7 +182,7 @@ def save_my_format(fname, scans, compression=True):
 
 1. **Accept list of (name, Surface) tuples:** Even if format supports only one
 2. **Extract data from Surface:** Use `surface.height`, `surface.xi`, `surface.yi`, etc.
-3. **Convert units at boundary:** Internal μm → format's expected units
+3. **Convert units at boundary:** Internal um -> format's expected units
 4. **Handle NaN appropriately:** Skip, fill, or format-specific encoding
 5. **Atomic writes if possible:** Write to temp file, then rename
 6. **Log on success:** Number of scans, file size
@@ -210,10 +210,10 @@ raise RuntimeError(f"Unexpected error: {e}")
 ### Informative Messages
 
 ```python
-# BAD ❌
+# BAD BAD
 raise ValueError("Invalid file")
 
-# GOOD ✅
+# GOOD OK
 raise ValueError(
     f"Invalid MY_FORMAT file '{fname}': "
     f"expected magic number 0x1234, got 0x5678"
@@ -261,14 +261,14 @@ def load_with_progress(fname, progress_callback=None):
 
 ## Unit Conversion
 
-### Import (File → Internal)
+### Import (File -> Internal)
 
 ```python
 def convert_to_internal_units(value, unit):
     """Convert input units to micrometers."""
     if unit == 'mm':
         return value * 1000.0
-    elif unit == 'um' or unit == 'μm':
+    elif unit == 'um' or unit == 'um':
         return value
     elif unit == 'nm':
         return value / 1000.0
@@ -276,7 +276,7 @@ def convert_to_internal_units(value, unit):
         raise ValueError(f"Unknown unit: {unit}")
 ```
 
-### Export (Internal → File)
+### Export (Internal -> File)
 
 ```python
 def convert_from_internal_units(value_um, target_unit):
@@ -317,7 +317,7 @@ class TestMyFormatLoader:
         # Load file known to be in mm
         surface = load_my_format('test_data/mm_units.myformat')
         
-        # Should be converted to μm internally
+        # Should be converted to um internally
         assert surface.dx > 100  # If original was ~0.1mm
     
     def test_preserves_nan(self):
