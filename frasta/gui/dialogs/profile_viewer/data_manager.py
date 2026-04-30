@@ -193,7 +193,7 @@ class DataManager:
         self.parent.plot_widget.getPlotItem().getViewBox().setRange(xRange=(0, size_x_mm))
         
         self.parent.progress_bar.setVisible(False)
-        self.parent.statusBar().showMessage("Gotowy")
+        self.parent.statusBar().showMessage("Ready")
         
         # Reset ROI and refresh GUI
         height, width = self.parent.reference_grid_smooth.shape

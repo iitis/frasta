@@ -109,21 +109,21 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
     
     # Konwersja XY na podstawie wybranej przez użytkownika jednostki
     if units_xy == 'mm':
-        logger.info("Przeliczam XY z milimetrów na mikrometry.")
+        logger.info("Converting XY from millimetres to micrometres.")
         x = x * 1000
         y = y * 1000
         # trzeba przeliczyć dx/dy jeszcze raz po skalowaniu
         dx = np.diff(np.sort(np.unique(x)))
         dy = np.diff(np.sort(np.unique(y)))
     else:
-        logger.info("Używam XY w mikrometrach - brak konwersji.")
+        logger.info("XY already in micrometres – no conversion.")
     
     # Konwersja Z niezależnie od XY
     if units_z == 'mm':
-        logger.info("Przeliczam Z z milimetrów na mikrometry.")
+        logger.info("Converting Z from millimetres to micrometres.")
         z = z * 1000
     else:
-        logger.info("Używam Z w mikrometrach - brak konwersji.")
+        logger.info("Z already in micrometres – no conversion.")
 
     dx = np.median(dx[dx > 0]).round(2)
     dy = np.median(dy[dy > 0]).round(2)

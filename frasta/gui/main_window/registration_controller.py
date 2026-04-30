@@ -36,8 +36,8 @@ class RegistrationController:
         tabs = self.main_window.tabs
         if tabs.count() < 2:
             QtWidgets.QMessageBox.warning(
-                self.main_window, "Za mało skanów", 
-                "Musisz mieć przynajmniej 2 skany!"
+                self.main_window, "Not enough scans",
+                "At least 2 scans are required!"
             )
             return
 
@@ -45,18 +45,18 @@ class RegistrationController:
             b = idx1 is not None and idx2 is not None
             if b:
                 msg = QtWidgets.QMessageBox(self.main_window)
-                msg.setWindowTitle("Dopasowanie skanów")
-                msg.setText("Jak chcesz zapisać dopasowanie?")
-                btn1 = msg.addButton("Jako nowe zakładki", QtWidgets.QMessageBox.AcceptRole)
-                btn2 = msg.addButton("Nadpisz istniejące", QtWidgets.QMessageBox.ActionRole)
-                msg.addButton("Anuluj", QtWidgets.QMessageBox.RejectRole)
+                msg.setWindowTitle("Scan alignment")
+                msg.setText("How would you like to save the alignment?")
+                btn1 = msg.addButton("As new tabs", QtWidgets.QMessageBox.AcceptRole)
+                btn2 = msg.addButton("Overwrite existing", QtWidgets.QMessageBox.ActionRole)
+                msg.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
                 msg.exec_()
 
             if not b or msg.clickedButton() == btn1:
                 tab1 = ScanTab()
                 tab2 = ScanTab()
-                tabs.addTab(tab1, "Dopasowany ref")
-                tabs.addTab(tab2, "Dopasowany scan2")
+                tabs.addTab(tab1, "Aligned ref")
+                tabs.addTab(tab2, "Aligned scan2")
             elif msg.clickedButton() == btn2:
                 tab1 = tabs.widget(idx1)
                 tab2 = tabs.widget(idx2)
@@ -66,17 +66,17 @@ class RegistrationController:
 
         # Dialog wyboru zakładek
         dialog = QtWidgets.QDialog(self.main_window)
-        dialog.setWindowTitle("Wybierz skany do porównania")
+        dialog.setWindowTitle("Select scans for comparison")
         layout = QtWidgets.QVBoxLayout(dialog)
-        label1 = QtWidgets.QLabel("Referencyjny skan:")
-        label2 = QtWidgets.QLabel("Skan do dopasowania:")
+        label1 = QtWidgets.QLabel("Reference scan:")
+        label2 = QtWidgets.QLabel("Scan to align:")
         cb1 = QtWidgets.QComboBox()
         cb2 = QtWidgets.QComboBox()
         names = [tabs.tabText(i) for i in range(tabs.count())]
         cb1.addItems(names)
         cb2.addItems(names)
         ok_btn = QtWidgets.QPushButton("OK")
-        cancel_btn = QtWidgets.QPushButton("Anuluj")
+        cancel_btn = QtWidgets.QPushButton("Cancel")
         hl = QtWidgets.QHBoxLayout()
         hl.addWidget(ok_btn)
         hl.addWidget(cancel_btn)
@@ -88,7 +88,7 @@ class RegistrationController:
 
         def accept():
             if cb1.currentIndex() == cb2.currentIndex():
-                QtWidgets.QMessageBox.warning(dialog, "Błąd", "Wybierz dwa różne skany!")
+                QtWidgets.QMessageBox.warning(dialog, "Error", "Please select two different scans!")
                 return
             dialog.accept()
         ok_btn.clicked.connect(accept)
