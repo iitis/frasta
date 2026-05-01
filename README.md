@@ -35,6 +35,8 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
     - adjust value range using histogram thresholding,
    - use the mouse wheel over the histogram to zoom its visible value range,
    - drag the histogram background horizontally to pan the zoomed range,
+   - use the manual `Min` / `Max` fields beside the histogram for precise threshold values,
+   - use the `Hide below Min` and `Hide above Max` toggles to choose independently whether low and high out-of-range values should be masked or rendered with boundary colors,
    - choose grayscale or a false-color palette directly from the main toolbar,
    - fill missing data if necessary.
 3. Apply advanced processing steps:

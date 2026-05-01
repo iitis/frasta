@@ -18,6 +18,11 @@ from frasta.gui.viewers.grid_3d_viewer import (
     LODManager, ColormapManager, SurfaceRenderer, 
     ProfileManager, CameraController
 )
+from frasta.gui.viewers.grid_3d_viewer.camera_controller import (
+    SCAN_VIEW_AZIMUTH_DEGREES,
+    SCAN_VIEW_ELEVATION_DEGREES,
+)
+from frasta.gui.viewers.lod_surface import LODSurface
 
 
 # ============================================================================
@@ -128,6 +133,35 @@ class TestLODManager:
         lod_manager._update_lod_tick()
 
 
+class TestLODSurface:
+    """Test suite for direct LOD surface mesh generation."""
+
+    @pytest.fixture
+    def mock_view(self):
+        """Create mock GLViewWidget."""
+        view = Mock(spec=gl.GLViewWidget)
+        view.addItem = Mock()
+        view.removeItem = Mock()
+        view.opts = {'distance': 100.0, 'fov': 60.0}
+        view.height = Mock(return_value=600)
+        return view
+
+    def test_build_item_uses_unlit_shader(self, mock_view):
+        """LOD surface rendering should not depend on directional lighting."""
+        with patch('frasta.gui.viewers.lod_surface.QtCore.QTimer'):
+            lod = LODSurface(mock_view)
+        lod.data = (
+            np.array([0.0, 1.0], dtype=np.float32),
+            np.array([0.0, -1.0], dtype=np.float32),
+            np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        )
+
+        with patch('frasta.gui.viewers.lod_surface.gl.GLMeshItem') as mock_item:
+            lod._build_item_for_step(1)
+
+        assert mock_item.call_args.kwargs['shader'] is None
+
+
 # ============================================================================
 # ColormapManager Tests
 # ============================================================================
@@ -142,8 +176,8 @@ class TestColormapManager:
     
     def test_initialization(self, colormap_manager):
         """Test ColormapManager initializes with correct defaults."""
-        assert colormap_manager.colormap_ref == 'RG'
-        assert colormap_manager.colormap_adj == 'RG'
+        assert colormap_manager.colormap_ref == 'Metrology'
+        assert colormap_manager.colormap_adj == 'Metrology'
         assert colormap_manager.range_linked is False
         assert colormap_manager.range_ref_auto is True
         assert colormap_manager.range_adj_auto is True
@@ -315,6 +349,19 @@ class TestSurfaceRenderer:
         assert Z.shape[0] == len(ys)
         assert Z.shape[1] == len(xs)
         assert Z.dtype == np.float32
+
+    def test_prepare_reference_surface_preserves_scan_orientation(self, surface_renderer):
+        """Test that 3D preparation keeps the input scan column order."""
+        grid = np.array([[1.0, 2.0, 3.0],
+                         [4.0, 5.0, 6.0]], dtype=float)
+
+        xs, ys, Z, _, _ = surface_renderer.prepare_reference_surface(
+            grid, max_points=10, dx=2.0, dy=3.0
+        )
+
+        np.testing.assert_array_equal(xs, np.array([0.0, 2.0, 4.0], dtype=np.float32))
+        np.testing.assert_array_equal(ys, np.array([0.0, -3.0], dtype=np.float32))
+        np.testing.assert_array_equal(Z, grid.astype(np.float32))
     
     def test_prepare_reference_surface_downsamples(self, surface_renderer):
         """Test prepare_reference_surface downsamples large grids."""
@@ -363,7 +410,7 @@ class TestSurfaceRenderer:
         
         # First coordinates should include origin
         assert xs[0] == 10.0
-        assert ys[0] == 20.0
+        assert ys[0] == -20.0
     
     def test_prepare_adjusted_surface(self, surface_renderer):
         """Test prepare_adjusted_surface creates matching surface."""
@@ -396,6 +443,54 @@ class TestSurfaceRenderer:
         # Should return NaN array of same shape
         assert Z_adj.shape == Z_ref.shape
         assert np.all(np.isnan(Z_adj))
+
+    def test_make_voxel_mesh_uses_unlit_shader(self, surface_renderer):
+        """Mesh-mode rendering should not depend on directional lighting."""
+        grid = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=float)
+
+        with patch('frasta.gui.viewers.grid_3d_viewer.surface_renderer.gl.GLMeshItem') as mock_item:
+            surface_renderer.make_voxel_mesh(grid)
+
+        assert mock_item.call_args.kwargs['shader'] is None
+
+
+class TestSurfaceTriangulationOrientation:
+    """Test suite for 3D mesh winding after scan-oriented axis mapping."""
+
+    def test_lod_surface_faces_point_upward_for_flat_scan(self):
+        """LOD triangulation should keep positive Z normals for a flat surface."""
+        xs = np.array([0.0, 1.0], dtype=np.float32)
+        ys = np.array([0.0, -1.0], dtype=np.float32)
+        X, Y = np.meshgrid(xs, ys, indexing='xy')
+        vertices = np.c_[X.ravel(), Y.ravel(), np.zeros(4, dtype=np.float32)]
+
+        idx = np.arange(4, dtype=np.uint32).reshape(2, 2)
+        face_a = vertices[[idx[0, 0], idx[1, 0], idx[1, 1]]]
+        face_b = vertices[[idx[0, 0], idx[1, 1], idx[0, 1]]]
+
+        normal_a = np.cross(face_a[1] - face_a[0], face_a[2] - face_a[0])
+        normal_b = np.cross(face_b[1] - face_b[0], face_b[2] - face_b[0])
+
+        assert normal_a[2] > 0.0
+        assert normal_b[2] > 0.0
+
+    def test_mesh_surface_faces_point_upward_for_flat_scan(self):
+        """Mesh-mode triangulation should keep positive Z normals for a flat surface."""
+        verts = np.array([
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [1.0, -1.0, 0.0],
+        ], dtype=np.float32)
+
+        face_a = verts[[0, 2, 3]]
+        face_b = verts[[0, 3, 1]]
+
+        normal_a = np.cross(face_a[1] - face_a[0], face_a[2] - face_a[0])
+        normal_b = np.cross(face_b[1] - face_b[0], face_b[2] - face_b[0])
+
+        assert normal_a[2] > 0.0
+        assert normal_b[2] > 0.0
 
 
 # ============================================================================
@@ -442,6 +537,23 @@ class TestProfileManager:
                 # Should call helper methods
                 profile_manager.add_cross_section_plane.assert_called_once()
                 assert profile_manager.add_profile_line_segments.call_count == 2
+
+    def test_add_profile_and_plane_uses_scan_oriented_y_axis(self, profile_manager):
+        """Test profile geometry uses the same Y direction as the 2D scan view."""
+        ref_grid = np.random.randn(20, 20) + 100
+        line_points = [[2, 3], [10, 12]]
+
+        with patch.object(profile_manager, 'add_cross_section_plane', return_value=Mock()) as mock_plane:
+            with patch.object(profile_manager, 'add_profile_line_segments'):
+                profile_manager.add_profile_and_plane(
+                    ref_grid, None, line_points,
+                    separation=0.0, z_min=90.0, z_max=120.0,
+                    pixel_size_x=2.0, pixel_size_y=5.0
+                )
+
+        pts = mock_plane.call_args.args[0]
+        np.testing.assert_array_equal(pts[:, 0], np.array([4.0, 20.0], dtype=np.float32))
+        np.testing.assert_array_equal(pts[:, 1], np.array([-15.0, -60.0], dtype=np.float32))
     
     def test_add_profile_and_plane_out_of_bounds(self, profile_manager):
         """Test add_profile_and_plane handles out-of-bounds points."""
@@ -516,6 +628,8 @@ class TestCameraController:
         call_args = mock_view.setCameraPosition.call_args
         assert 'pos' in call_args[1]
         assert 'distance' in call_args[1]
+        assert call_args[1]['azimuth'] == SCAN_VIEW_AZIMUTH_DEGREES
+        assert call_args[1]['elevation'] == SCAN_VIEW_ELEVATION_DEGREES
     
     def test_center_camera_with_adjusted(self, camera_controller, mock_view):
         """Test center_camera includes adjusted grid in calculation."""

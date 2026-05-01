@@ -16,6 +16,8 @@ class HistogramManager:
     """Manages histogram display and threshold controls."""
 
     HISTOGRAM_BINS = 512
+    THRESHOLD_LINE_WIDTH = 3
+    THRESHOLD_HOVER_WIDTH = 5
     
     def __init__(self, hist_widget, update_callback):
         """Initialize histogram manager.
@@ -33,6 +35,10 @@ class HistogramManager:
         self._updating_histogram = False
         self.current_colormap_name = "Gray"
         self._hist_centers = None
+        self._data_min = None
+        self._data_max = None
+        self.hide_below_range = True
+        self.hide_above_range = True
     
     def update_histogram(
         self,
@@ -62,6 +68,8 @@ class HistogramManager:
         # Get data range
         vmin = float(np.min(data))
         vmax = float(np.max(data))
+        self._data_min = vmin
+        self._data_max = vmax
 
         # Remember old positions (if they exist)
         old_min_line = self.hist_min_line
@@ -70,8 +78,8 @@ class HistogramManager:
 
         if was_data_negated:
             # Flip threshold positions for inverted data
-            min_val = np.clip(-old_max_line.value(), vmin, vmax) if old_max_line else vmin
-            max_val = np.clip(-old_min_line.value(), vmin, vmax) if old_min_line else vmax
+            min_val = self._clamp_threshold_value(-old_max_line.value()) if old_max_line else vmin
+            max_val = self._clamp_threshold_value(-old_min_line.value()) if old_min_line else vmax
         else:
             # Try to preserve old line positions, but only if they make sense for new data
             if old_min_line is not None and old_max_line is not None:
@@ -79,8 +87,8 @@ class HistogramManager:
                 old_max = old_max_line.value()
                 # Check if old values are reasonable for new data range
                 if vmin <= old_min <= vmax and vmin <= old_max <= vmax:
-                    min_val = old_min
-                    max_val = old_max
+                    min_val = self._clamp_threshold_value(old_min)
+                    max_val = self._clamp_threshold_value(old_max)
                 else:
                     # Old values don't make sense for new data, use full range
                     min_val = vmin
@@ -123,15 +131,17 @@ class HistogramManager:
         self.hist_min_line = ResponsiveInfiniteLine(
             update_callback=self._on_threshold_changed, 
             angle=90, movable=True, 
-            pen=pg.mkPen('b', width=2), 
-            hoverPen=pg.mkPen('y', width=2)
+            pen=pg.mkPen(40, 140, 255, width=self.THRESHOLD_LINE_WIDTH), 
+            hoverPen=pg.mkPen(255, 220, 0, width=self.THRESHOLD_HOVER_WIDTH)
         )
         self.hist_max_line = ResponsiveInfiniteLine(
             update_callback=self._on_threshold_changed, 
             angle=90, movable=True, 
-            pen=pg.mkPen('r', width=2), 
-            hoverPen=pg.mkPen('y', width=2)
+            pen=pg.mkPen(255, 90, 90, width=self.THRESHOLD_LINE_WIDTH), 
+            hoverPen=pg.mkPen(255, 220, 0, width=self.THRESHOLD_HOVER_WIDTH)
         )
+        self.hist_min_line.setBounds((vmin, vmax))
+        self.hist_max_line.setBounds((vmin, vmax))
         self.hist_widget.addItem(self.hist_min_line)
         self.hist_widget.addItem(self.hist_max_line)
         self.hist_min_line.setValue(min_val)
@@ -161,8 +171,9 @@ class HistogramManager:
             return
             
         logger.debug(f"Threshold updated: {value}")
-        vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
-        vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
+        vmin = self._clamp_threshold_value(min(self.hist_min_line.value(), self.hist_max_line.value()))
+        vmax = self._clamp_threshold_value(max(self.hist_min_line.value(), self.hist_max_line.value()))
+        self._set_line_positions(vmin, vmax)
         self._apply_histogram_coloring(vmin, vmax)
         self.update_callback(vmin, vmax)
     
@@ -173,8 +184,8 @@ class HistogramManager:
             tuple: (vmin, vmax) threshold values
         """
         if self.hist_min_line is not None and self.hist_max_line is not None:
-            vmin = min(self.hist_min_line.value(), self.hist_max_line.value())
-            vmax = max(self.hist_min_line.value(), self.hist_max_line.value())
+            vmin = self._clamp_threshold_value(min(self.hist_min_line.value(), self.hist_max_line.value()))
+            vmax = self._clamp_threshold_value(max(self.hist_min_line.value(), self.hist_max_line.value()))
             return vmin, vmax
         return None, None
     
@@ -186,9 +197,38 @@ class HistogramManager:
             vmax (float): Maximum threshold
         """
         if self.hist_min_line is not None and self.hist_max_line is not None:
+            vmin = self._clamp_threshold_value(vmin)
+            vmax = self._clamp_threshold_value(vmax)
+            vmin, vmax = min(vmin, vmax), max(vmin, vmax)
+            self._set_line_positions(vmin, vmax)
+            self._apply_histogram_coloring(vmin, vmax)
+
+    def set_out_of_range_visibility(self, hide_below_range: bool, hide_above_range: bool):
+        """Set whether values below/above the selected range should be hidden."""
+        self.hide_below_range = bool(hide_below_range)
+        self.hide_above_range = bool(hide_above_range)
+        vmin, vmax = self.get_threshold_range()
+        if vmin is not None and vmax is not None:
+            self._apply_histogram_coloring(vmin, vmax)
+
+    def get_data_range(self) -> tuple[float, float]:
+        """Return the current histogram data range."""
+        return self._data_min, self._data_max
+
+    def _clamp_threshold_value(self, value: float) -> float:
+        """Clamp a threshold value to the current histogram data range."""
+        if self._data_min is None or self._data_max is None:
+            return float(value)
+        return float(np.clip(value, self._data_min, self._data_max))
+
+    def _set_line_positions(self, vmin: float, vmax: float):
+        """Update threshold line positions without changing their order."""
+        self._updating_histogram = True
+        try:
             self.hist_min_line.setValue(vmin)
             self.hist_max_line.setValue(vmax)
-            self._apply_histogram_coloring(vmin, vmax)
+        finally:
+            self._updating_histogram = False
 
     def _build_histogram_brushes(self, vmin: float, vmax: float):
         """Create per-bin brushes using the active display range.
@@ -210,11 +250,15 @@ class HistogramManager:
             normalized = (centers[active_mask] - vmin) / span
             colored_brushes = get_brushes_for_values(self.current_colormap_name, normalized)
             color_iter = iter(colored_brushes)
-            for is_active in active_mask:
+            for center, is_active in zip(centers, active_mask):
                 if is_active:
                     brushes.append(next(color_iter))
-                else:
+                elif center < vmin and self.hide_below_range:
                     brushes.append(pg.mkBrush(230, 230, 230, 140))
+                elif center > vmax and self.hide_above_range:
+                    brushes.append(pg.mkBrush(230, 230, 230, 140))
+                else:
+                    brushes.append(pg.mkBrush(110, 110, 110, 180))
         else:
             brushes = [pg.mkBrush(230, 230, 230, 140) for _ in centers]
         return brushes

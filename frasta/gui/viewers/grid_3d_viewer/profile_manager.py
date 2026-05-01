@@ -63,10 +63,11 @@ class ProfileManager:
             if len(pts) < 2:
                 return  # Not enough points to plot a line
         
-        # Convert points from pixel indices to physical units (micrometers)
+        # Match the 3D surface orientation to the scan image: rows increase
+        # downward in the source scan, so world Y is negated here as well.
         pts_physical = pts.copy().astype(np.float32)
         pts_physical[:, 0] *= pixel_size_x  # X in micrometers
-        pts_physical[:, 1] *= pixel_size_y  # Y in micrometers
+        pts_physical[:, 1] *= -pixel_size_y  # Y in micrometers (scan convention)
         
         try:
             # Use original indices to fetch data from grid

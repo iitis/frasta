@@ -172,7 +172,7 @@ class LODSurface:
         faces = np.vstack([f1, f2])
 
         md = gl.MeshData(vertexes=V, faces=faces)
-        it = gl.GLMeshItem(meshdata=md, smooth=True, drawEdges=False, drawFaces=True, shader='shaded')
+        it = gl.GLMeshItem(meshdata=md, smooth=True, drawEdges=False, drawFaces=True, shader=None)
         it._mesh = md  # <- zapisz md w itemie
 
         if self.shader is not None:

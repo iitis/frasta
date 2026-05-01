@@ -76,9 +76,10 @@ class SurfaceRenderer:
         if mask.any():
             Z[mask] = np.nan
         
-        # Axes in units (FLOAT) - for GLSurfacePlotItem
+        # Keep the 3D Y axis in scan/image convention so the view matches
+        # the loaded 2D scan instead of a Cartesian-style mirrored layout.
         xs = x0 + dx * xs_idx.astype(np.float32)
-        ys = y0 + dy * ys_idx.astype(np.float32)
+        ys = -(y0 + dy * ys_idx.astype(np.float32))
         
         logger.debug("prepare_reference_surface() - end")
         return xs, ys, Z, xs_idx, ys_idx
@@ -298,7 +299,7 @@ class SurfaceRenderer:
             vertexes=verts,
             faces=np.array(faces),
             vertexColors=vertex_colors,
-            shader='shaded',
+            shader=None,
             smooth=True,
             drawEdges=False
         )

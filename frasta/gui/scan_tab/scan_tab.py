@@ -63,17 +63,22 @@ class ScanTab(QtWidgets.QWidget):
         self.image_view.ui.menuBtn.hide()
         self.image_view.ui.histogram.hide()
         self.image_view.getView().setMenuEnabled(False)
+        self.image_view.ui.graphicsView.setBackground((34, 34, 34))
 
         self.hist_widget = pg.PlotWidget(viewBox=HistogramViewBox())
         self.hist_widget.setMaximumHeight(120)
         self.hist_widget.setMenuEnabled(False)
         self.hist_widget.setMouseEnabled(x=False, y=False)
+        self._updating_threshold_controls = False
 
         # Layout
-        hlayout = QtWidgets.QVBoxLayout(self)
-        hlayout.addWidget(self.image_view, stretch=1)
-        hlayout.addWidget(self.hist_widget)
-        self.setLayout(hlayout)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        histogram_layout = QtWidgets.QHBoxLayout()
+        histogram_layout.addWidget(self.hist_widget, stretch=1)
+        histogram_layout.addWidget(self._create_histogram_controls())
+        main_layout.addWidget(self.image_view, stretch=1)
+        main_layout.addLayout(histogram_layout)
+        self.setLayout(main_layout)
 
         # Data attributes
         self.grid = None
@@ -86,15 +91,52 @@ class ScanTab(QtWidgets.QWidget):
         # Display settings
         self.is_colormap = False
         self.current_colormap = None
+        self.hide_below_range = True
+        self.hide_above_range = True
 
         # Initialize managers and handlers
-        self.histogram_manager = HistogramManager(self.hist_widget, self.update_image)
+        self.histogram_manager = HistogramManager(self.hist_widget, self._on_threshold_range_changed)
         self.interactive_handler = InteractiveHandler(self)
         
         # Connect mouse events
         self.image_view.getView().scene().sigMouseClicked.connect(
             self.interactive_handler.handle_mouse_click
         )
+
+    def _create_histogram_controls(self) -> QtWidgets.QWidget:
+        """Create manual threshold controls displayed beside the histogram."""
+        control_widget = QtWidgets.QWidget(self)
+        control_widget.setMinimumWidth(180)
+        control_widget.setMaximumWidth(200)
+        control_layout = QtWidgets.QFormLayout(control_widget)
+        control_layout.setContentsMargins(8, 0, 0, 0)
+        control_layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+
+        self.range_min_spin = QtWidgets.QDoubleSpinBox(control_widget)
+        self.range_min_spin.setDecimals(3)
+        self.range_min_spin.setRange(-1e12, 1e12)
+        self.range_min_spin.setKeyboardTracking(False)
+        self.range_min_spin.valueChanged.connect(self._on_manual_threshold_changed)
+
+        self.range_max_spin = QtWidgets.QDoubleSpinBox(control_widget)
+        self.range_max_spin.setDecimals(3)
+        self.range_max_spin.setRange(-1e12, 1e12)
+        self.range_max_spin.setKeyboardTracking(False)
+        self.range_max_spin.valueChanged.connect(self._on_manual_threshold_changed)
+
+        self.hide_below_range_checkbox = QtWidgets.QCheckBox("Hide below Min", control_widget)
+        self.hide_below_range_checkbox.setChecked(True)
+        self.hide_below_range_checkbox.toggled.connect(self._on_out_of_range_visibility_toggled)
+
+        self.hide_above_range_checkbox = QtWidgets.QCheckBox("Hide above Max", control_widget)
+        self.hide_above_range_checkbox.setChecked(True)
+        self.hide_above_range_checkbox.toggled.connect(self._on_out_of_range_visibility_toggled)
+
+        control_layout.addRow("Min:", self.range_min_spin)
+        control_layout.addRow("Max:", self.range_max_spin)
+        control_layout.addRow(self.hide_below_range_checkbox)
+        control_layout.addRow(self.hide_above_range_checkbox)
+        return control_widget
 
     # ==========================================================================
     # Data Management
@@ -156,11 +198,13 @@ class ScanTab(QtWidgets.QWidget):
             self.grid,
             colormap_name=self.get_colormap_name(),
         )
+        self._sync_threshold_controls()
         self.update_image()
         
         # Then set the threshold line values if provided
         if data.vmin is not None and data.vmax is not None:
             self.histogram_manager.set_threshold_values(data.vmin, data.vmax)
+            self._sync_threshold_controls()
 
     # ==========================================================================
     # Display Methods
@@ -177,6 +221,50 @@ class ScanTab(QtWidgets.QWidget):
             was_data_negated,
             self.get_colormap_name(),
         )
+        self._sync_threshold_controls()
+
+    def _on_threshold_range_changed(self, vmin: float, vmax: float):
+        """Handle threshold changes coming from histogram lines."""
+        self._sync_threshold_controls(vmin, vmax)
+        self.update_image(vmin, vmax)
+
+    def _on_manual_threshold_changed(self, _value: float):
+        """Handle manual threshold edits from spin boxes."""
+        if self._updating_threshold_controls:
+            return
+        self.histogram_manager.set_threshold_values(
+            self.range_min_spin.value(),
+            self.range_max_spin.value(),
+        )
+        vmin, vmax = self.histogram_manager.get_threshold_range()
+        self._on_threshold_range_changed(vmin, vmax)
+
+    def _on_out_of_range_visibility_toggled(self, _checked: bool):
+        """Switch masking independently below Min and above Max."""
+        self.hide_below_range = self.hide_below_range_checkbox.isChecked()
+        self.hide_above_range = self.hide_above_range_checkbox.isChecked()
+        self.histogram_manager.set_out_of_range_visibility(
+            self.hide_below_range,
+            self.hide_above_range,
+        )
+        self.update_image()
+
+    def _sync_threshold_controls(self, vmin: float = None, vmax: float = None):
+        """Synchronize manual threshold controls with histogram state."""
+        if vmin is None or vmax is None:
+            vmin, vmax = self.histogram_manager.get_threshold_range()
+        data_min, data_max = self.histogram_manager.get_data_range()
+        if vmin is None or vmax is None or data_min is None or data_max is None:
+            return
+
+        self._updating_threshold_controls = True
+        try:
+            self.range_min_spin.setRange(data_min, data_max)
+            self.range_max_spin.setRange(data_min, data_max)
+            self.range_min_spin.setValue(vmin)
+            self.range_max_spin.setValue(vmax)
+        finally:
+            self._updating_threshold_controls = False
     
     def update_image(self, vmin: float = None, vmax: float = None):
         """Update the displayed image based on current grid and value range.
@@ -224,9 +312,19 @@ class ScanTab(QtWidgets.QWidget):
                 logger.warning(f"update_image: using actual data range instead")
         
         # IMPORTANT: grid.T creates a VIEW, not a copy!
-        # Make a copy immediately to avoid accidentally modifying self.grid
-        self.masked = self.grid.T.copy()
-        self.masked[(self.masked < vmin) | (self.masked > vmax)] = np.nan
+        # Make a copy immediately to avoid accidentally modifying self.grid.
+        image_data = self.grid.T.copy()
+        invalid_mask = np.isnan(image_data)
+        if self.hide_below_range:
+            image_data[image_data < vmin] = np.nan
+        else:
+            image_data[image_data < vmin] = vmin
+        if self.hide_above_range:
+            image_data[image_data > vmax] = np.nan
+        else:
+            image_data[image_data > vmax] = vmax
+        image_data[invalid_mask] = np.nan
+        self.masked = image_data
         
         nan_count = np.isnan(self.masked).sum()
         total_count = self.masked.size
@@ -245,7 +343,14 @@ class ScanTab(QtWidgets.QWidget):
         else:
             image_item.setLookupTable(None)
         
-        self.image_view.setImage(self.masked, autoLevels=True, autoRange=False)
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
+        self.image_view.setImage(
+            self.masked,
+            autoLevels=False,
+            autoRange=False,
+            levels=(vmin, vmax),
+        )
         self.interactive_handler.clear_seed_points()
     
     def toggle_colormap(self):

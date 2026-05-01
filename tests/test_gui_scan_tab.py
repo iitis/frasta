@@ -59,6 +59,8 @@ class TestHistogramManager:
         assert hist_manager.hist_min_line is None
         assert hist_manager.hist_max_line is None
         assert hist_manager._updating_histogram is False
+        assert hist_manager.hide_below_range is True
+        assert hist_manager.hide_above_range is True
     
     def test_update_histogram_basic(self, hist_manager):
         """Test update_histogram creates histogram display."""
@@ -200,11 +202,42 @@ class TestHistogramManager:
         
         hist_manager.hist_min_line = mock_min_line
         hist_manager.hist_max_line = mock_max_line
+        hist_manager._data_min = 0.0
+        hist_manager._data_max = 100.0
         
         hist_manager.set_threshold_values(15.0, 85.0)
         
         mock_min_line.setValue.assert_called_once_with(15.0)
         mock_max_line.setValue.assert_called_once_with(85.0)
+
+    def test_set_threshold_values_clamps_to_data_range(self, hist_manager):
+        """Threshold updates should stay inside the histogram data range."""
+        mock_min_line = Mock()
+        mock_max_line = Mock()
+
+        hist_manager.hist_min_line = mock_min_line
+        hist_manager.hist_max_line = mock_max_line
+        hist_manager._data_min = 10.0
+        hist_manager._data_max = 90.0
+
+        hist_manager.set_threshold_values(-5.0, 150.0)
+
+        mock_min_line.setValue.assert_called_once_with(10.0)
+        mock_max_line.setValue.assert_called_once_with(90.0)
+
+    def test_get_data_range_returns_histogram_bounds(self, hist_manager):
+        """Histogram manager should expose current data bounds."""
+        hist_manager._data_min = -2.5
+        hist_manager._data_max = 7.5
+
+        assert hist_manager.get_data_range() == (-2.5, 7.5)
+
+    def test_set_out_of_range_visibility_updates_flags(self, hist_manager):
+        """Histogram manager should track below/above visibility separately."""
+        hist_manager.set_out_of_range_visibility(False, True)
+
+        assert hist_manager.hide_below_range is False
+        assert hist_manager.hide_above_range is True
     
     def test_on_threshold_changed_blocks_during_update(self, hist_manager, mock_update_callback):
         """Test _on_threshold_changed blocks callbacks during histogram setup."""
@@ -587,3 +620,60 @@ class TestScanTabColormap:
         view_box.set_data_bounds(-5.0, 10.0)
         assert view_box._data_x_min == -5.0
         assert view_box._data_x_max == 10.0
+
+    def test_histogram_controls_exist(self, scan_tab):
+        """Scan tab should expose manual histogram controls."""
+        assert isinstance(scan_tab.range_min_spin, QtWidgets.QDoubleSpinBox)
+        assert isinstance(scan_tab.range_max_spin, QtWidgets.QDoubleSpinBox)
+        assert isinstance(scan_tab.hide_below_range_checkbox, QtWidgets.QCheckBox)
+        assert isinstance(scan_tab.hide_above_range_checkbox, QtWidgets.QCheckBox)
+        assert scan_tab.hide_below_range_checkbox.isChecked() is True
+        assert scan_tab.hide_above_range_checkbox.isChecked() is True
+
+    def test_scan_view_background_is_not_black(self, scan_tab):
+        """Background should contrast with clipped low-end grayscale values."""
+        color = scan_tab.image_view.ui.graphicsView.backgroundBrush().color()
+        assert (color.red(), color.green(), color.blue()) == (34, 34, 34)
+
+    def test_set_surface_syncs_manual_histogram_controls(self, scan_tab):
+        """Loading a surface should update the manual threshold controls."""
+        data = np.arange(9, dtype=float).reshape(3, 3)
+        surface = Mock()
+        surface.height = data
+        surface.xi = np.array([0.0, 1.0, 2.0], dtype=float)
+        surface.yi = np.array([0.0, 1.0, 2.0], dtype=float)
+        surface.dx = 1.0
+        surface.dy = 1.0
+        surface.vmin = 2.0
+        surface.vmax = 6.0
+
+        scan_tab.set_surface(surface)
+
+        assert scan_tab.range_min_spin.value() == pytest.approx(2.0)
+        assert scan_tab.range_max_spin.value() == pytest.approx(6.0)
+
+    def test_manual_threshold_edit_updates_histogram_manager(self, scan_tab):
+        """Changing manual threshold controls should push values to the manager."""
+        scan_tab.histogram_manager.set_threshold_values = Mock()
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(1.5, 8.5))
+        scan_tab._updating_threshold_controls = False
+
+        scan_tab.range_min_spin.setValue(1.5)
+        scan_tab.range_max_spin.setValue(8.5)
+        scan_tab._on_manual_threshold_changed(0.0)
+
+        assert scan_tab.histogram_manager.set_threshold_values.call_args_list[-1] == call(1.5, 8.5)
+
+    def test_out_of_range_toggles_update_mode(self, scan_tab):
+        """Toggles should switch masking separately below and above the range."""
+        scan_tab.histogram_manager.set_out_of_range_visibility = Mock()
+        scan_tab.update_image = Mock()
+
+        scan_tab.hide_below_range_checkbox.setChecked(False)
+        scan_tab.hide_above_range_checkbox.setChecked(True)
+        scan_tab._on_out_of_range_visibility_toggled(False)
+
+        assert scan_tab.hide_below_range is False
+        assert scan_tab.hide_above_range is True
+        scan_tab.histogram_manager.set_out_of_range_visibility.assert_called_with(False, True)
+        assert scan_tab.update_image.call_count >= 1

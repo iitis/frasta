@@ -121,6 +121,8 @@ zone.
 - The **3D view** shows Surface A with the contact overlay; rotate the view
   to inspect the spatial distribution of the contact zone relative to the
   fracture topography.
+- The 3D view opens in a scan-oriented perspective: the horizontal scan axis
+  follows the same left-to-right direction as the main 2D view.
 
 ### 2.6  Export results
 
