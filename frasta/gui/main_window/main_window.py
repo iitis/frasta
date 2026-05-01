@@ -14,7 +14,9 @@ from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtGui import QIcon
 
 from ..dialogs import AboutDialog
+from ..scan_tab import ScanTab
 from ..viewers import show_3d_viewer
+from ...core import Surface
 
 from .roi_controller import ROIController
 from .file_controller import FileController
@@ -87,6 +89,77 @@ class MainWindow(QtWidgets.QMainWindow):
             ScanTab or None: Current tab widget
         """
         return self.tabs.currentWidget()
+
+    def make_unique_tab_title(self, base_title: str) -> str:
+        """Return a tab title that does not collide with existing tabs.
+
+        Args:
+            base_title (str): Preferred tab title.
+
+        Returns:
+            str: Unique tab title derived from the requested base title.
+        """
+        existing_titles = {
+            self.tabs.tabText(index)
+            for index in range(self.tabs.count())
+        }
+        if base_title not in existing_titles:
+            return base_title
+
+        suffix = 2
+        while f"{base_title} ({suffix})" in existing_titles:
+            suffix += 1
+        return f"{base_title} ({suffix})"
+
+    def create_surface_tab(self, surface: Surface, title: str) -> ScanTab:
+        """Create a new scan tab and populate it with surface data.
+
+        Args:
+            surface (Surface): Surface data to display in the new tab.
+            title (str): Preferred tab title.
+
+        Returns:
+            ScanTab: Newly created and selected scan tab.
+        """
+        tab = ScanTab()
+        unique_title = self.make_unique_tab_title(title)
+        self.tabs.addTab(tab, unique_title)
+        self.tabs.setCurrentWidget(tab)
+        tab.set_surface(surface)
+        return tab
+
+    def prompt_result_target(
+        self,
+        title: str,
+        message: str,
+        overwrite_label: str,
+        new_tab_label: str = "Create new tab",
+    ) -> str | None:
+        """Ask whether a processing result should overwrite or create a tab.
+
+        Args:
+            title (str): Dialog title.
+            message (str): Short explanatory message.
+            overwrite_label (str): Label for the overwrite action.
+            new_tab_label (str): Label for creating new output tab(s).
+
+        Returns:
+            str | None: ``"new_tab"`` or ``"overwrite"`` when chosen,
+            otherwise ``None`` if the dialog is cancelled.
+        """
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        new_button = dialog.addButton(new_tab_label, QtWidgets.QMessageBox.AcceptRole)
+        overwrite_button = dialog.addButton(overwrite_label, QtWidgets.QMessageBox.ActionRole)
+        dialog.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
+        dialog.exec_()
+
+        if dialog.clickedButton() == new_button:
+            return "new_tab"
+        if dialog.clickedButton() == overwrite_button:
+            return "overwrite"
+        return None
 
     def view3d(self):
         """Show 3D viewer for current tab."""

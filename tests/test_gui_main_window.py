@@ -19,6 +19,8 @@ from frasta.gui.main_window.processing_controller import ProcessingController
 from frasta.gui.main_window.registration_controller import RegistrationController
 from frasta.gui.main_window.roi_controller import ROIController
 from frasta.gui.main_window.menu_builder import MenuBuilder
+from frasta.gui.dialogs.processing_dialog import MorphologyDialog, RegistrationDialog
+from frasta.gui.dialogs.overlay_viewer import OverlayViewer
 from frasta.core import Surface
 
 
@@ -196,6 +198,11 @@ class TestProcessingController:
         window = Mock()
         window.current_tab = Mock(return_value=None)
         window.roi_controller = Mock()
+        window.prompt_result_target = Mock(return_value="overwrite")
+        window.create_surface_tab = Mock()
+        window.tabs = Mock()
+        window.tabs.indexOf = Mock(return_value=0)
+        window.tabs.tabText = Mock(return_value="Scan 1")
         return window
     
     @pytest.fixture
@@ -205,6 +212,8 @@ class TestProcessingController:
         tab.grid = np.ones((10, 10), dtype=float)
         tab.dx = 1.0
         tab.dy = 1.0
+        tab.xi = np.arange(10, dtype=float)
+        tab.yi = np.arange(10, dtype=float)
         tab.flip_scan = Mock()
         tab.scan_rot90 = Mock()
         tab.invert_scan = Mock()
@@ -212,6 +221,11 @@ class TestProcessingController:
         tab.repair_grid = Mock()
         tab.update_histogram = Mock()
         tab.update_image = Mock()
+        tab.set_surface = Mock()
+        tab.get_surface = Mock(return_value=Surface(np.ones((10, 10), dtype=float), 1.0, 1.0, metadata={"name": "Scan 1"}))
+        tab.hide_below_range = True
+        tab.hide_above_range = False
+        tab.get_colormap_name = Mock(return_value="Metrology")
         return tab
     
     @pytest.fixture
@@ -296,6 +310,138 @@ class TestProcessingController:
             processing_controller.apply_advanced_filter()
             QtWidgets.QMessageBox.warning.assert_called_once()
 
+    def test_apply_advanced_filter_can_create_new_tab(self, processing_controller, mock_tab):
+        """Filtered results can be stored in a new tab."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        processing_controller.main_window.prompt_result_target.return_value = "new_tab"
+        roi_mask = np.ones((10, 10), dtype=bool)
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
+        target_tab = Mock()
+        target_tab.hide_below_range_checkbox = Mock()
+        target_tab.hide_above_range_checkbox = Mock()
+        target_tab.set_colormap = Mock()
+        processing_controller.main_window.create_surface_tab.return_value = target_tab
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_filter_config = Mock(return_value=("median", {"size": 3}))
+
+        with patch("frasta.gui.main_window.processing_controller.FilterDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.processing_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.median_filter_nan_aware", return_value=np.full((10, 10), 2.0)):
+                            processing_controller.apply_advanced_filter()
+
+        processing_controller.main_window.create_surface_tab.assert_called_once()
+        mock_tab.set_surface.assert_not_called()
+        target_tab.set_colormap.assert_called_once_with("Metrology")
+
+    def test_apply_morphology_overwrites_current_tab(self, processing_controller, mock_tab):
+        """Morphology result can overwrite the current tab through shared flow."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        processing_controller.main_window.prompt_result_target.return_value = "overwrite"
+        roi_mask = np.ones((10, 10), dtype=bool)
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_operation_config = Mock(return_value=("level_ls", {}))
+
+        with patch("frasta.gui.main_window.processing_controller.MorphologyDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.processing_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.level_by_plane", return_value=np.zeros((10, 10))):
+                            processing_controller.apply_morphology()
+
+        mock_tab.set_surface.assert_called_once()
+        processing_controller.main_window.create_surface_tab.assert_not_called()
+
+    def test_apply_advanced_filter_passes_active_roi_mask(self, processing_controller, mock_tab):
+        """Active ROI should constrain advanced filtering operations."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        processing_controller.main_window.prompt_result_target.return_value = "overwrite"
+        roi_mask = np.zeros((10, 10), dtype=bool)
+        roi_mask[2:8, 2:8] = True
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_filter_config = Mock(return_value=("median", {"size": 3}))
+
+        with patch("frasta.gui.main_window.processing_controller.FilterDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.processing_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.median_filter_nan_aware", return_value=np.full((10, 10), 2.0)) as mock_filter:
+                            processing_controller.apply_advanced_filter()
+
+        assert np.array_equal(mock_filter.call_args.kwargs["mask"], roi_mask)
+
+    def test_apply_morphology_passes_active_roi_mask(self, processing_controller, mock_tab):
+        """Active ROI should constrain leveling and form-removal operations."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        processing_controller.main_window.prompt_result_target.return_value = "overwrite"
+        roi_mask = np.zeros((10, 10), dtype=bool)
+        roi_mask[1:9, 1:9] = True
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_operation_config = Mock(return_value=("polynomial", {"order": 2}))
+
+        with patch("frasta.gui.main_window.processing_controller.MorphologyDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.processing_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.remove_polynomial_form", return_value=np.zeros((10, 10))) as mock_remove:
+                            processing_controller.apply_morphology()
+
+        assert np.array_equal(mock_remove.call_args.kwargs["mask"], roi_mask)
+
+    def test_apply_morphology_restores_cursor_before_prompt(self, processing_controller, mock_tab):
+        """Target selection should happen after the wait cursor is cleared."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=None)
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_operation_config = Mock(return_value=("level_ls", {}))
+
+        events = []
+
+        def restore_cursor():
+            events.append("restore")
+
+        def prompt_target(*args, **kwargs):
+            events.append("prompt")
+            return "overwrite"
+
+        processing_controller.main_window.prompt_result_target.side_effect = prompt_target
+
+        with patch("frasta.gui.main_window.processing_controller.MorphologyDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.processing_controller.QtWidgets.QApplication.restoreOverrideCursor", side_effect=restore_cursor):
+                    with patch("frasta.gui.main_window.processing_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.level_by_plane", return_value=np.zeros((10, 10))):
+                            processing_controller.apply_morphology()
+
+        assert events[:2] == ["restore", "prompt"]
+
+    def test_surface_roughness_summary_uses_active_roi(self, processing_controller, mock_tab):
+        """Roughness summary should evaluate the active ROI when present."""
+        processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        roi_mask = np.zeros((10, 10), dtype=bool)
+        roi_mask[3:7, 3:7] = True
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
+
+        with patch("frasta.processing.surface_roughness_parameters", return_value={"Sa": 1.0, "Sq": 2.0, "Sz": 3.0}) as mock_metrics:
+            with patch.object(QtWidgets.QMessageBox, "information"):
+                processing_controller.show_surface_roughness_summary()
+
+        assert np.array_equal(mock_metrics.call_args.kwargs["mask"], roi_mask)
+
 
 # ============================================================================
 # RegistrationController Tests
@@ -313,6 +459,8 @@ class TestRegistrationController:
         window.tabs.tabText = Mock(side_effect=lambda i: f"Tab {i}")
         window.tabs.widget = Mock()
         window.tabs.addTab = Mock()
+        window.prompt_result_target = Mock(return_value="overwrite")
+        window.create_surface_tab = Mock()
         return window
     
     @pytest.fixture
@@ -341,6 +489,257 @@ class TestRegistrationController:
         with patch.object(QtWidgets.QMessageBox, 'warning'):
             registration_controller.start_profile_analysis()
             QtWidgets.QMessageBox.warning.assert_called_once()
+
+    def test_auto_register_surfaces_can_create_new_tab(self, registration_controller):
+        """Auto-registration can store the moving surface in a new tab."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((5, 5))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((5, 5))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(5, dtype=float)
+        mov_tab.yi = np.arange(5, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((5, 5)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "new_tab"
+        target_tab = Mock()
+        target_tab.hide_below_range_checkbox = Mock()
+        target_tab.hide_above_range_checkbox = Mock()
+        target_tab.set_colormap = Mock()
+        self.main_window.create_surface_tab.return_value = target_tab
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "correlation"))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (1.0, 2.0), "rmse": 10.0}):
+                            with patch("frasta.processing.apply_registration", return_value=(np.ones((5, 5)), np.arange(5), np.arange(5), 1.0, 1.0)):
+                                registration_controller.auto_register_surfaces()
+
+        self.main_window.create_surface_tab.assert_called_once()
+        mov_tab.set_surface.assert_not_called()
+
+    def test_auto_register_surfaces_offers_common_crop_for_correlation(self, registration_controller):
+        """Cross-correlation should offer cropping when scan sizes differ."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((7, 5))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((5, 4))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(4, dtype=float)
+        mov_tab.yi = np.arange(5, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((5, 4)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "correlation"))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.question", return_value=QtWidgets.QMessageBox.Yes):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                        with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rmse": 10.0}) as mock_register:
+                                with patch("frasta.processing.apply_registration", return_value=(np.ones((5, 4)), np.arange(4), np.arange(5), 1.0, 1.0)):
+                                    registration_controller.auto_register_surfaces()
+
+        register_args = mock_register.call_args.args
+        assert register_args[0].shape == (5, 4)
+        assert register_args[1].shape == (5, 4)
+
+    def test_auto_register_surfaces_respects_active_roi(self, registration_controller):
+        """Active ROI should limit the area used for automatic registration."""
+        ref_tab = Mock()
+        ref_tab.grid = np.arange(25, dtype=float).reshape(5, 5)
+        mov_tab = Mock()
+        mov_tab.grid = np.arange(25, dtype=float).reshape(5, 5)
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(5, dtype=float)
+        mov_tab.yi = np.arange(5, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((5, 5)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+        roi_mask = np.zeros((5, 5), dtype=bool)
+        roi_mask[1:4, 1:4] = True
+        self.main_window.roi_controller = Mock()
+        self.main_window.roi_controller.create_mask = Mock(side_effect=[roi_mask, roi_mask])
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "correlation"))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rmse": 1.0}) as mock_register:
+                            with patch("frasta.processing.apply_registration", return_value=(np.ones((5, 5)), np.arange(5), np.arange(5), 1.0, 1.0)):
+                                registration_controller.auto_register_surfaces()
+
+        masked_reference = mock_register.call_args.args[0]
+        masked_target = mock_register.call_args.args[1]
+        assert masked_reference.shape == (3, 3)
+        assert masked_target.shape == (3, 3)
+        assert masked_reference[1, 1] == ref_tab.grid[2, 2]
+
+    def test_auto_register_surfaces_uses_roi_before_shape_check(self, registration_controller):
+        """Matching ROI subgrids should avoid a full-grid size mismatch warning."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((8, 8))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((6, 6))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(4, dtype=float)
+        mov_tab.yi = np.arange(4, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((4, 4)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+        ref_mask = np.zeros((8, 8), dtype=bool)
+        ref_mask[2:6, 2:6] = True
+        mov_mask = np.zeros((6, 6), dtype=bool)
+        mov_mask[1:5, 1:5] = True
+        self.main_window.roi_controller = Mock()
+        self.main_window.roi_controller.create_mask = Mock(side_effect=[ref_mask, mov_mask, np.ones((4, 4), dtype=bool), np.ones((4, 4), dtype=bool)])
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "correlation"))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.question") as mock_question:
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                        with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rmse": 1.0}) as mock_register:
+                                with patch("frasta.processing.apply_registration", return_value=(np.ones((4, 4)), np.arange(4), np.arange(4), 1.0, 1.0)):
+                                    registration_controller.auto_register_surfaces()
+
+        mock_question.assert_not_called()
+        assert mock_register.call_args.args[0].shape == (4, 4)
+        assert mock_register.call_args.args[1].shape == (4, 4)
+
+    def test_auto_register_surfaces_applies_transform_to_full_grid(self, registration_controller):
+        """Registration estimated on ROI should still transform the full moving grid."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((8, 8))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((8, 8))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(8, dtype=float)
+        mov_tab.yi = np.arange(8, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((8, 8)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+        roi_mask = np.zeros((8, 8), dtype=bool)
+        roi_mask[2:6, 2:6] = True
+        self.main_window.roi_controller = Mock()
+        self.main_window.roi_controller.create_mask = Mock(side_effect=[roi_mask, roi_mask, np.ones((4, 4), dtype=bool), np.ones((4, 4), dtype=bool)])
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "correlation"))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (1.0, 1.0), "rmse": 1.0}):
+                            with patch("frasta.processing.apply_registration", return_value=(np.ones((8, 8)), np.arange(8), np.arange(8), 1.0, 1.0)) as mock_apply:
+                                registration_controller.auto_register_surfaces()
+
+        assert mock_apply.call_args.args[0].shape == (8, 8)
+
+
+class TestProcessingDialogs:
+    """Test suite for processing dialogs."""
+
+    def test_morphology_dialog_has_no_preview_checkbox(self, qapp):
+        """Morphology dialog should not expose a non-functional preview toggle."""
+        dialog = MorphologyDialog()
+
+        assert not hasattr(dialog, "preview_check")
+
+    def test_registration_dialog_uses_clear_method_labels(self, qapp):
+        """Registration dialog should describe method capabilities explicitly."""
+        dialog = RegistrationDialog(["A", "B"])
+
+        labels = [dialog.method_combo.itemText(i) for i in range(dialog.method_combo.count())]
+        assert labels == [
+            "Cross-Correlation (translation only)",
+            "ICP (translation + rotation)",
+        ]
+
+
+class TestOverlayViewer:
+    """Test suite for overlay viewer auto-alignment helpers."""
+
+    def test_overlay_viewer_uses_scan_orientation_matching_main_view(self, qapp):
+        """Overlay viewer should display scans using the same transposed orientation as the main view."""
+        scan1 = Surface(np.arange(12, dtype=float).reshape(3, 4), 1.0, 1.0)
+        scan2 = Surface(np.arange(12, 24, dtype=float).reshape(3, 4), 1.0, 1.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            assert np.array_equal(viewer.scan1, scan1.height.T)
+            assert np.array_equal(viewer.scan2, scan2.height.T)
+            assert viewer.viewbox.state["yInverted"] is True
+        finally:
+            viewer.close()
+
+    def test_auto_shift_updates_manual_sliders(self, qapp):
+        """Automatic shift proposal should write estimated values into sliders."""
+        scan1 = Surface(np.zeros((8, 8), dtype=float), 1.0, 1.0)
+        scan2 = Surface(np.ones((8, 8), dtype=float), 1.0, 1.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (7.0, -4.0), "rotation": 0.0, "rmse": 12.0}):
+                with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.setOverrideCursor"):
+                    with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.restoreOverrideCursor"):
+                        with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QMessageBox.information"):
+                            viewer.apply_auto_shift()
+            assert viewer.slider_tx.value() == -4
+            assert viewer.slider_ty.value() == 7
+            assert viewer.slider_angle.value() == 0
+        finally:
+            viewer.close()
 
 
 # ============================================================================

@@ -241,9 +241,9 @@ def test_auto_register_surfaces(sample_grid):
     assert params is not None
     assert 'translation' in params
     assert 'rmse' in params
-    # Should detect the shift
-    assert abs(params['translation'][0] - 5) <= 2
-    assert abs(params['translation'][1] - 3) <= 2
+    # Should detect the corrective shift needed for alignment
+    assert abs(params['translation'][0] + 5) <= 2
+    assert abs(params['translation'][1] + 3) <= 2
 
 
 if __name__ == '__main__':

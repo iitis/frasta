@@ -365,9 +365,9 @@ class TestAutoRegisterSurfaces:
         
         params = auto_register_surfaces(grid, shifted, method='correlation')
         
-        # Should be close to (5, 3) shift
-        assert abs(params['translation'][0] - 5) < 2
-        assert abs(params['translation'][1] - 3) < 2
+        # Should be close to the corrective shift needed for alignment
+        assert abs(params['translation'][0] + 5) < 2
+        assert abs(params['translation'][1] + 3) < 2
         assert params['rotation'] == 0.0  # Correlation doesn't estimate rotation
     
     def test_icp_method(self, grid_with_pattern):
@@ -418,8 +418,8 @@ class TestRegisterCorrelation:
         
         params = _register_correlation(grid, shifted)
         
-        # Should detect shift (approximately)
-        assert abs(params['translation'][1] - 10) < 2
+        # Should detect the corrective shift (approximately)
+        assert abs(params['translation'][1] + 10) < 2
     
     def test_detects_vertical_shift(self):
         """Test detection of vertical shift."""
@@ -432,8 +432,8 @@ class TestRegisterCorrelation:
         
         params = _register_correlation(grid, shifted)
         
-        # Should detect shift
-        assert abs(params['translation'][0] - 8) < 2
+        # Should detect the corrective shift
+        assert abs(params['translation'][0] + 8) < 2
     
     def test_different_shapes_raises_error(self):
         """Test that different shapes raise ValueError."""
@@ -455,6 +455,17 @@ class TestRegisterCorrelation:
         params = _register_correlation(grid, shifted)
         
         assert 'translation' in params
+        assert np.isfinite(params['rmse'])
+
+    def test_subpixel_negative_shift_keeps_finite_rmse(self):
+        """Small negative subpixel shifts should not erase the overlap mask."""
+        from scipy.ndimage import shift as ndimage_shift
+
+        grid = np.random.randn(64, 64) * 3.0 + 25.0
+        shifted = ndimage_shift(grid, (-0.4, -0.6), order=3, mode='constant', cval=np.nan)
+
+        params = _register_correlation(grid, shifted)
+
         assert np.isfinite(params['rmse'])
 
 
@@ -664,8 +675,8 @@ class TestTransformsIntegration:
         # Register (should work on cropped data)
         params = auto_register_surfaces(cropped, shifted, method='correlation')
         
-        # Should detect shift (approximately)
-        assert abs(params['translation'][1] - 3) < 3  # More relaxed tolerance
+        # Should detect the corrective shift (approximately)
+        assert abs(params['translation'][1] + 3) < 3  # More relaxed tolerance
     
     def test_register_then_apply(self, grid_with_pattern):
         """Test finding registration then applying it."""
@@ -686,9 +697,13 @@ class TestTransformsIntegration:
             rotation=params.get('rotation', 0.0)
         )
         
-        # Should be more similar to reference after alignment
-        # (though not perfect due to NaN regions)
+        # Should be more similar to reference after alignment.
+        mask_before = np.isfinite(grid) & np.isfinite(target)
+        mask_after = np.isfinite(grid) & np.isfinite(aligned)
+        rmse_before = np.sqrt(np.mean((grid[mask_before] - target[mask_before]) ** 2))
+        rmse_after = np.sqrt(np.mean((grid[mask_after] - aligned[mask_after]) ** 2))
         assert aligned.shape == grid.shape
+        assert rmse_after < rmse_before * 0.5
 
 
 if __name__ == '__main__':

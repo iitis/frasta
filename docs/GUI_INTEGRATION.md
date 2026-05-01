@@ -69,9 +69,10 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 2. Click "Advanced Filtering" toolbar button or menu item
 3. Select filter type from dropdown
 4. Adjust parameters (descriptions appear below each parameter)
-5. Click OK to apply
+5. Click OK and choose whether to replace the current scan or create a derived tab
 
-**Result**: Current scan is updated with filtered data
+**Result**: The filtered data can either replace the current scan or be stored in a new tab
+If an ROI is visible, filtering is automatically restricted to that ROI.
 
 ---
 
@@ -97,17 +98,15 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
   - Parameters: Lower Bound, Upper Bound
   - Use for: Masking extreme values (become NaN)
 
-**Options**:
-- [x] Show preview - (Not yet implemented, placeholder for future)
-
 **Workflow**:
 1. Load a scan
 2. Click "Morphology & Leveling" toolbar button
 3. Select operation from dropdown
 4. Configure parameters
-5. Click OK to apply
+5. Click OK and choose whether to replace the current scan or create a derived tab
 
-**Result**: Current scan is updated with leveled/processed data
+**Result**: The processed data can either replace the current scan or be stored in a new tab
+If an ROI is visible, leveling and polynomial form removal use that ROI automatically.
 
 ---
 
@@ -136,10 +135,10 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 2. Click "Geometric Transforms" toolbar button
 3. Select transform type
 4. Set parameters
-5. Click OK to apply
+5. Click OK and choose whether to replace the current scan or create a derived tab
 
 **Result**: 
-- Current scan is updated with transformed data
+- The transformed data can either replace the current scan or be stored in a new tab
 - Pixel sizes are updated automatically
 - Coordinate arrays are regenerated
 - Success message shows new dimensions
@@ -159,6 +158,11 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
   - **Cross-Correlation** - Fast, 2D translation only
   - **ICP (Iterative Closest Point)** - 3D rigid transform (translation + rotation)
 
+If cross-correlation is selected for scans of different sizes, the GUI offers
+cropping both scans to their shared rectangular area before registration.
+When a visible ROI is active, automatic registration is restricted to that ROI
+by masking everything outside the selected region.
+
 **Workflow**:
 1. Load 2+ scans in different tabs
 2. Click `Processing -> Auto-Register Surfaces...`
@@ -168,7 +172,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 6. Click OK
 
 **Result**:
-- Moving surface tab is updated with registered data
+- The registered moving surface can either replace the original moving tab or be stored in a new tab
 - Success dialog shows:
   - Registration method used
   - Translation values (pixels)
@@ -178,6 +182,15 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 **Use Cases**:
 - Aligning opposing fracture surfaces
 - Comparing before/after scans
+
+### Overlay viewer assistance
+
+The manual scan-comparison window now includes two helper actions:
+- **Auto shift** - estimates translation only and writes it into the manual sliders
+- **Auto shift + rotate** - estimates translation and in-plane rotation and writes both into the manual sliders
+
+These actions do not save anything on their own; they only provide a starting
+point for further manual refinement before accepting the alignment.
 - Multi-scan reconstruction
 
 ---
@@ -293,7 +306,7 @@ Potential improvements:
 ## Known Issues
 
 1. **No undo** - Processing operations directly modify the scan. Save backups before processing.
-2. **No preview** - "Show preview" checkbox in Morphology dialog is not yet implemented.
+2. **No live preview** - Morphology and leveling operations still apply after confirmation rather than through an interactive preview.
 3. **No progress bar** - Long operations (bilateral filter) show wait cursor but no percentage.
 4. **No icons** - Toolbar buttons use text labels only (icons can be added later).
 

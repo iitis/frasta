@@ -47,8 +47,10 @@ class OverlayViewer(QtWidgets.QWidget):
         self.scan1_data = scan1_data
         self.scan2_data = scan2_data
 
-        self.scan1 = scan1_data.height
-        self.scan2 = scan2_data.height
+        self.scan1_raw = scan1_data.height
+        self.scan2_raw = scan2_data.height
+        self.scan1 = self.scan1_raw.T.copy()
+        self.scan2 = self.scan2_raw.T.copy()
 
         self._orig_scan1 = self.scan1.copy()
         self._orig_scan2 = self.scan2.copy()
@@ -109,6 +111,7 @@ class OverlayViewer(QtWidgets.QWidget):
         self.view = pg.GraphicsLayoutWidget()
         self.viewbox = self.view.addViewBox()
         self.viewbox.setAspectLocked(True)
+        self.viewbox.invertY(True)
 
         # Difference image
         self.diff_view = pg.ImageView(view=pg.PlotItem())
@@ -155,6 +158,14 @@ class OverlayViewer(QtWidgets.QWidget):
         self.update_diff_btn = QtWidgets.QPushButton("Redraw difference view")
         self.update_diff_btn.clicked.connect(self.update_difference_map)
         tool2_layout.addWidget(self.update_diff_btn)
+
+        self.auto_shift_btn = QtWidgets.QPushButton("Auto shift")
+        self.auto_shift_btn.clicked.connect(self.apply_auto_shift)
+        tool2_layout.addWidget(self.auto_shift_btn)
+
+        self.auto_rigid_btn = QtWidgets.QPushButton("Auto shift + rotate")
+        self.auto_rigid_btn.clicked.connect(self.apply_auto_rigid)
+        tool2_layout.addWidget(self.auto_rigid_btn)
 
         # self.save_button = QtWidgets.QPushButton("Save aligned grids to .h5")
         # self.save_button.clicked.connect(self.saveAlignedScans)
@@ -266,8 +277,8 @@ class OverlayViewer(QtWidgets.QWidget):
         h = min(self.original_scan1.shape[0], self.original_scan2.shape[0])
         w = min(self.original_scan1.shape[1], self.original_scan2.shape[1])
 
-        aligned1 = self.original_scan1[:h, :w]
-        aligned2 = self.original_scan2[:h, :w]
+        aligned1 = self.original_scan1[:h, :w].T
+        aligned2 = self.original_scan2[:h, :w].T
 
         # Dialog zapisu
         path, _ = QFileDialog.getSaveFileName(self, "Save the .h5 file", "aligned.h5", "HDF5 (*.h5)")
@@ -307,7 +318,7 @@ class OverlayViewer(QtWidgets.QWidget):
         w = min(self.scan1.shape[1], scan2_trans.shape[1])
 
         data1 = Surface(
-            height=self.scan1[:h, :w],
+            height=self.scan1[:h, :w].T,
             dx=self.scan1_data.dx,
             dy=self.scan1_data.dy,
             x0=self.scan1_data.x0,
@@ -317,7 +328,7 @@ class OverlayViewer(QtWidgets.QWidget):
         )
 
         data2 = Surface(
-            height=scan2_trans[:h, :w],
+            height=scan2_trans[:h, :w].T,
             dx=self.scan1_data.dx,
             dy=self.scan1_data.dy,
             x0=self.scan1_data.x0,
@@ -509,3 +520,99 @@ class OverlayViewer(QtWidgets.QWidget):
         transform.translate(-cx, -cy)          # wróć na miejsce
 
         self.img2.setTransform(transform)
+
+    @staticmethod
+    def _crop_to_mask_bounds(grid: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+        """Crop grid to the bounding box defined by an ROI mask."""
+        if mask is None or not np.any(mask):
+            return None
+        rows = np.where(np.any(mask, axis=1))[0]
+        cols = np.where(np.any(mask, axis=0))[0]
+        if rows.size == 0 or cols.size == 0:
+            return None
+        return grid[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+
+    def _prepare_auto_registration_inputs(self, method: str):
+        """Prepare scan fragments for automatic alignment proposal."""
+        reference_grid = self.scan1
+        moving_grid = self.scan2
+
+        parent = self.parent()
+        roi_controller = getattr(parent, "roi_controller", None) if parent is not None else None
+        if roi_controller is not None:
+            reference_mask = roi_controller.create_mask(*reference_grid.shape)
+            moving_mask = roi_controller.create_mask(*moving_grid.shape)
+            if isinstance(reference_mask, np.ndarray) and isinstance(moving_mask, np.ndarray):
+                reference_roi = self._crop_to_mask_bounds(reference_grid, reference_mask)
+                moving_roi = self._crop_to_mask_bounds(moving_grid, moving_mask)
+                if reference_roi is not None and moving_roi is not None:
+                    reference_grid = reference_roi
+                    moving_grid = moving_roi
+
+        if method == "correlation" and reference_grid.shape != moving_grid.shape:
+            common_height = min(reference_grid.shape[0], moving_grid.shape[0])
+            common_width = min(reference_grid.shape[1], moving_grid.shape[1])
+            reference_grid = reference_grid[:common_height, :common_width]
+            moving_grid = moving_grid[:common_height, :common_width]
+
+        return reference_grid, moving_grid
+
+    @staticmethod
+    def _set_slider_value_with_range(slider: QtWidgets.QSlider, value: int):
+        """Expand slider range if needed before assigning a new value."""
+        if value < slider.minimum():
+            slider.setMinimum(value)
+        if value > slider.maximum():
+            slider.setMaximum(value)
+        slider.setValue(value)
+
+    def _apply_auto_alignment(self, method: str):
+        """Estimate alignment parameters and write them into manual controls."""
+        from ...processing import auto_register_surfaces
+
+        reference_grid, moving_grid = self._prepare_auto_registration_inputs(method)
+        if np.all(np.isnan(reference_grid)) or np.all(np.isnan(moving_grid)):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Automatic alignment",
+                "The selected area does not contain enough valid data.",
+            )
+            return
+
+        cursor_active = False
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            cursor_active = True
+            params = auto_register_surfaces(reference_grid, moving_grid, method=method)
+            QtWidgets.QApplication.restoreOverrideCursor()
+            cursor_active = False
+
+            dy, dx = params.get("translation", (0.0, 0.0))
+            rotation = params.get("rotation", 0.0)
+            self._set_slider_value_with_range(self.slider_tx, int(np.round(dx)))
+            self._set_slider_value_with_range(self.slider_ty, int(np.round(dy)))
+            self._set_slider_value_with_range(self.slider_angle, int(np.round(rotation * 10.0)))
+
+            msg = (
+                f"Suggested translation: ({dx:.2f}, {dy:.2f}) px\n"
+                f"Suggested rotation: {rotation:.2f}°\n"
+                f"RMSE: {params.get('rmse', np.nan):.2f}"
+            )
+            QtWidgets.QMessageBox.information(self, "Automatic alignment", msg)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Automatic alignment",
+                f"Automatic alignment failed:\n{exc}",
+            )
+        finally:
+            if cursor_active:
+                QtWidgets.QApplication.restoreOverrideCursor()
+
+    def apply_auto_shift(self):
+        """Estimate translation-only alignment and update sliders."""
+        self._apply_auto_alignment("correlation")
+
+    def apply_auto_rigid(self):
+        """Estimate translation and rotation alignment and update sliders."""
+        self._apply_auto_alignment("icp")

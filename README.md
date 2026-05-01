@@ -41,9 +41,12 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
    - fill missing data if necessary.
 3. Apply advanced processing steps:
    - Use **Processing** menu for filtering, leveling, transforms
+   - Active ROI is used automatically by local processing and registration operations; geometric transforms still apply to the full grid
    - Interactive dialogs guide parameter selection
+   - Processed and registered results consistently offer a choice between replacing the current scan and creating a derived tab
    - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
 4. Align two opposing fracture surfaces using interactive translation and rotation.
+   - The comparison window can prefill manual alignment with automatic translation-only or translation+rotation estimates.
 5. Place cross-sectional profiles to inspect local deviations and contacts.
 6. Export aligned data, profiles, and measurements for further analysis or documentation.
 

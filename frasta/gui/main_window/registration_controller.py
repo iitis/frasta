@@ -11,7 +11,6 @@ from PyQt5 import QtWidgets, QtCore
 from functools import partial
 
 from ..dialogs import ProfileViewer, OverlayViewer, RegistrationDialog
-from ..scan_tab import ScanTab
 from ...core import Surface
 
 import logging
@@ -30,6 +29,114 @@ class RegistrationController:
         self.main_window = main_window
         self.viewer = None
         self._profile_viewer = None
+
+    def _copy_display_settings(self, source_tab, target_tab):
+        """Copy current scan display settings to a derived registration tab."""
+        target_tab.hide_below_range = source_tab.hide_below_range
+        target_tab.hide_above_range = source_tab.hide_above_range
+        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
+        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
+        target_tab.set_colormap(source_tab.get_colormap_name())
+
+    def _crop_to_common_area_if_needed(self, ref_tab, mov_tab, method: str):
+        """Optionally crop mismatched grids before automatic registration.
+
+        Args:
+            ref_tab: Reference scan tab.
+            mov_tab: Moving scan tab.
+            method (str): Selected registration method.
+
+        Returns:
+            tuple | None: Tuple ``(reference_grid, moving_grid)`` ready for
+            registration, or ``None`` when the user cancels.
+        """
+        reference_grid = ref_tab.grid
+        moving_grid = mov_tab.grid
+
+        if reference_grid.shape == moving_grid.shape:
+            return reference_grid, moving_grid
+
+        if method != "correlation":
+            return reference_grid, moving_grid
+
+        common_height = min(reference_grid.shape[0], moving_grid.shape[0])
+        common_width = min(reference_grid.shape[1], moving_grid.shape[1])
+        reply = QtWidgets.QMessageBox.question(
+            self.main_window,
+            "Different sizes",
+            f"Cross-correlation requires equal grid sizes:\n"
+            f"{reference_grid.shape} vs {moving_grid.shape}\n\n"
+            f"Crop both scans to the common area {common_height}x{common_width} and continue?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.Yes,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return None
+
+        return (
+            reference_grid[:common_height, :common_width],
+            moving_grid[:common_height, :common_width],
+        )
+
+    def _apply_roi_mask_if_needed(self, reference_grid, moving_grid):
+        """Restrict automatic registration to the active ROI when present.
+
+        Args:
+            reference_grid (np.ndarray): Reference grid used for registration.
+            moving_grid (np.ndarray): Moving grid used for registration.
+
+        Returns:
+            tuple: ROI-masked copies of ``reference_grid`` and ``moving_grid``.
+        """
+        roi_controller = getattr(self.main_window, "roi_controller", None)
+        if roi_controller is None:
+            return reference_grid, moving_grid
+
+        reference_mask = roi_controller.create_mask(*reference_grid.shape)
+        moving_mask = roi_controller.create_mask(*moving_grid.shape)
+        if (
+            reference_mask is None or moving_mask is None or
+            not isinstance(reference_mask, np.ndarray) or
+            not isinstance(moving_mask, np.ndarray)
+        ):
+            return reference_grid, moving_grid
+
+        reference_masked = np.array(reference_grid, copy=True, dtype=float)
+        moving_masked = np.array(moving_grid, copy=True, dtype=float)
+        reference_masked[~reference_mask] = np.nan
+        moving_masked[~moving_mask] = np.nan
+        return reference_masked, moving_masked
+
+    @staticmethod
+    def _crop_to_mask_bounds(grid: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+        """Crop a grid to the bounding box of the valid ROI mask."""
+        if mask is None or not np.any(mask):
+            return None
+        rows = np.where(np.any(mask, axis=1))[0]
+        cols = np.where(np.any(mask, axis=0))[0]
+        if rows.size == 0 or cols.size == 0:
+            return None
+        return grid[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+
+    def _extract_roi_subgrids_if_possible(self, reference_grid, moving_grid):
+        """Crop both grids to the active ROI bounds when ROI is available."""
+        roi_controller = getattr(self.main_window, "roi_controller", None)
+        if roi_controller is None:
+            return reference_grid, moving_grid, False
+
+        reference_mask = roi_controller.create_mask(*reference_grid.shape)
+        moving_mask = roi_controller.create_mask(*moving_grid.shape)
+        if (
+            not isinstance(reference_mask, np.ndarray) or
+            not isinstance(moving_mask, np.ndarray)
+        ):
+            return reference_grid, moving_grid, False
+
+        reference_roi = self._crop_to_mask_bounds(reference_grid, reference_mask)
+        moving_roi = self._crop_to_mask_bounds(moving_grid, moving_mask)
+        if reference_roi is None or moving_roi is None:
+            return reference_grid, moving_grid, False
+        return reference_roi, moving_roi, True
     
     def compare_scans(self):
         """Open overlay viewer for comparing two scans."""
@@ -43,21 +150,28 @@ class RegistrationController:
 
         def receive_aligned_grids(scan1_aligned_data: Surface, scan2_aligned_data: Surface, idx1=None, idx2=None):
             b = idx1 is not None and idx2 is not None
+            result_target = "new_tab"
             if b:
-                msg = QtWidgets.QMessageBox(self.main_window)
-                msg.setWindowTitle("Scan alignment")
-                msg.setText("How would you like to save the alignment?")
-                btn1 = msg.addButton("As new tabs", QtWidgets.QMessageBox.AcceptRole)
-                btn2 = msg.addButton("Overwrite existing", QtWidgets.QMessageBox.ActionRole)
-                msg.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
-                msg.exec_()
+                result_target = self.main_window.prompt_result_target(
+                    "Scan alignment",
+                    "How would you like to save the aligned scans?",
+                    overwrite_label="Overwrite source tabs",
+                    new_tab_label="Create new tabs",
+                )
+            if result_target is None:
+                return
 
-            if not b or msg.clickedButton() == btn1:
-                tab1 = ScanTab()
-                tab2 = ScanTab()
-                tabs.addTab(tab1, "Aligned ref")
-                tabs.addTab(tab2, "Aligned scan2")
-            elif msg.clickedButton() == btn2:
+            if not b or result_target == "new_tab":
+                ref_title = f"{tabs.tabText(idx1)} [aligned]" if idx1 is not None else "Aligned ref"
+                mov_title = f"{tabs.tabText(idx2)} [aligned]" if idx2 is not None else "Aligned scan"
+                tab1 = self.main_window.create_surface_tab(scan1_aligned_data, ref_title)
+                tab2 = self.main_window.create_surface_tab(scan2_aligned_data, mov_title)
+                if idx1 is not None and idx2 is not None:
+                    self._copy_display_settings(tabs.widget(idx1), tab1)
+                    self._copy_display_settings(tabs.widget(idx2), tab2)
+                return
+
+            if result_target == "overwrite":
                 tab1 = tabs.widget(idx1)
                 tab2 = tabs.widget(idx2)
 
@@ -211,16 +325,39 @@ class RegistrationController:
         
         ref_tab = tabs.widget(ref_idx)
         mov_tab = tabs.widget(mov_idx)
+        reference_grid, moving_grid, used_roi_subgrids = self._extract_roi_subgrids_if_possible(
+            ref_tab.grid,
+            mov_tab.grid,
+        )
+        registration_inputs = self._crop_to_common_area_if_needed(
+            type("GridHolder", (), {"grid": reference_grid})(),
+            type("GridHolder", (), {"grid": moving_grid})(),
+            method,
+        )
+        if registration_inputs is None:
+            return
+        reference_grid, moving_grid = registration_inputs
+        if not used_roi_subgrids:
+            reference_grid, moving_grid = self._apply_roi_mask_if_needed(reference_grid, moving_grid)
+        if np.all(np.isnan(reference_grid)) or np.all(np.isnan(moving_grid)):
+            QtWidgets.QMessageBox.warning(
+                self.main_window,
+                "ROI registration",
+                "The active ROI does not contain enough valid data for registration.",
+            )
+            return
         
         from ...processing import auto_register_surfaces, apply_registration
         
+        cursor_active = False
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            cursor_active = True
             
             # Perform registration
             params = auto_register_surfaces(
-                ref_tab.grid,
-                mov_tab.grid,
+                reference_grid,
+                moving_grid,
                 method=method
             )
             
@@ -234,36 +371,34 @@ class RegistrationController:
                     f"Automatically switching to ICP method for better alignment."
                 )
                 params = auto_register_surfaces(
-                    ref_tab.grid,
-                    mov_tab.grid,
+                    reference_grid,
+                    moving_grid,
                     method='icp'
                 )
                 logger.info(f"ICP result: RMSE={params['rmse']:.1f} nm, translation={params['translation']}")
             
-            # Auto-generate coordinate arrays if missing
+            # Apply the estimated transform to the full moving surface, not only
+            # to the ROI/common-area subset used during parameter estimation.
             h, w = mov_tab.grid.shape
             if not hasattr(mov_tab, 'xi') or mov_tab.xi is None:
-                mov_tab.xi = np.arange(w) * (mov_tab.dx or 1.0)
+                xi = np.arange(w) * (mov_tab.dx or 1.0)
+            else:
+                xi = mov_tab.xi[:w]
             if not hasattr(mov_tab, 'yi') or mov_tab.yi is None:
-                mov_tab.yi = np.arange(h) * (mov_tab.dy or 1.0)
+                yi = np.arange(h) * (mov_tab.dy or 1.0)
+            else:
+                yi = mov_tab.yi[:h]
             
             # Apply registration to moving surface
             registered, new_xi, new_yi, new_dx, new_dy = apply_registration(
                 mov_tab.grid,
-                mov_tab.xi,
-                mov_tab.yi,
+                xi,
+                yi,
                 mov_tab.dx or 1.0,
                 mov_tab.dy or 1.0,
                 params['translation'],
                 params.get('rotation', 0.0)
             )
-            
-            # Update moving tab
-            mov_tab.grid = registered
-            mov_tab.xi = new_xi
-            mov_tab.yi = new_yi
-            mov_tab.dx = new_dx
-            mov_tab.dy = new_dy
             
             # Check if registration resulted in valid data
             valid_data = ~np.isnan(registered)
@@ -278,11 +413,41 @@ class RegistrationController:
                 )
                 # Don't apply the registration
                 QtWidgets.QApplication.restoreOverrideCursor()
+                cursor_active = False
                 return
-            
-            # Update visualization
-            mov_tab.update_histogram()
-            mov_tab.update_image()  # This will properly set masked from grid
+
+            source_surface = mov_tab.get_surface()
+            result_surface = Surface(
+                height=registered,
+                dx=new_dx,
+                dy=new_dy,
+                x0=float(new_xi[0]) if len(new_xi) else 0.0,
+                y0=float(new_yi[0]) if len(new_yi) else 0.0,
+                unit=source_surface.unit,
+                metadata={
+                    **source_surface.metadata,
+                    "last_operation": f"auto-registration ({method})",
+                },
+                vmin=source_surface.vmin,
+                vmax=source_surface.vmax,
+            )
+            QtWidgets.QApplication.restoreOverrideCursor()
+            cursor_active = False
+            result_target = self.main_window.prompt_result_target(
+                "Registered scan",
+                "How would you like to save the registered moving surface?",
+                overwrite_label="Overwrite moving scan",
+            )
+            if result_target is None:
+                return
+            if result_target == "overwrite":
+                mov_tab.set_surface(result_surface)
+            else:
+                target_tab = self.main_window.create_surface_tab(
+                    result_surface,
+                    f"{tabs.tabText(mov_idx)} [registered]",
+                )
+                self._copy_display_settings(mov_tab, target_tab)
             
             # Show results
             msg = f"Registration completed!\n\n"
@@ -313,4 +478,5 @@ class RegistrationController:
                 f"Registration failed:\n{str(e)}"
             )
         finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+            if cursor_active:
+                QtWidgets.QApplication.restoreOverrideCursor()

@@ -179,11 +179,6 @@ class MorphologyDialog(QtWidgets.QDialog):
         self.param_group.setLayout(self.param_layout)
         layout.addWidget(self.param_group)
         
-        # Preview checkbox
-        self.preview_check = QtWidgets.QCheckBox("Show preview")
-        self.preview_check.setChecked(True)
-        layout.addWidget(self.preview_check)
-        
         # Buttons
         button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
@@ -427,8 +422,8 @@ class RegistrationDialog(QtWidgets.QDialog):
         
         self.method_combo = QtWidgets.QComboBox()
         self.method_combo.addItems([
-            "Cross-Correlation (Fast, 2D translation only)",
-            "ICP (Iterative Closest Point, 3D rigid transform)"
+            "Cross-Correlation (translation only)",
+            "ICP (translation + rotation)"
         ])
         method_layout.addWidget(self.method_combo)
         
@@ -437,8 +432,8 @@ class RegistrationDialog(QtWidgets.QDialog):
         
         # Info
         info_label = QtWidgets.QLabel(
-            "Automatic registration aligns two surfaces by finding optimal translation/rotation. "
-            "The moving surface will be transformed to match the reference surface."
+            "Automatic registration estimates alignment parameters for the moving surface. "
+            "Cross-correlation updates translation only, while ICP estimates both translation and in-plane rotation."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: gray; font-style: italic;")

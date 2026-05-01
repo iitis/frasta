@@ -284,11 +284,11 @@ def _register_correlation(reference, target):
             if abs(offset_x) < 1.0:  # Sanity check
                 peak_x += offset_x
     
-    # The shift needed to align target with reference
-    # Note: we negate because correlate tells us where target IS relative to reference,
-    # but we want the shift needed to MOVE target back to reference
-    dy = -(peak_y - center[0])
-    dx = -(peak_x - center[1])
+    # The shift needed to align target with reference. The correlation peak is
+    # already expressed in the same sign convention expected later by
+    # ``apply_registration`` / ``ndimage_shift``.
+    dy = peak_y - center[0]
+    dx = peak_x - center[1]
     
     logger.info(f"Cross-correlation found shift: dy={dy}, dx={dx}")
     
@@ -313,14 +313,16 @@ def _register_correlation(reference, target):
     # Mark shifted regions that came from outside as NaN
     # Create a mask of valid regions after shift
     valid_mask = np.ones_like(target, dtype=bool)
-    if dy > 0:
-        valid_mask[:int(dy), :] = False
-    elif dy < 0:
-        valid_mask[int(dy):, :] = False
-    if dx > 0:
-        valid_mask[:, :int(dx)] = False
-    elif dx < 0:
-        valid_mask[:, int(dx):] = False
+    edge_rows = int(np.ceil(abs(dy)))
+    edge_cols = int(np.ceil(abs(dx)))
+    if dy > 0 and edge_rows > 0:
+        valid_mask[:edge_rows, :] = False
+    elif dy < 0 and edge_rows > 0:
+        valid_mask[-edge_rows:, :] = False
+    if dx > 0 and edge_cols > 0:
+        valid_mask[:, :edge_cols] = False
+    elif dx < 0 and edge_cols > 0:
+        valid_mask[:, -edge_cols:] = False
     
     shifted[~valid_mask] = np.nan
     valid_both = ref_valid & ~np.isnan(shifted)

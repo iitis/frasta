@@ -11,6 +11,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
 from ..dialogs import FilterDialog, MorphologyDialog, TransformDialog
+from ...core import Surface
 
 import logging
 logger = logging.getLogger(__name__)
@@ -26,6 +27,89 @@ class ProcessingController:
             main_window: Reference to MainWindow instance
         """
         self.main_window = main_window
+
+    def _build_result_surface(
+        self,
+        tab,
+        result_grid: np.ndarray,
+        *,
+        dx: float | None = None,
+        dy: float | None = None,
+        x0: float | None = None,
+        y0: float | None = None,
+        metadata_label: str | None = None,
+    ) -> Surface:
+        """Create a processed surface while preserving source display metadata."""
+        source_surface = tab.get_surface()
+        metadata = source_surface.metadata.copy()
+        if metadata_label:
+            metadata["last_operation"] = metadata_label
+
+        return Surface(
+            height=np.asarray(result_grid, dtype=float),
+            dx=source_surface.dx if dx is None else dx,
+            dy=source_surface.dy if dy is None else dy,
+            x0=source_surface.x0 if x0 is None else x0,
+            y0=source_surface.y0 if y0 is None else y0,
+            unit=source_surface.unit,
+            metadata=metadata,
+            vmin=source_surface.vmin,
+            vmax=source_surface.vmax,
+        )
+
+    def _copy_display_settings(self, source_tab, target_tab):
+        """Copy user-selected scan display settings to a derived tab."""
+        target_tab.hide_below_range = source_tab.hide_below_range
+        target_tab.hide_above_range = source_tab.hide_above_range
+        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
+        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
+        target_tab.set_colormap(source_tab.get_colormap_name())
+
+    def _result_tab_title(self, source_tab, suffix: str) -> str:
+        """Build a readable derived tab title for a processed result."""
+        source_index = self.main_window.tabs.indexOf(source_tab)
+        base_title = self.main_window.tabs.tabText(source_index) if source_index >= 0 else "Scan"
+        return f"{base_title} [{suffix}]"
+
+    def _store_result_surface(
+        self,
+        source_tab,
+        surface: Surface,
+        *,
+        dialog_title: str,
+        dialog_message: str,
+        overwrite_label: str,
+        suffix: str,
+    ) -> bool:
+        """Store a processing result using the shared overwrite/new-tab dialog."""
+        result_target = self.main_window.prompt_result_target(
+            dialog_title,
+            dialog_message,
+            overwrite_label=overwrite_label,
+        )
+        if result_target is None:
+            return False
+
+        if result_target == "overwrite":
+            source_tab.set_surface(surface)
+            return True
+
+        target_tab = self.main_window.create_surface_tab(
+            surface,
+            self._result_tab_title(source_tab, suffix),
+        )
+        self._copy_display_settings(source_tab, target_tab)
+        return True
+
+    def _active_roi_mask(self, shape: tuple[int, int]) -> np.ndarray | None:
+        """Return the active ROI mask for the requested grid shape, if any."""
+        roi_controller = getattr(self.main_window, "roi_controller", None)
+        if roi_controller is None:
+            return None
+        mask = roi_controller.create_mask(*shape)
+        if isinstance(mask, np.ndarray):
+            return mask
+        return None
     
     def flipUD_scan(self):
         """Flip current scan vertically."""
@@ -71,7 +155,10 @@ class ProcessingController:
         from ...processing import surface_roughness_parameters
 
         try:
-            metrics = surface_roughness_parameters(tab.get_surface())
+            metrics = surface_roughness_parameters(
+                tab.get_surface(),
+                mask=self._active_roi_mask(tab.grid.shape),
+            )
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self.main_window, "Roughness summary", str(exc))
             return
@@ -98,6 +185,13 @@ class ProcessingController:
             return
         
         filter_type, params = dialog.get_filter_config()
+        filter_labels = {
+            "bilateral": "bilateral filter",
+            "median": "median filter",
+            "opening": "morphological opening",
+            "closing": "morphological closing",
+            "robust_gaussian": "robust Gaussian filter",
+        }
         
         # Import processing functions
         from ...processing import (
@@ -105,9 +199,12 @@ class ProcessingController:
             morphological_opening, morphological_closing,
             robust_gaussian_filter
         )
+        mask = self._active_roi_mask(tab.grid.shape)
         
+        cursor_active = False
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            cursor_active = True
             
             if filter_type == "bilateral":
                 result = bilateral_filter(
@@ -115,28 +212,32 @@ class ProcessingController:
                     sigma_spatial=params['sigma_spatial'],
                     sigma_range=params['sigma_range'],
                     dx=tab.dx or 1.0,
-                    dy=tab.dy or 1.0
+                    dy=tab.dy or 1.0,
+                    mask=mask,
                 )
             elif filter_type == "median":
                 result = median_filter_nan_aware(
                     tab.grid, 
                     size=params['size'],
                     dx=tab.dx or 1.0,
-                    dy=tab.dy or 1.0
+                    dy=tab.dy or 1.0,
+                    mask=mask,
                 )
             elif filter_type == "opening":
                 result = morphological_opening(
                     tab.grid, 
                     size=params['size'],
                     dx=tab.dx or 1.0,
-                    dy=tab.dy or 1.0
+                    dy=tab.dy or 1.0,
+                    mask=mask,
                 )
             elif filter_type == "closing":
                 result = morphological_closing(
                     tab.grid, 
                     size=params['size'],
                     dx=tab.dx or 1.0,
-                    dy=tab.dy or 1.0
+                    dy=tab.dy or 1.0,
+                    mask=mask,
                 )
             elif filter_type == "robust_gaussian":
                 result = robust_gaussian_filter(
@@ -144,13 +245,26 @@ class ProcessingController:
                     sigma=params['sigma'],
                     dx=tab.dx or 1.0,
                     dy=tab.dy or 1.0,
+                    mask=mask,
                     iterations=params['max_iterations'],
                     threshold=params['outlier_threshold']
                 )
-            
-            tab.grid = result
-            tab.update_histogram()
-            tab.update_image()  # This will properly set masked from grid
+            QtWidgets.QApplication.restoreOverrideCursor()
+            cursor_active = False
+            output_surface = self._build_result_surface(
+                tab,
+                result,
+                metadata_label=filter_labels.get(filter_type, "filter"),
+            )
+            if not self._store_result_surface(
+                tab,
+                output_surface,
+                dialog_title="Filtered scan",
+                dialog_message="How would you like to save the filtered scan?",
+                overwrite_label="Replace current scan",
+                suffix=filter_labels.get(filter_type, "filter"),
+            ):
+                return
             
             QtWidgets.QMessageBox.information(
                 self.main_window, "Success", 
@@ -163,7 +277,8 @@ class ProcessingController:
                 f"Failed to apply filter:\n{str(e)}"
             )
         finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+            if cursor_active:
+                QtWidgets.QApplication.restoreOverrideCursor()
     
     def apply_morphology(self):
         """Apply morphology/leveling operations to current scan."""
@@ -177,36 +292,58 @@ class ProcessingController:
             return
         
         op_type, params = dialog.get_operation_config()
+        operation_labels = {
+            "level_ls": "plane leveling",
+            "level_robust": "robust plane leveling",
+            "polynomial": f"polynomial form {params.get('order', 1)}",
+            "threshold": "threshold mask",
+        }
         
         from ...processing import (
             level_by_plane, remove_polynomial_form, threshold_grid
         )
+        mask = self._active_roi_mask(tab.grid.shape)
         
+        cursor_active = False
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            cursor_active = True
             
             if op_type == "level_ls":
-                result = level_by_plane(tab.grid, method='least_squares')
+                result = level_by_plane(tab.grid, mask=mask, method='least_squares')
             elif op_type == "level_robust":
                 # Call fit_plane_robust directly to use residual_threshold
                 from ...processing.morphology import fit_plane_robust
                 plane, coeffs, inliers = fit_plane_robust(
                     tab.grid,
+                    mask=mask,
                     residual_threshold=params.get('residual_threshold', 10.0)
                 )
                 result = tab.grid - plane
             elif op_type == "polynomial":
-                result = remove_polynomial_form(tab.grid, order=params['order'])
+                result = remove_polynomial_form(tab.grid, order=params['order'], mask=mask)
             elif op_type == "threshold":
                 result = threshold_grid(
                     tab.grid,
                     low=params['lower'],
                     high=params['upper']
                 )
-            
-            tab.grid = result
-            tab.update_histogram()
-            tab.update_image()  # This will properly set masked from grid
+            QtWidgets.QApplication.restoreOverrideCursor()
+            cursor_active = False
+            output_surface = self._build_result_surface(
+                tab,
+                result,
+                metadata_label=operation_labels.get(op_type, "processing"),
+            )
+            if not self._store_result_surface(
+                tab,
+                output_surface,
+                dialog_title="Processed scan",
+                dialog_message="How would you like to save the processed scan?",
+                overwrite_label="Replace current scan",
+                suffix=operation_labels.get(op_type, "processed"),
+            ):
+                return
             
             QtWidgets.QMessageBox.information(
                 self.main_window, "Success", 
@@ -219,7 +356,8 @@ class ProcessingController:
                 f"Failed to apply operation:\n{str(e)}"
             )
         finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+            if cursor_active:
+                QtWidgets.QApplication.restoreOverrideCursor()
     
     def apply_transform(self):
         """Apply geometric transform to current scan."""
@@ -233,69 +371,83 @@ class ProcessingController:
             return
         
         transform_type, params = dialog.get_transform_config()
+        transform_labels = {
+            "rotate": "rotated",
+            "rescale": "rescaled",
+            "crop": "cropped",
+        }
         
         from ...processing import rotate_grid, rescale_grid, crop_to_valid_region
         
+        cursor_active = False
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            cursor_active = True
             
             # Ensure coordinate arrays exist
             if not hasattr(tab, 'xi') or tab.xi is None:
                 h, w = tab.grid.shape
-                tab.xi = np.arange(w) * (tab.dx or 1.0)
-                tab.yi = np.arange(h) * (tab.dy or 1.0)
+                xi = np.arange(w) * (tab.dx or 1.0)
+                yi = np.arange(h) * (tab.dy or 1.0)
+            else:
+                xi = tab.xi
+                yi = tab.yi
             
             if transform_type == "rotate":
                 result, new_xi, new_yi, new_dx, new_dy = rotate_grid(
                     tab.grid,
                     angle_degrees=params['angle'],
-                    xi=tab.xi,
-                    yi=tab.yi,
+                    xi=xi,
+                    yi=yi,
                     dx=tab.dx or 1.0,
                     dy=tab.dy or 1.0,
                     order=params.get('order', 3)
                 )
-                tab.xi = new_xi
-                tab.yi = new_yi
-                tab.dx = new_dx
-                tab.dy = new_dy
             elif transform_type == "rescale":
                 result, new_xi, new_yi, new_dx, new_dy = rescale_grid(
                     tab.grid,
                     scale_factor=params['scale'],
-                    xi=tab.xi,
-                    yi=tab.yi,
+                    xi=xi,
+                    yi=yi,
                     dx=tab.dx or 1.0,
                     dy=tab.dy or 1.0,
                     order=params.get('order', 3)
                 )
-                tab.xi = new_xi
-                tab.yi = new_yi
-                tab.dx = new_dx
-                tab.dy = new_dy
             elif transform_type == "crop":
                 result, new_xi, new_yi, new_dx, new_dy = crop_to_valid_region(
                     tab.grid,
-                    xi=tab.xi,
-                    yi=tab.yi,
+                    xi=xi,
+                    yi=yi,
                     dx=tab.dx or 1.0,
                     dy=tab.dy or 1.0,
                     margin=params.get('margin', 0)
                 )
-                tab.xi = new_xi
-                tab.yi = new_yi
-                tab.dx = new_dx
-                tab.dy = new_dy
-            
-            tab.grid = result
-            tab.update_histogram()
-            tab.update_image()  # This will properly set masked from grid
+            QtWidgets.QApplication.restoreOverrideCursor()
+            cursor_active = False
+            output_surface = self._build_result_surface(
+                tab,
+                result,
+                dx=new_dx,
+                dy=new_dy,
+                x0=float(new_xi[0]) if len(new_xi) else 0.0,
+                y0=float(new_yi[0]) if len(new_yi) else 0.0,
+                metadata_label=transform_labels.get(transform_type, "transform"),
+            )
+            if not self._store_result_surface(
+                tab,
+                output_surface,
+                dialog_title="Transformed scan",
+                dialog_message="How would you like to save the transformed scan?",
+                overwrite_label="Replace current scan",
+                suffix=transform_labels.get(transform_type, "transformed"),
+            ):
+                return
             
             QtWidgets.QMessageBox.information(
                 self.main_window, "Success", 
                 f"Transform applied successfully!\n"
                 f"New shape: {result.shape}\n"
-                f"Pixel size: {tab.dx:.3f} x {tab.dy:.3f}"
+                f"Pixel size: {output_surface.dx:.3f} x {output_surface.dy:.3f}"
             )
             
         except Exception as e:
@@ -304,4 +456,5 @@ class ProcessingController:
                 f"Failed to apply transform:\n{str(e)}"
             )
         finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+            if cursor_active:
+                QtWidgets.QApplication.restoreOverrideCursor()
