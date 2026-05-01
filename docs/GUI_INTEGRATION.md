@@ -157,6 +157,8 @@ If an ROI is visible, leveling and polynomial form removal use that ROI automati
 - **Registration Method**:
   - **Cross-Correlation** - Fast, 2D translation only
   - **ICP (Iterative Closest Point)** - 3D rigid transform (translation + rotation)
+ - **Refine ICP alignment (slower)** - Optional final height-RMSE refinement for ICP; useful mainly for small, distinctive ROIs
+ - **Auto reject mismatched areas (ICP)** - Optional second ICP pass on an automatically selected low-mismatch overlap region; useful when scans contain burrs or broken fragments
 
 If cross-correlation is selected for scans of different sizes, the GUI offers
 cropping both scans to their shared rectangular area before registration.
@@ -169,7 +171,9 @@ by masking everything outside the selected region.
 3. Select reference surface (stays fixed)
 4. Select moving surface (will be transformed)
 5. Choose registration method
-6. Click OK
+6. Optionally enable ICP refinement for a small ROI
+7. Optionally enable automatic mismatched-area rejection for ICP
+8. Click OK
 
 **Result**:
 - The registered moving surface can either replace the original moving tab or be stored in a new tab
@@ -185,11 +189,10 @@ by masking everything outside the selected region.
 
 ### Overlay viewer assistance
 
-The manual scan-comparison window now includes two helper actions:
-- **Auto shift** - estimates translation only and writes it into the manual sliders
-- **Auto shift + rotate** - estimates translation and in-plane rotation and writes both into the manual sliders
+The manual scan-comparison window includes one helper action:
+- **Auto align (ICP)** - estimates translation and in-plane rotation with a fast ICP pass and writes both into the manual sliders
 
-These actions do not save anything on their own; they only provide a starting
+This action does not save anything on its own; it only provides a starting
 point for further manual refinement before accepting the alignment.
 - Multi-scan reconstruction
 

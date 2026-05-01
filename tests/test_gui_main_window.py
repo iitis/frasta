@@ -680,6 +680,70 @@ class TestRegistrationController:
 
         assert mock_apply.call_args.args[0].shape == (8, 8)
 
+    def test_auto_register_surfaces_passes_refine_flag(self, registration_controller):
+        """Registration should forward the optional ICP refinement flag."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((5, 5))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((5, 5))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(5, dtype=float)
+        mov_tab.yi = np.arange(5, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((5, 5)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "icp", True))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rotation": 0.0, "rmse": 1.0}) as mock_register:
+                            with patch("frasta.processing.apply_registration", return_value=(np.ones((5, 5)), np.arange(5), np.arange(5), 1.0, 1.0)):
+                                registration_controller.auto_register_surfaces()
+
+        assert mock_register.call_args.kwargs["refine"] is True
+
+    def test_auto_register_surfaces_passes_stable_region_flag(self, registration_controller):
+        """Registration should forward the optional stable-region ICP flag."""
+        ref_tab = Mock()
+        ref_tab.grid = np.zeros((5, 5))
+        mov_tab = Mock()
+        mov_tab.grid = np.ones((5, 5))
+        mov_tab.dx = 1.0
+        mov_tab.dy = 1.0
+        mov_tab.xi = np.arange(5, dtype=float)
+        mov_tab.yi = np.arange(5, dtype=float)
+        mov_tab.hide_below_range = True
+        mov_tab.hide_above_range = True
+        mov_tab.get_colormap_name = Mock(return_value="Gray")
+        mov_tab.get_surface = Mock(return_value=Surface(np.ones((5, 5)), 1.0, 1.0))
+        self.main_window = registration_controller.main_window
+        self.main_window.tabs.widget.side_effect = [ref_tab, mov_tab]
+        self.main_window.prompt_result_target.return_value = "overwrite"
+
+        dialog = Mock()
+        dialog.exec_ = Mock(return_value=QtWidgets.QDialog.Accepted)
+        dialog.get_registration_config = Mock(return_value=(0, 1, "icp", False, True))
+
+        with patch("frasta.gui.main_window.registration_controller.RegistrationDialog", return_value=dialog):
+            with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.setOverrideCursor"):
+                with patch("frasta.gui.main_window.registration_controller.QtWidgets.QApplication.restoreOverrideCursor"):
+                    with patch("frasta.gui.main_window.registration_controller.QtWidgets.QMessageBox.information"):
+                        with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rotation": 0.0, "rmse": 1.0}) as mock_register:
+                            with patch("frasta.processing.apply_registration", return_value=(np.ones((5, 5)), np.arange(5), np.arange(5), 1.0, 1.0)):
+                                registration_controller.auto_register_surfaces()
+
+        assert mock_register.call_args.kwargs["stable_region"] is True
+
 
 class TestProcessingDialogs:
     """Test suite for processing dialogs."""
@@ -699,6 +763,23 @@ class TestProcessingDialogs:
             "Cross-Correlation (translation only)",
             "ICP (translation + rotation)",
         ]
+        assert dialog.refine_checkbox.isEnabled() is False
+
+    def test_registration_dialog_enables_refine_only_for_icp(self, qapp):
+        """ICP refinement option should be disabled for correlation and enabled for ICP."""
+        dialog = RegistrationDialog(["A", "B"])
+
+        dialog.method_combo.setCurrentIndex(0)
+        assert dialog.refine_checkbox.isEnabled() is False
+        assert dialog.stable_region_checkbox.isEnabled() is False
+        assert dialog.get_registration_config() == (0, 1, "correlation", False, False)
+
+        dialog.method_combo.setCurrentIndex(1)
+        assert dialog.refine_checkbox.isEnabled() is True
+        assert dialog.stable_region_checkbox.isEnabled() is True
+        dialog.refine_checkbox.setChecked(True)
+        dialog.stable_region_checkbox.setChecked(True)
+        assert dialog.get_registration_config() == (0, 1, "icp", True, True)
 
 
 class TestOverlayViewer:
@@ -720,8 +801,8 @@ class TestOverlayViewer:
         finally:
             viewer.close()
 
-    def test_auto_shift_updates_manual_sliders(self, qapp):
-        """Automatic shift proposal should write estimated values into sliders."""
+    def test_auto_icp_updates_manual_sliders(self, qapp):
+        """Automatic ICP proposal should write estimated values into sliders."""
         scan1 = Surface(np.zeros((8, 8), dtype=float), 1.0, 1.0)
         scan2 = Surface(np.ones((8, 8), dtype=float), 1.0, 1.0)
         parent = QtWidgets.QWidget()
@@ -730,14 +811,36 @@ class TestOverlayViewer:
 
         viewer = OverlayViewer(scan1, scan2, parent=parent)
         try:
-            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (7.0, -4.0), "rotation": 0.0, "rmse": 12.0}):
+            assert hasattr(viewer, "auto_icp_btn")
+            assert not hasattr(viewer, "auto_shift_btn")
+            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (7.0, -4.0), "rotation": 1.2, "rmse": 12.0}):
                 with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.setOverrideCursor"):
                     with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.restoreOverrideCursor"):
                         with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QMessageBox.information"):
-                            viewer.apply_auto_shift()
+                            viewer.apply_auto_icp()
             assert viewer.slider_tx.value() == -4
             assert viewer.slider_ty.value() == 7
-            assert viewer.slider_angle.value() == 0
+            assert viewer.slider_angle.value() == 12
+        finally:
+            viewer.close()
+
+    def test_auto_icp_uses_fast_registration_mode(self, qapp):
+        """Overlay auto-alignment should use the fast ICP mode."""
+        scan1 = Surface(np.zeros((8, 8), dtype=float), 1.0, 1.0)
+        scan2 = Surface(np.ones((8, 8), dtype=float), 1.0, 1.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            with patch("frasta.processing.auto_register_surfaces", return_value={"translation": (0.0, 0.0), "rotation": 0.0, "rmse": 1.0}) as mock_register:
+                with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.setOverrideCursor"):
+                    with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QApplication.restoreOverrideCursor"):
+                        with patch("frasta.gui.dialogs.overlay_viewer.QtWidgets.QMessageBox.information"):
+                            viewer.apply_auto_icp()
+            assert mock_register.call_args.kwargs["max_iterations"] == 25
+            assert mock_register.call_args.kwargs["refine"] is False
         finally:
             viewer.close()
 

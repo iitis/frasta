@@ -270,6 +270,10 @@ aligned, xi, yi, px_x, px_y = apply_registration(
 - `'correlation'`: Cross-correlation (tylko translacja, szybka)
 - `'icp'`: Iterative Closest Point (translacja + rotacja, wolniejsza)
 
+**Opcje ICP:**
+- `refine=True`: wolniejsze końcowe dopracowanie pod RMSE wysokości
+- `stable_region=True`: drugi przebieg ICP na automatycznie wybranym obszarze o małym mismatchu
+
 **Zastosowanie:**
 - Automatyczne wyrównanie przeciwnych powierzchni pęknięcia
 - Pre-processing przed analizą mismatch

@@ -5,7 +5,13 @@ automatic registration (alignment) of two surfaces.
 """
 
 import numpy as np
-from scipy.ndimage import affine_transform, map_coordinates, shift as ndimage_shift
+from scipy.ndimage import (
+    affine_transform,
+    binary_closing,
+    binary_opening,
+    map_coordinates,
+    shift as ndimage_shift,
+)
 from scipy.optimize import minimize
 from sklearn.linear_model import RANSACRegressor, LinearRegression
 
@@ -182,7 +188,7 @@ def crop_to_valid_region(grid, xi, yi, dx, dy, margin=0):
     return cropped, new_xi, new_yi, dx, dy
 
 
-def auto_register_surfaces(reference, target, method='icp', max_iterations=100):
+def auto_register_surfaces(reference, target, method='icp', max_iterations=100, refine=True, stable_region=False):
     """Automatically registers (aligns) target surface to reference surface.
     
     Finds the optimal translation and rotation to align two surfaces using
@@ -196,6 +202,10 @@ def auto_register_surfaces(reference, target, method='icp', max_iterations=100):
             'correlation' - Cross-correlation (translation only, faster)
             Defaults to 'icp'.
         max_iterations (int, optional): Maximum ICP iterations. Defaults to 100.
+        refine (bool, optional): When using ICP, run final height-RMSE refinement.
+            Defaults to True.
+        stable_region (bool, optional): When using ICP, run a second pass on an
+            automatically selected low-mismatch overlap region. Defaults to False.
             
     Returns:
         dict: Registration parameters containing:
@@ -210,11 +220,53 @@ def auto_register_surfaces(reference, target, method='icp', max_iterations=100):
         >>> print(f"Translation: {params['translation']}, Rotation: {params['rotation']}°")
     """
     if method == 'correlation':
-        return _register_correlation(reference, target)
+        params = _register_correlation(reference, target)
     elif method == 'icp':
-        return _register_icp(reference, target, max_iterations)
+        return _register_icp(
+            reference,
+            target,
+            max_iterations,
+            refine=refine,
+            stable_region=stable_region,
+        )
     else:
         raise ValueError(f"Unknown registration method: {method}")
+    return params
+
+
+def _detrend_surface_plane(grid: np.ndarray) -> np.ndarray:
+    """Fit and subtract the best-fit plane from a 2D height grid.
+
+    Removes the global tilt (linear trend) from the surface so that the
+    cross-correlation is driven by topographic features rather than slope.
+    NaN pixels are set to 0.0 in the output (neutral for FFT correlation).
+
+    Args:
+        grid (np.ndarray): 2D height array, may contain NaN.
+
+    Returns:
+        np.ndarray: Detrended grid with NaN regions zeroed out.
+    """
+    valid = ~np.isnan(grid)
+    n_valid = int(np.sum(valid))
+    if n_valid < 3:
+        # Not enough points – fall back to mean centering
+        mean_val = np.nanmean(grid)
+        mean_val = mean_val if np.isfinite(mean_val) else 0.0
+        return np.where(valid, grid - mean_val, 0.0)
+
+    rows, cols = np.where(valid)
+    z = grid[valid]
+    A = np.column_stack([rows, cols, np.ones(n_valid)])
+    try:
+        coeffs, _, _, _ = np.linalg.lstsq(A, z, rcond=None)
+    except np.linalg.LinAlgError:
+        mean_val = float(np.mean(z))
+        return np.where(valid, grid - mean_val, 0.0)
+
+    r_all, c_all = np.mgrid[0:grid.shape[0], 0:grid.shape[1]]
+    plane = coeffs[0] * r_all + coeffs[1] * c_all + coeffs[2]
+    return np.where(valid, grid - plane, 0.0)
 
 
 def _register_correlation(reference, target):
@@ -232,61 +284,67 @@ def _register_correlation(reference, target):
     # Use valid data only
     ref_valid = ~np.isnan(reference)
     tgt_valid = ~np.isnan(target)
-    
-    # Normalize: subtract mean from each surface (zero-mean correlation)
-    # This is CRITICAL - otherwise filled NaN regions dominate the correlation
-    ref_mean = np.nanmean(reference)
-    tgt_mean = np.nanmean(target)
-    ref_centered = np.where(ref_valid, reference - ref_mean, 0.0)
-    tgt_centered = np.where(tgt_valid, target - tgt_mean, 0.0)
-    
-    # Cross-correlation on zero-mean data
-    # Note: correlate(a, b) finds where b is located relative to a
-    # The shift we calculate is how much we need to move b to align it with a
+
+    if not np.any(ref_valid) or not np.any(tgt_valid):
+        logger.warning("Cross-correlation failed: one of the inputs has no valid data.")
+        return {
+            'translation': (0.0, 0.0),
+            'rotation': 0.0,
+            'rmse': np.inf,
+            'inliers': 0,
+        }
+
+    # Remove the global plane (tilt + offset) from each surface before
+    # correlating.  Simple mean subtraction fails when the surface is
+    # dominated by a linear slope: after mean removal the dominant signal
+    # is still the monotonic gradient, whose autocorrelation is nearly flat
+    # and argmax can land anywhere.  Plane-detrending leaves only the
+    # topographic residuals which are the true registration signal.
+    ref_centered = _detrend_surface_plane(reference)
+    tgt_centered = _detrend_surface_plane(target)
     correlation = correlate(ref_centered, tgt_centered, mode='same', method='fft')
-    
-    # Find peak
-    max_val = np.max(correlation)
-    max_pos = np.unravel_index(np.argmax(correlation), correlation.shape)
+    overlap = correlate(ref_valid.astype(float), tgt_valid.astype(float), mode='same', method='fft')
+
+    # Ignore edge peaks with very small overlap and unrealistic large shifts.
+    min_overlap = max(25.0, 0.15 * min(np.sum(ref_valid), np.sum(tgt_valid)))
     center = (reference.shape[0] // 2, reference.shape[1] // 2)
-    
-    # Check if peak is at edge (suspicious!)
-    edge_margin = 10
-    at_edge = (max_pos[0] < edge_margin or max_pos[0] > correlation.shape[0] - edge_margin or
-               max_pos[1] < edge_margin or max_pos[1] > correlation.shape[1] - edge_margin)
-    if at_edge:
-        logger.warning(f"Cross-correlation peak at edge! Position {max_pos} may be unreliable.")
-    
-    # Subpixel refinement using parabolic interpolation
-    # Fit parabola in y and x directions to find subpixel peak
+    max_shift_y = max(3, int(reference.shape[0] * 0.35))
+    max_shift_x = max(3, int(reference.shape[1] * 0.35))
+    row_indices, col_indices = np.indices(reference.shape)
+    search_mask = (
+        (overlap >= min_overlap)
+        & (np.abs(row_indices - center[0]) <= max_shift_y)
+        & (np.abs(col_indices - center[1]) <= max_shift_x)
+    )
+    if np.any(search_mask):
+        safe_score = np.where(search_mask, correlation, -np.inf)
+        max_pos = np.unravel_index(np.argmax(safe_score), safe_score.shape)
+    else:
+        max_pos = np.unravel_index(np.argmax(correlation), correlation.shape)
+
     peak_y = float(max_pos[0])
     peak_x = float(max_pos[1])
-    
+
     if 0 < max_pos[0] < correlation.shape[0] - 1:
-        # Parabolic fit in y direction
         c_minus = correlation[max_pos[0] - 1, max_pos[1]]
         c_zero = correlation[max_pos[0], max_pos[1]]
         c_plus = correlation[max_pos[0] + 1, max_pos[1]]
         denom = 2 * (2 * c_zero - c_minus - c_plus)
         if abs(denom) > 1e-10:
             offset_y = (c_minus - c_plus) / denom
-            if abs(offset_y) < 1.0:  # Sanity check
+            if abs(offset_y) < 1.0:
                 peak_y += offset_y
-    
+
     if 0 < max_pos[1] < correlation.shape[1] - 1:
-        # Parabolic fit in x direction
         c_minus = correlation[max_pos[0], max_pos[1] - 1]
         c_zero = correlation[max_pos[0], max_pos[1]]
         c_plus = correlation[max_pos[0], max_pos[1] + 1]
         denom = 2 * (2 * c_zero - c_minus - c_plus)
         if abs(denom) > 1e-10:
             offset_x = (c_minus - c_plus) / denom
-            if abs(offset_x) < 1.0:  # Sanity check
+            if abs(offset_x) < 1.0:
                 peak_x += offset_x
-    
-    # The shift needed to align target with reference. The correlation peak is
-    # already expressed in the same sign convention expected later by
-    # ``apply_registration`` / ``ndimage_shift``.
+
     dy = peak_y - center[0]
     dx = peak_x - center[1]
     
@@ -342,16 +400,227 @@ def _register_correlation(reference, target):
     }
 
 
-def _register_icp(reference, target, max_iterations=100):
-    """Register using Iterative Closest Point (handles rotation + translation)."""
-    
-    # Extract valid points
+def _subsample_registration_points(points: np.ndarray, max_points: int) -> np.ndarray:
+    """Return a deterministic subsample of registration points."""
+    if len(points) <= max_points:
+        return points
+    indices = np.linspace(0, len(points) - 1, max_points, dtype=int)
+    return points[indices]
+
+
+def _estimate_rigid_transform_2d(source_xy: np.ndarray, target_xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate the rigid 2D transform that maps source points onto target points."""
+    source_mean = np.mean(source_xy, axis=0)
+    target_mean = np.mean(target_xy, axis=0)
+    source_centered = source_xy - source_mean
+    target_centered = target_xy - target_mean
+
+    covariance = source_centered.T @ target_centered
+    u_matrix, _, vt_matrix = np.linalg.svd(covariance)
+    rotation = vt_matrix.T @ u_matrix.T
+    if np.linalg.det(rotation) < 0:
+        vt_matrix[-1, :] *= -1.0
+        rotation = vt_matrix.T @ u_matrix.T
+
+    translation = target_mean - source_mean @ rotation.T
+    return rotation, translation
+
+
+def _compose_row_vector_transform(
+    rotation_total: np.ndarray,
+    translation_total: np.ndarray,
+    rotation_delta: np.ndarray,
+    translation_delta: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compose rigid transforms that operate on row-vector coordinates."""
+    rotation_composed = rotation_delta @ rotation_total
+    translation_composed = translation_total @ rotation_delta.T + translation_delta
+    return rotation_composed, translation_composed
+
+
+def _downsample_grid_for_registration(grid: np.ndarray, max_dim: int = 160) -> np.ndarray:
+    """Downsample a grid by integer strides for fast registration refinement."""
+    if grid.size == 0:
+        return grid
+    stride_y = max(1, int(np.ceil(grid.shape[0] / max_dim)))
+    stride_x = max(1, int(np.ceil(grid.shape[1] / max_dim)))
+    return grid[::stride_y, ::stride_x]
+
+
+def _registration_rmse_for_grid(
+    reference: np.ndarray,
+    target: np.ndarray,
+    translation: tuple[float, float],
+    rotation: float,
+) -> tuple[float, int]:
+    """Calculate overlap RMSE after applying a candidate registration."""
+    if int(np.sum(np.isfinite(reference))) == 0 or int(np.sum(np.isfinite(target))) == 0:
+        return np.inf, 0
+    height, width = target.shape
+    xi = np.arange(width, dtype=float)
+    yi = np.arange(height, dtype=float)
+    transformed, _, _, _, _ = apply_registration(
+        target,
+        xi,
+        yi,
+        1.0,
+        1.0,
+        translation,
+        rotation=rotation,
+    )
+    common_height = min(reference.shape[0], transformed.shape[0])
+    common_width = min(reference.shape[1], transformed.shape[1])
+    if common_height == 0 or common_width == 0:
+        return np.inf, 0
+
+    reference_common = reference[:common_height, :common_width]
+    transformed_common = transformed[:common_height, :common_width]
+    overlap_mask = np.isfinite(reference_common) & np.isfinite(transformed_common)
+    if not np.any(overlap_mask):
+        return np.inf, 0
+    rmse = float(
+        np.sqrt(
+            np.mean(
+                (reference_common[overlap_mask] - transformed_common[overlap_mask]) ** 2
+            )
+        )
+    )
+    return rmse, int(np.sum(overlap_mask))
+
+
+def _optimize_registration_on_grid(
+    reference: np.ndarray,
+    target: np.ndarray,
+    translation: tuple[float, float],
+    rotation: float,
+    max_iterations: int,
+) -> tuple[tuple[float, float], float]:
+    """Refine rigid registration by minimizing height RMSE on the provided grids."""
+    if int(np.sum(np.isfinite(reference))) < 10 or int(np.sum(np.isfinite(target))) < 10:
+        return translation, rotation
+    ref_valid = np.isfinite(reference)
+    initial_guess = np.array([translation[0], translation[1], rotation], dtype=float)
+
+    def objective(params: np.ndarray) -> float:
+        """Evaluate height RMSE for a candidate rigid transform."""
+        candidate_translation = (float(params[0]), float(params[1]))
+        candidate_rotation = float(params[2])
+        candidate_rmse, candidate_overlap = _registration_rmse_for_grid(
+            reference,
+            target,
+            candidate_translation,
+            candidate_rotation,
+        )
+        if candidate_overlap == 0 or not np.isfinite(candidate_rmse):
+            return 1e12
+        overlap_fraction = candidate_overlap / max(1, np.sum(ref_valid))
+        return candidate_rmse - 0.05 * overlap_fraction
+
+    refinement = minimize(
+        objective,
+        initial_guess,
+        method="Powell",
+        options={"maxiter": max_iterations, "xtol": 0.05, "ftol": 1e-3},
+    )
+    if refinement.success:
+        return (float(refinement.x[0]), float(refinement.x[1])), float(refinement.x[2])
+    return translation, rotation
+
+
+def _compose_registration_parameters(
+    base_translation: tuple[float, float],
+    base_rotation: float,
+    delta_translation: tuple[float, float],
+    delta_rotation: float,
+    grid_shape: tuple[int, int],
+) -> tuple[tuple[float, float], float]:
+    """Compose two apply_registration-style rigid transforms for one grid shape."""
+    center = np.array([grid_shape[0] / 2.0, grid_shape[1] / 2.0], dtype=float)
+
+    def to_origin_transform(
+        translation: tuple[float, float],
+        rotation: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        rotation_rad = np.radians(rotation)
+        rotation_matrix = np.array(
+            [
+                [np.cos(rotation_rad), -np.sin(rotation_rad)],
+                [np.sin(rotation_rad), np.cos(rotation_rad)],
+            ],
+            dtype=float,
+        )
+        translation_origin = np.array(translation, dtype=float) + center - center @ rotation_matrix.T
+        return rotation_matrix, translation_origin
+
+    base_rotation_matrix, base_translation_origin = to_origin_transform(base_translation, base_rotation)
+    delta_rotation_matrix, delta_translation_origin = to_origin_transform(delta_translation, delta_rotation)
+    combined_rotation, combined_translation_origin = _compose_row_vector_transform(
+        base_rotation_matrix,
+        base_translation_origin,
+        delta_rotation_matrix,
+        delta_translation_origin,
+    )
+    combined_rotation_deg = float(
+        np.degrees(np.arctan2(combined_rotation[1, 0], combined_rotation[0, 0]))
+    )
+    combined_translation = tuple(
+        (combined_translation_origin - center + center @ combined_rotation.T).tolist()
+    )
+    return combined_translation, combined_rotation_deg
+
+
+def _build_stable_overlap_masks(
+    reference: np.ndarray,
+    aligned_target: np.ndarray,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Build masks for the low-mismatch overlap region in one coordinate frame."""
+    common_height = min(reference.shape[0], aligned_target.shape[0])
+    common_width = min(reference.shape[1], aligned_target.shape[1])
+    if common_height == 0 or common_width == 0:
+        return None, None
+
+    reference_common = reference[:common_height, :common_width]
+    transformed_common = aligned_target[:common_height, :common_width]
+    overlap_mask = np.isfinite(reference_common) & np.isfinite(transformed_common)
+    if int(np.sum(overlap_mask)) < 50:
+        return None, None
+
+    residual = reference_common - transformed_common
+    residual_values = residual[overlap_mask]
+    residual_median = float(np.median(residual_values))
+    residual_mad = float(np.median(np.abs(residual_values - residual_median)))
+    residual_sigma = 1.4826 * residual_mad
+    if not np.isfinite(residual_sigma) or residual_sigma < 1e-8:
+        residual_sigma = float(np.std(residual_values))
+    if not np.isfinite(residual_sigma) or residual_sigma < 1e-8:
+        return None, None
+
+    stable_common = overlap_mask & (np.abs(residual - residual_median) <= 2.5 * residual_sigma)
+    if int(np.sum(stable_common)) < 50:
+        return None, None
+
+    stable_common = binary_opening(stable_common, structure=np.ones((3, 3), dtype=bool))
+    stable_common = binary_closing(stable_common, structure=np.ones((3, 3), dtype=bool))
+    if int(np.sum(stable_common)) < 50:
+        return None, None
+
+    reference_mask = np.zeros_like(reference, dtype=bool)
+    target_mask_transformed = np.zeros_like(aligned_target, dtype=bool)
+    reference_mask[:common_height, :common_width] = stable_common
+    target_mask_transformed[:common_height, :common_width] = stable_common
+
+    if int(np.sum(reference_mask)) < 50 or int(np.sum(target_mask_transformed)) < 50:
+        return None, None
+    return reference_mask, target_mask_transformed
+
+
+def _register_icp(reference, target, max_iterations=100, refine=True, stable_region=False):
+    """Register using ICP with iterative 2D rigid fitting."""
     ref_valid = ~np.isnan(reference)
     tgt_valid = ~np.isnan(target)
-    
-    ref_points = np.column_stack(np.where(ref_valid))
-    tgt_points = np.column_stack(np.where(tgt_valid))
-    
+
+    ref_points = np.column_stack(np.where(ref_valid)).astype(float)
+    tgt_points = np.column_stack(np.where(tgt_valid)).astype(float)
     if len(ref_points) < 10 or len(tgt_points) < 10:
         logger.warning("Not enough valid points for ICP registration")
         return {
@@ -360,62 +629,195 @@ def _register_icp(reference, target, max_iterations=100):
             'rmse': np.inf,
             'inliers': 0
         }
-    
-    # Add height as 3rd dimension
-    ref_heights = reference[ref_valid].reshape(-1, 1)
-    tgt_heights = target[tgt_valid].reshape(-1, 1)
-    
-    ref_points_3d = np.hstack([ref_points, ref_heights])
-    tgt_points_3d = np.hstack([tgt_points, tgt_heights])
-    
-    # Subsample if too many points
+
+    ref_heights = reference[ref_valid].astype(float)
+    tgt_heights = target[tgt_valid].astype(float)
+
     max_points = 5000
-    if len(ref_points_3d) > max_points:
-        indices = np.random.choice(len(ref_points_3d), max_points, replace=False)
-        ref_points_3d = ref_points_3d[indices]
-    if len(tgt_points_3d) > max_points:
-        indices = np.random.choice(len(tgt_points_3d), max_points, replace=False)
-        tgt_points_3d = tgt_points_3d[indices]
-    
-    # Simplified ICP: just find translation and in-plane rotation
-    # For full ICP, would need scipy or dedicated library
-    
-    # Center the point clouds
-    ref_center = np.mean(ref_points_3d[:, :2], axis=0)
-    tgt_center = np.mean(tgt_points_3d[:, :2], axis=0)
-    
-    translation = ref_center - tgt_center
-    
-    # Estimate rotation using covariance (simplified)
-    ref_centered = ref_points_3d[:, :2] - ref_center
-    tgt_centered = tgt_points_3d[:, :2] - tgt_center
-    
-    # Sample matching (nearest neighbor approximation)
+    ref_indices = _subsample_registration_points(np.arange(len(ref_points)), max_points)
+    tgt_indices = _subsample_registration_points(np.arange(len(tgt_points)), max_points)
+    ref_points = ref_points[ref_indices]
+    tgt_points = tgt_points[tgt_indices]
+    ref_heights = ref_heights[ref_indices]
+    tgt_heights = tgt_heights[tgt_indices]
+
+    combined_heights = np.concatenate([ref_heights, tgt_heights])
+    height_scale = float(np.nanstd(combined_heights))
+    if not np.isfinite(height_scale) or height_scale < 1e-8:
+        height_scale = 1.0
+    feature_height_weight = 3.0
+
+    # Detrend heights by removing the best-fit plane before using them as
+    # ICP features.  Without this, a tilted surface has a monotone height
+    # gradient that is nearly redundant with the (row, col) coordinates and
+    # causes ICP to converge to wrong positions on nearly-planar surfaces.
+    def _detrend_heights(points_rc: np.ndarray, heights: np.ndarray) -> np.ndarray:
+        if len(heights) < 3:
+            return heights - np.median(heights)
+        A = np.column_stack([points_rc, np.ones(len(points_rc))])
+        try:
+            coeffs, _, _, _ = np.linalg.lstsq(A, heights, rcond=None)
+            return heights - (A @ coeffs)
+        except np.linalg.LinAlgError:
+            return heights - np.median(heights)
+
+    ref_heights_dt = _detrend_heights(ref_points, ref_heights)
+    tgt_heights_dt = _detrend_heights(tgt_points, tgt_heights)
+
+    height_scale_dt = float(np.std(np.concatenate([ref_heights_dt, tgt_heights_dt])))
+    if not np.isfinite(height_scale_dt) or height_scale_dt < 1e-8:
+        height_scale_dt = 1.0
+
+    ref_height_feature = feature_height_weight * (ref_heights_dt / height_scale_dt)
+    tgt_height_feature = feature_height_weight * (tgt_heights_dt / height_scale_dt)
+    ref_features = np.column_stack([ref_points, ref_height_feature])
+
     from scipy.spatial import cKDTree
-    
-    tree = cKDTree(ref_centered)
-    distances, indices = tree.query(tgt_centered, k=1)
-    
-    # Estimate rotation angle
-    matched_ref = ref_centered[indices]
-    
-    # Use least squares to find rotation
-    angles_ref = np.arctan2(matched_ref[:, 0], matched_ref[:, 1])
-    angles_tgt = np.arctan2(tgt_centered[:, 0], tgt_centered[:, 1])
-    angle_diffs = angles_ref - angles_tgt
-    
-    # Circular mean
-    rotation_rad = np.arctan2(np.mean(np.sin(angle_diffs)), np.mean(np.cos(angle_diffs)))
-    rotation_deg = np.degrees(rotation_rad)
-    
-    # Calculate RMSE
-    rmse = np.sqrt(np.mean(distances ** 2))
-    inliers = np.sum(distances < 3 * np.median(distances))
-    
-    logger.info(f"ICP registration: translation={translation}, rotation={rotation_deg:.2f}°, RMSE={rmse:.3f}")
-    
+
+    tree = cKDTree(ref_features)
+    rotation_total = np.eye(2, dtype=float)
+    translation_total = np.mean(ref_points, axis=0) - np.mean(tgt_points, axis=0)
+    previous_rmse = np.inf
+    correspondence_rmse = np.inf
+    inliers = 0
+
+    for _ in range(max_iterations):
+        transformed_points = tgt_points @ rotation_total.T + translation_total
+        transformed_features = np.column_stack([transformed_points, tgt_height_feature])
+        distances, indices = tree.query(transformed_features, k=1)
+
+        median_distance = float(np.median(distances))
+        if not np.isfinite(median_distance):
+            break
+        if median_distance <= 0.0:
+            inlier_mask = np.ones_like(distances, dtype=bool)
+        else:
+            inlier_mask = distances <= max(2.0, 2.5 * median_distance)
+        if np.sum(inlier_mask) < 10:
+            inlier_mask = np.ones_like(distances, dtype=bool)
+        if np.sum(inlier_mask) < 10:
+            break
+
+        matched_reference = ref_points[indices[inlier_mask]]
+        matched_source = transformed_points[inlier_mask]
+        rotation_delta, translation_delta = _estimate_rigid_transform_2d(matched_source, matched_reference)
+        rotation_total, translation_total = _compose_row_vector_transform(
+            rotation_total,
+            translation_total,
+            rotation_delta,
+            translation_delta,
+        )
+
+        transformed_points = tgt_points @ rotation_total.T + translation_total
+        transformed_features = np.column_stack([transformed_points, tgt_height_feature])
+        distances, _ = tree.query(transformed_features, k=1)
+        median_distance = float(np.median(distances))
+        if median_distance <= 0.0:
+            inlier_mask = np.ones_like(distances, dtype=bool)
+        else:
+            inlier_mask = distances <= max(2.0, 2.5 * median_distance)
+        inliers = int(np.sum(inlier_mask))
+        if inliers == 0:
+            break
+
+        correspondence_rmse = float(np.sqrt(np.mean(distances[inlier_mask] ** 2)))
+        delta_rotation = float(np.degrees(np.arctan2(rotation_delta[1, 0], rotation_delta[0, 0])))
+        delta_translation = float(np.linalg.norm(translation_delta))
+        if abs(previous_rmse - correspondence_rmse) < 1e-4 and abs(delta_rotation) < 0.01 and delta_translation < 0.01:
+            break
+        previous_rmse = correspondence_rmse
+
+    rotation_deg = float(np.degrees(np.arctan2(rotation_total[1, 0], rotation_total[0, 0])))
+    center = np.array([target.shape[0] / 2.0, target.shape[1] / 2.0], dtype=float)
+    translation_apply = translation_total - center + center @ rotation_total.T
+    translation = (float(translation_apply[0]), float(translation_apply[1]))
+
+    # Always do a small, cheap refinement on downsampled grids. This keeps the
+    # fast ICP variant useful instead of stopping at the raw point-cloud fit.
+    coarse_reference = _downsample_grid_for_registration(reference, max_dim=140)
+    coarse_target = _downsample_grid_for_registration(target, max_dim=140)
+    coarse_stride_y = max(1.0, reference.shape[0] / max(1, coarse_reference.shape[0]))
+    coarse_stride_x = max(1.0, reference.shape[1] / max(1, coarse_reference.shape[1]))
+    coarse_translation = (
+        translation[0] / coarse_stride_y,
+        translation[1] / coarse_stride_x,
+    )
+    coarse_translation, coarse_rotation = _optimize_registration_on_grid(
+        coarse_reference,
+        coarse_target,
+        coarse_translation,
+        rotation_deg,
+        max_iterations=max(8, min(18, max_iterations // 2)),
+    )
+    translation = (
+        float(coarse_translation[0] * coarse_stride_y),
+        float(coarse_translation[1] * coarse_stride_x),
+    )
+    rotation_deg = float(coarse_rotation)
+
+    if refine:
+        translation, rotation_deg = _optimize_registration_on_grid(
+            reference,
+            target,
+            translation,
+            rotation_deg,
+            max_iterations=max(20, max_iterations),
+        )
+
+    grid_rmse, overlap_points = _registration_rmse_for_grid(reference, target, translation, rotation_deg)
+    rmse = grid_rmse if overlap_points > 0 else correspondence_rmse
+    if overlap_points > 0:
+        inliers = overlap_points
+
+    if stable_region and np.isfinite(rmse):
+        height, width = target.shape
+        xi = np.arange(width, dtype=float)
+        yi = np.arange(height, dtype=float)
+        transformed_target, _, _, _, _ = apply_registration(
+            target,
+            xi,
+            yi,
+            1.0,
+            1.0,
+            translation,
+            rotation=rotation_deg,
+        )
+        reference_mask, target_mask = _build_stable_overlap_masks(reference, transformed_target)
+        if reference_mask is not None and target_mask is not None:
+            reference_stable = np.where(reference_mask, reference, np.nan)
+            target_stable = np.where(target_mask, transformed_target, np.nan)
+            stable_params = _register_icp(
+                reference_stable,
+                target_stable,
+                max_iterations=max(20, max_iterations // 2),
+                refine=refine,
+                stable_region=False,
+            )
+            translation, rotation_deg = _compose_registration_parameters(
+                translation,
+                rotation_deg,
+                stable_params['translation'],
+                stable_params['rotation'],
+                target.shape,
+            )
+            grid_rmse, overlap_points = _registration_rmse_for_grid(
+                reference,
+                target,
+                translation,
+                rotation_deg,
+            )
+            rmse = grid_rmse if overlap_points > 0 else stable_params['rmse']
+            inliers = overlap_points if overlap_points > 0 else stable_params['inliers']
+
+    logger.info(
+        "ICP registration: translation=%s, rotation=%.2f deg, RMSE=%.3f",
+        translation,
+        rotation_deg,
+        rmse,
+    )
+
     return {
-        'translation': tuple(translation),
+        'translation': translation,
         'rotation': rotation_deg,
         'rmse': rmse,
         'inliers': inliers
@@ -442,10 +844,11 @@ def apply_registration(grid, xi, yi, dx, dy, translation, rotation=0.0):
     if abs(rotation) > 0.01:
         grid, xi, yi, dx, dy = rotate_grid(grid, rotation, xi, yi, dx, dy)
     
-    # Apply translation using proper shift (not circular roll)
-    dy, dx = translation
+    # Apply translation using proper shift (not circular roll).
+    # Use separate names to avoid shadowing the pixel-size parameters dx/dy.
+    shift_dy, shift_dx = translation
     
-    if abs(dy) > 0.5 or abs(dx) > 0.5:
+    if abs(shift_dy) > 0.5 or abs(shift_dx) > 0.5:
         # Strategy: Can't use mode='nearest' with NaN - it propagates NaN everywhere!
         # Instead:
         # 1. Save NaN mask
@@ -466,23 +869,23 @@ def apply_registration(grid, xi, yi, dx, dy, translation, rotation=0.0):
         grid_filled = np.where(nan_mask_before, fill_value, grid)
         
         # Shift with constant boundary (using fill value)
-        grid = ndimage_shift(grid_filled, (dy, dx), order=3, mode='constant', cval=fill_value)
+        grid = ndimage_shift(grid_filled, (shift_dy, shift_dx), order=3, mode='constant', cval=fill_value)
         
         # Restore original NaN mask (shifted)
         # Use order=1 (linear) instead of order=0 to properly interpolate mask values
-        nan_mask_shifted = ndimage_shift(nan_mask_before.astype(float), (dy, dx), order=1, mode='constant', cval=1.0) > 0.5
+        nan_mask_shifted = ndimage_shift(nan_mask_before.astype(float), (shift_dy, shift_dx), order=1, mode='constant', cval=1.0) > 0.5
         grid[nan_mask_shifted] = np.nan
         
         # Mark regions that were shifted from outside the original bounds as NaN
         valid_mask = np.ones_like(grid, dtype=bool)
-        if dy > 0:
-            valid_mask[:int(np.ceil(dy)), :] = False
-        elif dy < 0:
-            valid_mask[int(np.floor(dy)):, :] = False
-        if dx > 0:
-            valid_mask[:, :int(np.ceil(dx))] = False
-        elif dx < 0:
-            valid_mask[:, int(np.floor(dx)):] = False
+        if shift_dy > 0:
+            valid_mask[:int(np.ceil(shift_dy)), :] = False
+        elif shift_dy < 0:
+            valid_mask[int(np.floor(shift_dy)):, :] = False
+        if shift_dx > 0:
+            valid_mask[:, :int(np.ceil(shift_dx))] = False
+        elif shift_dx < 0:
+            valid_mask[:, int(np.floor(shift_dx)):] = False
         
         grid[~valid_mask] = np.nan
     

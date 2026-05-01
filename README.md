@@ -46,7 +46,7 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
    - Processed and registered results consistently offer a choice between replacing the current scan and creating a derived tab
    - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
 4. Align two opposing fracture surfaces using interactive translation and rotation.
-   - The comparison window can prefill manual alignment with automatic translation-only or translation+rotation estimates.
+   - The comparison window can prefill manual alignment with a fast ICP-based translation+rotation estimate.
 5. Place cross-sectional profiles to inspect local deviations and contacts.
 6. Export aligned data, profiles, and measurements for further analysis or documentation.
 
@@ -70,7 +70,8 @@ FRASTA-toolbox includes advanced processing algorithms for surface preparation a
 - **Rotation** - rotate surfaces with interpolation
 - **Rescaling** - change resolution (upsampling/downsampling)
 - **Cropping** - automatic crop to valid regions
-- **Auto-registration** - automatic surface alignment for height-map data (cross-correlation and simplified ICP-style translation/rotation estimation)
+- **Auto-registration** - automatic surface alignment for height-map data (cross-correlation and ICP-based translation/rotation estimation)
+  with optional slower ICP refinement for small, distinctive ROIs and optional automatic rejection of mismatched areas
 - **Minimal roughness summaries** - basic amplitude parameters for grids
   (`Sa`, `Sq`, `Sz`) and extracted profiles (`Ra`, `Rq`, `Rz`) available from
   the Python processing API and from lightweight GUI summary dialogs

@@ -314,7 +314,16 @@ class RegistrationController:
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
         
-        ref_idx, mov_idx, method = dialog.get_registration_config()
+        registration_config = dialog.get_registration_config()
+        if len(registration_config) == 5:
+            ref_idx, mov_idx, method, refine, stable_region = registration_config
+        elif len(registration_config) == 4:
+            ref_idx, mov_idx, method, refine = registration_config
+            stable_region = False
+        else:
+            ref_idx, mov_idx, method = registration_config
+            refine = False
+            stable_region = False
         
         if ref_idx == mov_idx:
             QtWidgets.QMessageBox.warning(
@@ -358,7 +367,9 @@ class RegistrationController:
             params = auto_register_surfaces(
                 reference_grid,
                 moving_grid,
-                method=method
+                method=method,
+                refine=refine,
+                stable_region=stable_region,
             )
             
             # Auto-fallback: if cross-correlation gives poor RMSE, try ICP
@@ -373,7 +384,9 @@ class RegistrationController:
                 params = auto_register_surfaces(
                     reference_grid,
                     moving_grid,
-                    method='icp'
+                    method='icp',
+                    refine=refine,
+                    stable_region=stable_region,
                 )
                 logger.info(f"ICP result: RMSE={params['rmse']:.1f} nm, translation={params['translation']}")
             

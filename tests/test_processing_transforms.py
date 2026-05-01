@@ -384,6 +384,30 @@ class TestAutoRegisterSurfaces:
         assert 'rotation' in params
         assert 'rmse' in params
         assert params['rmse'] < np.inf
+
+    def test_icp_stable_region_handles_mismatched_area(self):
+        """Stable-region ICP should improve alignment when the target has a large burr."""
+        from scipy.ndimage import shift as ndimage_shift
+
+        ny, nx = 90, 110
+        y_idx, x_idx = np.mgrid[0:ny, 0:nx]
+        reference = (
+            25.0
+            + 0.12 * x_idx
+            - 0.08 * y_idx
+            + 7.5 * np.exp(-((x_idx - 30.0) ** 2 + (y_idx - 32.0) ** 2) / 90.0)
+            - 5.0 * np.exp(-((x_idx - 76.0) ** 2 + (y_idx - 62.0) ** 2) / 120.0)
+            + 4.2 * np.sin(x_idx * 0.13 + y_idx * 0.08)
+        )
+        target = ndimage_shift(reference, shift=(3.0, -4.0), order=1, mode='nearest')
+        target[10:35, 75:103] += 35.0
+
+        base_params = auto_register_surfaces(reference, target, method='icp', refine=False, stable_region=False)
+        stable_params = auto_register_surfaces(reference, target, method='icp', refine=False, stable_region=True)
+        base_translation_error = np.linalg.norm(np.array(base_params['translation']) - np.array([-3.0, 4.0]))
+        stable_translation_error = np.linalg.norm(np.array(stable_params['translation']) - np.array([-3.0, 4.0]))
+
+        assert stable_translation_error < base_translation_error * 0.8
     
     def test_invalid_method_raises_error(self, simple_grid):
         """Test that invalid method raises ValueError."""
@@ -402,10 +426,28 @@ class TestAutoRegisterSurfaces:
         assert abs(params['translation'][0]) < 1.0
         assert abs(params['translation'][1]) < 1.0
 
-
 class TestRegisterCorrelation:
     """Tests for _register_correlation function."""
-    
+
+    def test_tilted_surface_detects_shift(self):
+        """CC must recover the correct shift even when the surface has a strong global tilt.
+
+        Without plane detrending, mean-subtraction leaves a monotone gradient that
+        makes the cross-correlation nearly flat and argmax lands at a random/edge position.
+        """
+        np.random.seed(7)
+        N = 100
+        y, x = np.mgrid[0:N, 0:N]
+        # Strong tilt that dominates raw values + weak topographic features
+        ref = 50.0 + 0.8 * y + 0.4 * x + 2.0 * np.sin(x * 0.25) + np.random.randn(N, N) * 0.2
+        from scipy.ndimage import shift as nshift
+        tgt = nshift(ref, (12, -9), mode='constant', cval=np.nan)
+
+        params = _register_correlation(ref, tgt)
+        dy, dx = params['translation']
+        assert abs(dy - (-12)) < 2, f"row shift wrong: got {dy}, expected -12"
+        assert abs(dx - 9) < 2, f"col shift wrong: got {dx}, expected +9"
+
     def test_detects_horizontal_shift(self):
         """Test detection of horizontal shift."""
         ny, nx = 100, 100
@@ -489,6 +531,46 @@ class TestRegisterICP:
         assert 'translation' in params
         assert 'rotation' in params
         assert np.isfinite(params['rmse'])
+
+    def test_icp_improves_rotation_estimate(self):
+        """ICP should reduce RMSE for a rotated and shifted asymmetric surface."""
+        from scipy.ndimage import rotate as ndimage_rotate
+        from scipy.ndimage import shift as ndimage_shift
+
+        ny, nx = 90, 110
+        y_idx, x_idx = np.mgrid[0:ny, 0:nx]
+        grid = (
+            30.0
+            + 0.18 * x_idx
+            - 0.11 * y_idx
+            + 8.0 * np.exp(-((x_idx - 28.0) ** 2 + (y_idx - 35.0) ** 2) / 90.0)
+            - 6.5 * np.exp(-((x_idx - 72.0) ** 2 + (y_idx - 58.0) ** 2) / 140.0)
+            + 4.0 * np.sin(x_idx * 0.16 + y_idx * 0.07)
+        )
+        xi = np.arange(nx, dtype=float)
+        yi = np.arange(ny, dtype=float)
+
+        rotated = ndimage_rotate(grid, 6.5, reshape=False, order=1, mode='nearest')
+        shifted = ndimage_shift(rotated, shift=(4.0, -6.0), order=1, mode='nearest')
+
+        params = _register_icp(grid, shifted)
+        corrected, _, _, _, _ = apply_registration(
+            shifted,
+            xi,
+            yi,
+            1.0,
+            1.0,
+            translation=params['translation'],
+            rotation=params['rotation'],
+        )
+
+        before_mask = np.isfinite(grid) & np.isfinite(shifted)
+        after_mask = np.isfinite(grid) & np.isfinite(corrected)
+        before_rmse = np.sqrt(np.mean((grid[before_mask] - shifted[before_mask]) ** 2))
+        after_rmse = np.sqrt(np.mean((grid[after_mask] - corrected[after_mask]) ** 2))
+
+        assert after_rmse < before_rmse * 0.6
+        assert abs(params['rotation'] + 6.5) < 3.0
     
     def test_insufficient_points_returns_default(self):
         """Test that insufficient points returns default params."""
@@ -516,6 +598,19 @@ class TestRegisterICP:
         assert params is not None
         assert 'rmse' in params
 
+    def test_icp_handles_different_shapes(self):
+        """ICP should handle differently sized grids without shape errors."""
+        ny, nx = 70, 90
+        y_idx, x_idx = np.mgrid[0:ny, 0:nx]
+        reference = 20.0 + 0.1 * x_idx - 0.07 * y_idx + 3.5 * np.sin(x_idx * 0.12 + y_idx * 0.09)
+        target = reference[:68, :87].copy()
+
+        params = _register_icp(reference, target)
+
+        assert 'translation' in params
+        assert 'rotation' in params
+        assert np.isfinite(params['rmse'])
+
 
 # ============================================================================
 # Tests for apply_registration
@@ -523,7 +618,29 @@ class TestRegisterICP:
 
 class TestApplyRegistration:
     """Tests for apply_registration function."""
-    
+
+    def test_apply_translation_preserves_pixel_sizes(self, simple_grid):
+        """Returned dx/dy must be pixel sizes, not translation values (regression test)."""
+        grid, xi, yi, dx, dy = simple_grid  # dx=1.0, dy=1.0
+
+        _, _, _, dx_new, dy_new = apply_registration(
+            grid, xi, yi, dx, dy, translation=(7.0, -3.0), rotation=0.0
+        )
+
+        assert dx_new == pytest.approx(dx), "dx should be pixel size, not translation"
+        assert dy_new == pytest.approx(dy), "dy should be pixel size, not translation"
+
+    def test_apply_rotation_preserves_pixel_sizes(self, simple_grid):
+        """Pixel sizes must survive rotation + translation pipeline."""
+        grid, xi, yi, dx, dy = simple_grid  # dx=1.0, dy=1.0
+
+        _, _, _, dx_new, dy_new = apply_registration(
+            grid, xi, yi, dx, dy, translation=(5.0, 2.0), rotation=20.0
+        )
+
+        assert dx_new == pytest.approx(dx), "dx should be pixel size after rotation+translation"
+        assert dy_new == pytest.approx(dy), "dy should be pixel size after rotation+translation"
+
     def test_apply_no_transformation(self, simple_grid):
         """Test with zero translation and rotation."""
         grid, xi, yi, dx, dy = simple_grid

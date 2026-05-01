@@ -426,6 +426,17 @@ class RegistrationDialog(QtWidgets.QDialog):
             "ICP (translation + rotation)"
         ])
         method_layout.addWidget(self.method_combo)
+
+        self.refine_checkbox = QtWidgets.QCheckBox("Refine ICP alignment (slower)")
+        self.refine_checkbox.setChecked(False)
+        self.refine_checkbox.setEnabled(False)
+        method_layout.addWidget(self.refine_checkbox)
+
+        self.stable_region_checkbox = QtWidgets.QCheckBox("Auto reject mismatched areas (ICP)")
+        self.stable_region_checkbox.setChecked(False)
+        self.stable_region_checkbox.setEnabled(False)
+        method_layout.addWidget(self.stable_region_checkbox)
+        self.method_combo.currentIndexChanged.connect(self._update_refine_option_state)
         
         method_group.setLayout(method_layout)
         layout.addWidget(method_group)
@@ -433,7 +444,8 @@ class RegistrationDialog(QtWidgets.QDialog):
         # Info
         info_label = QtWidgets.QLabel(
             "Automatic registration estimates alignment parameters for the moving surface. "
-            "Cross-correlation updates translation only, while ICP estimates both translation and in-plane rotation."
+            "Cross-correlation updates translation only, while ICP estimates both translation and in-plane rotation. "
+            "The stable-region option adds a second ICP pass on automatically selected low-mismatch overlap areas."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: gray; font-style: italic;")
@@ -448,11 +460,20 @@ class RegistrationDialog(QtWidgets.QDialog):
         layout.addWidget(button_box)
         
         self.setLayout(layout)
+        self._update_refine_option_state()
+
+    def _update_refine_option_state(self):
+        """Enable the ICP refinement option only for the ICP method."""
+        is_icp = "ICP" in self.method_combo.currentText()
+        self.refine_checkbox.setEnabled(is_icp)
+        self.stable_region_checkbox.setEnabled(is_icp)
     
     def get_registration_config(self):
         """Get registration configuration."""
         ref_idx = self.ref_combo.currentIndex()
         mov_idx = self.mov_combo.currentIndex()
         method = "correlation" if "Cross-Correlation" in self.method_combo.currentText() else "icp"
-        
-        return ref_idx, mov_idx, method
+        refine = bool(self.refine_checkbox.isChecked()) if method == "icp" else False
+        stable_region = bool(self.stable_region_checkbox.isChecked()) if method == "icp" else False
+
+        return ref_idx, mov_idx, method, refine, stable_region

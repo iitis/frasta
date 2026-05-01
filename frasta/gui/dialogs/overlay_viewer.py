@@ -159,13 +159,9 @@ class OverlayViewer(QtWidgets.QWidget):
         self.update_diff_btn.clicked.connect(self.update_difference_map)
         tool2_layout.addWidget(self.update_diff_btn)
 
-        self.auto_shift_btn = QtWidgets.QPushButton("Auto shift")
-        self.auto_shift_btn.clicked.connect(self.apply_auto_shift)
-        tool2_layout.addWidget(self.auto_shift_btn)
-
-        self.auto_rigid_btn = QtWidgets.QPushButton("Auto shift + rotate")
-        self.auto_rigid_btn.clicked.connect(self.apply_auto_rigid)
-        tool2_layout.addWidget(self.auto_rigid_btn)
+        self.auto_icp_btn = QtWidgets.QPushButton("Auto align (ICP)")
+        self.auto_icp_btn.clicked.connect(self.apply_auto_icp)
+        tool2_layout.addWidget(self.auto_icp_btn)
 
         # self.save_button = QtWidgets.QPushButton("Save aligned grids to .h5")
         # self.save_button.clicked.connect(self.saveAlignedScans)
@@ -583,7 +579,13 @@ class OverlayViewer(QtWidgets.QWidget):
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
             cursor_active = True
-            params = auto_register_surfaces(reference_grid, moving_grid, method=method)
+            params = auto_register_surfaces(
+                reference_grid,
+                moving_grid,
+                method=method,
+                max_iterations=25,
+                refine=False,
+            )
             QtWidgets.QApplication.restoreOverrideCursor()
             cursor_active = False
 
@@ -609,10 +611,6 @@ class OverlayViewer(QtWidgets.QWidget):
             if cursor_active:
                 QtWidgets.QApplication.restoreOverrideCursor()
 
-    def apply_auto_shift(self):
-        """Estimate translation-only alignment and update sliders."""
-        self._apply_auto_alignment("correlation")
-
-    def apply_auto_rigid(self):
+    def apply_auto_icp(self):
         """Estimate translation and rotation alignment and update sliders."""
         self._apply_auto_alignment("icp")
