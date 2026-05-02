@@ -160,7 +160,7 @@ class MenuBuilder:
                 ])
             ]),
             ("Scan &Actions", [
-                "fill", "repair", "flipUD", "flipLR", "rot90", "inverse", "zero", "colormap"
+                "fill", "repair", "flipUD", "flipLR", "rot90", "inverse", "zero"#, "colormap"
             ]),
             ("&Processing", [
                 "filter", "morphology", "transform", "roughness", "separator", "register"

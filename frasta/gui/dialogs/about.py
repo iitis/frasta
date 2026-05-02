@@ -32,7 +32,7 @@ class AboutDialog(QtWidgets.QDialog):
         <b>FRASTA-toolbox</b><br>
         <br>
         Author: Dariusz Pojda<br>
-        Version: 1.0.0<br>
+        Version: 1.1.0<br>
         <br>
         This software uses icons from <a href='https://icons8.com/icons'>Icons8.com</a>.<br>
         <small>Some icons are from Google Material Icons (Apache 2.0) and/or FontAwesome (CC BY 4.0).</small>
