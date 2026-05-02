@@ -194,7 +194,6 @@ The manual scan-comparison window includes one helper action:
 
 This action does not save anything on its own; it only provides a starting
 point for further manual refinement before accepting the alignment.
-- Multi-scan reconstruction
 
 ---
 
@@ -329,7 +328,7 @@ For issues or questions:
 1. Check [ADVANCED_PROCESSING.md](ADVANCED_PROCESSING.md) for function details
 2. Run [examples/advanced_processing.py](../examples/advanced_processing.py) to verify installation
 3. Check console output for detailed error messages
-4. Verify Python environment has scipy and scikit-learn installed
+4. Verify that the Python environment has SciPy and scikit-learn installed
 
 ---
 

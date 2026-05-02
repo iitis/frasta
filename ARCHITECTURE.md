@@ -49,21 +49,21 @@ gui -> processing -> core
 
 ### 1. **Immutability in Processing**
 
-All functions in `processing/` are **pure functions** - they:
-- OK Take input arrays and parameters
-- OK Return new arrays/tuples without side effects
-- BAD Never modify input arrays in-place
-- BAD Never call GUI functions or access global state
+All functions in `processing/` are **pure functions**. In practice, they should:
+- take input arrays and parameters,
+- return new arrays or tuples without side effects,
+- avoid modifying input arrays in-place,
+- avoid calling GUI functions or accessing global state.
 
 **Example:**
 ```python
-# CORRECT OK
+# Recommended
 def bilateral_filter(grid, sigma_spatial, sigma_range, px_x=1.0, px_y=1.0, mask=None):
     grid = grid.copy()  # Work on copy
     # ... processing ...
     return result
 
-# WRONG BAD
+# Avoid
 def bilateral_filter(grid, sigma_spatial, sigma_range):
     grid[mask] = filtered_values  # Modifying input!
     return grid
@@ -96,14 +96,14 @@ class Surface:
 ```
 
 **Use it for:**
-- OK Passing scan data between GUI components
-- OK Storing visualization metadata (vmin/vmax)
-- OK Simple utility methods (crop, copy)
+- Passing scan data between GUI components
+- Storing visualization metadata (`vmin` / `vmax`)
+- Simple utility methods such as `crop()` and `copy()`
 
 **Don't use it for:**
-- BAD Processing algorithms (use numpy arrays instead)
-- BAD Business logic (filtering, leveling, etc.)
-- BAD Complex state management
+- Processing algorithms; use NumPy arrays instead
+- Business logic such as filtering or leveling
+- Complex state management
 
 ### 3. **Lazy Imports in GUI**
 
@@ -808,58 +808,58 @@ Test **end-to-end workflows** using pytest-qt or manual testing:
 
 ## Common Pitfalls
 
-### BAD Modifying Arrays In-Place
+### Pitfall: Modifying Arrays In-Place
 
 ```python
-# WRONG BAD
+# Avoid
 def bad_filter(grid):
     grid[grid > 100] = 100  # Modifies input!
     return grid
 
-# CORRECT OK
+# Recommended
 def good_filter(grid):
     result = grid.copy()
     result[result > 100] = 100
     return result
 ```
 
-### BAD Mixing Surface and np.ndarray
+### Pitfall: Mixing `Surface` and `np.ndarray`
 
 ```python
-# WRONG BAD
+# Avoid
 from ..processing import bilateral_filter
 result = bilateral_filter(grid_data, ...)  # Surface has no __array__ interface
 
-# CORRECT OK
+# Recommended
 result = bilateral_filter(grid_data.height, px_x=grid_data.dx, ...)
 ```
 
-### BAD Putting Algorithms in GUI
+### Pitfall: Putting Algorithms in GUI Code
 
 ```python
-# WRONG BAD - in main_window.py
+# Avoid - in main_window.py
 def apply_filter(self):
     grid = self.current_tab.grid
     for i in range(grid.shape[0]):  # Complex algorithm in GUI!
         for j in range(grid.shape[1]):
             grid[i,j] = ...
 
-# CORRECT OK
+# Recommended
 def apply_filter(self):
     from ..processing import my_algorithm
     result = my_algorithm(self.current_tab.grid, ...)
     self.current_tab.grid = result
 ```
 
-### BAD Ignoring pixel_size Parameters
+### Pitfall: Ignoring Pixel-Size Parameters
 
 ```python
-# WRONG BAD
+# Avoid
 def spatial_filter(grid, radius_pixels):
     # Assumes pixels are square and uniform
     kernel_size = 2 * radius_pixels + 1
 
-# CORRECT OK
+# Recommended
 def spatial_filter(grid, radius_physical, px_x=1.0, px_y=1.0):
     # Convert physical radius to pixels
     radius_x_pixels = radius_physical / px_x
@@ -867,14 +867,14 @@ def spatial_filter(grid, radius_physical, px_x=1.0, px_y=1.0):
     # Use anisotropic kernel if px_x != px_y
 ```
 
-### BAD Forgetting to Handle NaN Values
+### Pitfall: Forgetting to Handle NaN Values
 
 ```python
-# WRONG BAD
+# Avoid
 def mean_filter(grid):
     return scipy.ndimage.uniform_filter(grid, size=5)  # Propagates NaNs!
 
-# CORRECT OK
+# Recommended
 def mean_filter(grid):
     # Use weighted approach to ignore NaNs
     valid = ~np.isnan(grid)
@@ -889,15 +889,15 @@ def mean_filter(grid):
     return result
 ```
 
-### BAD Not Using Mask Parameter
+### Pitfall: Ignoring the `mask` Parameter
 
 ```python
-# WRONG BAD
+# Avoid
 def filter_function(grid, sigma):
     # Processes entire grid, ignoring user's ROI selection
     return gaussian_filter(grid, sigma)
 
-# CORRECT OK
+# Recommended
 def filter_function(grid, sigma, mask=None):
     if mask is not None:
         result = grid.copy()
@@ -976,4 +976,3 @@ graph TD
 - [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - API documentation for all processing functions
 - [GUI Integration Guide](docs/GUI_INTEGRATION.md) - How to use processing in the GUI
 - [Quick Reference](docs/QUICK_REFERENCE.md) - Function cheat sheet
-

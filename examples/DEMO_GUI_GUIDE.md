@@ -38,8 +38,8 @@ difference map reflects only the true fracture topography.
 
 2. **Inspect holes**
    - In each tab, circular white (NaN) patches are visible — simulated
-     measurement artefacts.
-   - *Processing dialog → Hole filling* (nearest-neighbour) on both tabs.
+     measurement artifacts.
+   - *Processing dialog → Hole filling* (nearest-neighbor) on both tabs.
 
 3. **Switch to Alignment view**
    - Click the *Alignment* icon or select it from the toolbar.
@@ -50,7 +50,7 @@ difference map reflects only the true fracture topography.
    - *Processing → Remove relative tilt* — fits and subtracts a plane from
      the difference map.
    - *Processing → Remove relative offset* — zeros the mean height difference.
-   - The difference map should now appear flat, centred near 0 µm.
+   - The difference map should now appear flat, centered near 0 µm.
 
 5. **Quantitative check**
    - Hover over the difference map; the status bar shows local height values.
@@ -68,7 +68,7 @@ difference map reflects only the true fracture topography.
 
 **Scenario.**  Two conjugate faces of a mode-I fatigue fracture.  The surfaces
 are already free of systematic tilt.  The difference map encodes the
-**crack-opening displacement (COD)**: near-zero values in the left-centre
+**crack-opening displacement (COD)**: near-zero values in the left-center
 region correspond to the last contact front (crack arrest zone); larger values
 near the edges indicate the fully separated fatigue region.
 
@@ -86,12 +86,12 @@ near the edges indicate the fully separated fatigue region.
 
 4. **Inspect the difference map**
    - The Alignment view shows a smooth gradient from deep blue (low COD, left
-     centre) through yellow to red (high COD, edges).
-   - The colour scale represents local COD in µm.
+     center) through yellow to red (high COD, edges).
+   - The color scale represents local COD in µm.
 
 5. **Build a contact map**
    - Switch to *Profile / Cross-section* view.
-   - Place a horizontal section line across the surface centre.
+   - Place a horizontal section line across the surface center.
    - In the profile panel set the *Separation* slider to **8 µm** (strict
      threshold): the contact region appears highlighted in the profile.
    - Increase the threshold to **15 µm** to include the transitional fringe.
@@ -100,7 +100,7 @@ near the edges indicate the fully separated fatigue region.
 
 6. **Visualise in 3D**
    - The 3D view shows Surface A with the contact region overlaid as a
-     colour mask.
+     color mask.
 
 7. **Export**
    - *File → Export contact map* saves the binary contact mask as a CSV.

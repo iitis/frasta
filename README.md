@@ -6,6 +6,33 @@ The toolbox provides tools for masking, interpolation-based hole filling, manual
 
 FRASTA-toolbox is implemented in Python using PyQt5 and pyqtgraph, and is intended for applications in materials science, fracture mechanics, tribology, biomedical engineering, and related research domains.
 
+## Start here
+
+If you are new to the project, use the documentation in this order:
+
+1. Read the [Quick Start Guide](docs/QUICK_START_GUI.md) to launch the GUI and walk through the first demo workflows.
+2. Return to this README for installation details, supported formats, and troubleshooting.
+3. Use the [documentation index](docs/README.md) to choose more detailed user or developer guides.
+
+## What the software does
+
+FRASTA-toolbox helps you:
+
+- import structured fracture-surface scans,
+- clean and level the data,
+- align opposing surfaces,
+- inspect difference and contact maps,
+- extract cross-sectional profiles,
+- export results for later analysis or reporting.
+
+## Who this README is for
+
+This README is the main entry point for:
+
+- first-time users who need installation and a quick orientation,
+- returning users who need a reminder about supported data formats,
+- contributors who need links to the detailed user and developer guides.
+
 ## Project structure
 
 - **Data structures**: `frasta/core/`
@@ -29,26 +56,31 @@ The main FRASTA workflow assumes regular height-map data. This matches the typic
 
 ## Typical workflow (GUI)
 
+The usual GUI workflow is:
+
 1. Import one or more fracture-surface scans in CSV (XYZ grid) format.
 2. Apply basic preprocessing:
-   - define region of interest (ROI),
-    - adjust value range using histogram thresholding,
-   - use the mouse wheel over the histogram to zoom its visible value range,
-   - drag the histogram background horizontally to pan the zoomed range,
-   - use the manual `Min` / `Max` fields beside the histogram for precise threshold values,
-   - use the `Hide below Min` and `Hide above Max` toggles to choose independently whether low and high out-of-range values should be masked or rendered with boundary colors,
-   - choose grayscale or a false-color palette directly from the main toolbar,
-   - fill missing data if necessary.
+   - Define a region of interest (ROI).
+   - Adjust the value range using histogram thresholding.
+   - Use the mouse wheel over the histogram to zoom its visible value range.
+   - Drag the histogram background horizontally to pan the zoomed range.
+   - Use the manual `Min` / `Max` fields beside the histogram for precise threshold values.
+   - Use the `Hide below Min` and `Hide above Max` toggles to choose independently whether low and high out-of-range values should be masked or rendered with boundary colors.
+   - Choose grayscale or a false-color palette directly from the main toolbar.
+   - Fill missing data if necessary.
 3. Apply advanced processing steps:
-   - Use **Processing** menu for filtering, leveling, transforms
-   - Active ROI is used automatically by local processing and registration operations; geometric transforms still apply to the full grid
-   - Interactive dialogs guide parameter selection
-   - Processed and registered results consistently offer a choice between replacing the current scan and creating a derived tab
-   - See [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details
+   - Use the **Processing** menu for filtering, leveling, and transforms.
+   - The active ROI is used automatically by local processing and registration operations; geometric transforms still apply to the full grid.
+   - Interactive dialogs guide parameter selection.
+   - Processed and registered results consistently offer a choice between replacing the current scan and creating a derived tab.
+   - See the [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details.
 4. Align two opposing fracture surfaces using interactive translation and rotation.
    - The comparison window can prefill manual alignment with a fast ICP-based translation+rotation estimate.
 5. Place cross-sectional profiles to inspect local deviations and contacts.
 6. Export aligned data, profiles, and measurements for further analysis or documentation.
+
+If you want a guided walkthrough with demo datasets, start with the
+[Quick Start Guide](docs/QUICK_START_GUI.md).
 
 ## Advanced processing
 
@@ -76,7 +108,12 @@ FRASTA-toolbox includes advanced processing algorithms for surface preparation a
   (`Sa`, `Sq`, `Sz`) and extracted profiles (`Ra`, `Rq`, `Rz`) available from
   the Python processing API and from lightweight GUI summary dialogs
 
-**Documentation:**
+## Documentation map
+
+Use these guides depending on what you need:
+
+- [Quick Start Guide](docs/QUICK_START_GUI.md) - best starting point for first-time GUI users
+- [Documentation Index](docs/README.md) - overview of the user and developer documentation
 - [Advanced Processing Guide](docs/ADVANCED_PROCESSING.md) - detailed API documentation
 - [GUI Integration Guide](docs/GUI_INTEGRATION.md) - using advanced processing in the GUI
 - [Methods Overview](docs/METHODS.md) - computational workflow and assumptions
@@ -137,44 +174,44 @@ Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph,
 
 ## Installation
 
+If you only want to get the GUI running, the fastest path is:
+
+1. Create a virtual environment.
+2. Install dependencies from `requirements.txt`.
+3. Run `python main.py` from the repository root.
+
+The platform-specific commands are listed below.
+
 ### Windows
 
-* create virtual environment:
-`python -m venv .venv`
-
-* activate:
-`.venv\Scripts\activate.bat`
-
-* install packages:
-`.venv\Scripts\pip.exe install -r requirements.txt`
-
-* generate `requirements.txt`:
-`.venv\Scripts\pip.exe freeze > requirements.txt`
+- Create a virtual environment:
+  `python -m venv .venv`
+- Activate it:
+  `.venv\Scripts\activate.bat`
+- Install packages:
+  `.venv\Scripts\pip.exe install -r requirements.txt`
+- Regenerate `requirements.txt` when needed:
+  `.venv\Scripts\pip.exe freeze > requirements.txt`
 
 ### Linux and macOS
 
-* create virtual environment:
-`python -m venv .venv`
+- Create a virtual environment:
+  `python -m venv .venv`
+- Activate it:
+  `source .venv/bin/activate`
+- Install packages:
+  `./.venv/bin/pip install -r requirements.txt`
+- Regenerate `requirements.txt` when needed:
+  `./.venv/bin/pip freeze > requirements.txt`
 
-* activate:
-`source .venv/bin/activate`
+## Other useful commands
 
-* install packages:
-`./.venv/bin/pip install -r requirements.txt`
-
-* generate `requirements.txt`:
-`./.venv/bin/pip freeze > requirements.txt`
-
-## Other useful commands:
-
-* create distribution package on Windows:
-`.venv\Scripts\python.exe -m PyInstaller --add-data "icons;icons" main.py`
-
-* create distribution package on Linux or macOS:
-`./.venv/bin/python -m PyInstaller --add-data "icons:icons" main.py`
-
-* run tests:
-`./.venv/bin/python -m pytest -v -s`
+- Create a distribution package on Windows:
+  `.venv\Scripts\python.exe -m PyInstaller --add-data "icons;icons" main.py`
+- Create a distribution package on Linux or macOS:
+  `./.venv/bin/python -m PyInstaller --add-data "icons:icons" main.py`
+- Run tests:
+  `./.venv/bin/python -m pytest -v -s`
 
 ## Troubleshooting
 
@@ -203,9 +240,8 @@ Large regular grids increase both memory use and processing time. Crop invalid b
 ## Developer documentation
 
 For contributors and developers:
+
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design principles
-- **[Coding conventions](agent-docs/conventions/README.md)** - Detailed coding standards by module
-  - [Processing algorithms](agent-docs/conventions/processing/algorithms.md) - Required reading for algorithm development
-  - [File I/O patterns](agent-docs/conventions/io/) - Loader/exporter conventions
-  - [GUI development](agent-docs/conventions/gui/) - Dialog and widget patterns
-  - [General standards](agent-docs/conventions/general/) - Naming, imports, logging
+- Review the module structure in `frasta/core`, `frasta/io`, `frasta/processing`, and `frasta/gui` before adding new features.
+- Keep processing logic in `frasta/processing` and keep GUI code focused on orchestration and presentation.
+- Follow the patterns already used in nearby modules when extending loaders, processing functions, dialogs, or viewers.

@@ -1,78 +1,85 @@
 # FRASTA Advanced Processing - Quick Reference
 
-## Szybka ściągawka
+This cheat sheet summarizes the most commonly used advanced-processing
+functions in FRASTA-toolbox.
 
-### Filtracja
+Use it as a quick reminder after you already know the workflow. If you are
+launching the software for the first time, start with
+[`QUICK_START_GUI.md`](QUICK_START_GUI.md) instead.
+
+## Filtering
 
 ```python
 from frasta.processing import (
-    bilateral_filter,           # edge-preserving
+    bilateral_filter,           # edge-preserving smoothing
     median_filter_nan_aware,    # outlier removal
     robust_gaussian_filter,     # robust smoothing
     morphological_opening,      # remove peaks
     morphological_closing       # fill valleys
 )
 
-# Edge-preserving smoothing (najlepsze dla pęknięć!)
-smoothed = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0, 
-                           px_x=px_x, px_y=px_y)
+# Edge-preserving smoothing; useful for fracture surfaces
+smoothed = bilateral_filter(
+    grid, sigma_spatial=5.0, sigma_range=10.0, px_x=px_x, px_y=px_y
+)
 
-# Usuń spike'y
+# Remove isolated spikes
 cleaned = median_filter_nan_aware(grid, size=5.0, px_x=px_x, px_y=px_y)
 
-# Robust Gaussian
-filtered = robust_gaussian_filter(grid, sigma=10.0, px_x=px_x, 
-                                 iterations=3, threshold=3.0)
+# Robust Gaussian smoothing with iterative outlier rejection
+filtered = robust_gaussian_filter(
+    grid, sigma=10.0, px_x=px_x, iterations=3, threshold=3.0
+)
 ```
 
 ---
 
-### Levelowanie i korekcje
+## Leveling and Corrections
 
 ```python
 from frasta.processing import (
-    level_by_plane,             # remove tilt
-    remove_polynomial_form,     # remove curvature
-    threshold_grid             # value masking
+    level_by_plane,          # remove tilt
+    remove_polynomial_form,  # remove curvature
+    threshold_grid           # value masking
 )
 
-# Usuń przechyłkę (tilt)
-leveled = level_by_plane(grid, method='least_squares')  # szybka
-leveled = level_by_plane(grid, method='robust')         # odporna
+# Remove tilt
+leveled = level_by_plane(grid, method='least_squares')  # fast
+leveled = level_by_plane(grid, method='robust')         # more outlier-resistant
 
-# Usuń krzywizny, wypaczenia
+# Remove curvature or warping
 flattened = remove_polynomial_form(grid, order=2)  # quadratic
 flattened = remove_polynomial_form(grid, order=3)  # cubic
 
 # Threshold outliers
 mean, std = np.nanmean(grid), np.nanstd(grid)
-filtered = threshold_grid(grid, low=mean-3*std, high=mean+3*std)
+filtered = threshold_grid(grid, low=mean - 3 * std, high=mean + 3 * std)
 ```
 
 ---
 
-### Transformacje
+## Geometric Transforms
 
 ```python
 from frasta.processing import (
-    rotate_grid,                # rotate
-    rescale_grid,              # change resolution
-    crop_to_valid_region,      # crop
-    auto_register_surfaces,    # auto-align
-    apply_registration         # apply transform
+    rotate_grid,             # rotate
+    rescale_grid,            # change resolution
+    crop_to_valid_region,    # crop
+    auto_register_surfaces,  # auto-align
+    apply_registration       # apply transform
 )
 
-# Obrót
+# Rotate
 rotated, xi, yi, px_x, px_y = rotate_grid(grid, 45, xi, yi, px_x, px_y)
 
-# Zmiana rozdzielczości
-high_res, xi, yi, px_x, px_y = rescale_grid(grid, 2.0, xi, yi, px_x, px_y)  # 2x
-low_res, xi, yi, px_x, px_y = rescale_grid(grid, 0.5, xi, yi, px_x, px_y)   # 0.5x
+# Change resolution
+high_res, xi, yi, px_x, px_y = rescale_grid(grid, 2.0, xi, yi, px_x, px_y)
+low_res, xi, yi, px_x, px_y = rescale_grid(grid, 0.5, xi, yi, px_x, px_y)
 
-# Przytnij do valid data
+# Crop to valid data
 cropped, xi, yi, px_x, px_y = crop_to_valid_region(grid, xi, yi, px_x, px_y)
 
-# Auto-wyrównanie
+# Automatic alignment
 params = auto_register_surfaces(surf1, surf2, method='correlation')
 aligned, xi, yi, px_x, px_y = apply_registration(
     surf2, xi, yi, px_x, px_y,
@@ -83,117 +90,110 @@ aligned, xi, yi, px_x, px_y = apply_registration(
 
 ---
 
-## Typowe scenariusze
+## Typical Scenarios
 
-### Scenario 1: Czyszczenie surowych danych
+### Scenario 1: Cleaning raw data
 
 ```python
 # Pipeline: median -> level -> threshold
 cleaned = median_filter_nan_aware(raw, size=5.0, px_x=px_x)
 leveled = level_by_plane(cleaned, method='robust')
 mean, std = np.nanmean(leveled), np.nanstd(leveled)
-final = threshold_grid(leveled, low=mean-3*std, high=mean+3*std)
+final = threshold_grid(leveled, low=mean - 3 * std, high=mean + 3 * std)
 ```
 
----
-
-### Scenario 2: Pre-processing dla analizy chropowatości
+### Scenario 2: Preprocessing for roughness analysis
 
 ```python
-# Usuń formy geometryczne, zachowaj chropowatość
-leveled = level_by_plane(grid)                          # usuń tilt
-flattened = remove_polynomial_form(leveled, order=2)    # usuń bending
-# Teraz możesz policzyć Sa, Sq itp.
+# Remove geometric form while preserving roughness-scale variations
+leveled = level_by_plane(grid)
+flattened = remove_polynomial_form(leveled, order=2)
+# Roughness descriptors such as Sa and Sq can be computed afterwards
 ```
 
----
-
-### Scenario 3: Smoothing z zachowaniem krawędzi
+### Scenario 3: Edge-preserving smoothing
 
 ```python
-# Bilateral zamiast Gaussian dla powierzchni pęknięć
-smoothed = bilateral_filter(grid, sigma_spatial=5.0, sigma_range=10.0,
-                           px_x=px_x, px_y=px_y)
-# Krawędzie pęknięcia pozostają ostre!
+# Prefer bilateral filtering to standard Gaussian smoothing on fracture surfaces
+smoothed = bilateral_filter(
+    grid, sigma_spatial=5.0, sigma_range=10.0, px_x=px_x, px_y=px_y
+)
 ```
 
----
-
-### Scenario 4: Automatyczne wyrównanie dwóch powierzchni
+### Scenario 4: Automatic alignment of two surfaces
 
 ```python
-# 1. Znajdź parametry (quick correlation)
+# 1. Estimate alignment parameters
 params = auto_register_surfaces(surf1, surf2, method='correlation')
 
-# 2. Zastosuj
+# 2. Apply the transform
 aligned, xi, yi, px_x, px_y = apply_registration(
     surf2, xi, yi, px_x, px_y,
     translation=params['translation']
 )
 
-# 3. Dodaj fine-tuning z ICP jeśli potrzeba
+# 3. Add ICP refinement if needed
 params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 ```
 
 ---
 
-## Parametry - kiedy co używać?
+## Parameter Hints
 
 ### Bilateral filter
-- `sigma_spatial`: ~5-10 x pixel size (skala przestrzenna)
-- `sigma_range`: ~1-2 x noise level (tolerancja wysokości)
-- **Mniejsze sigma_range** = ostrzejsze krawędzie
+- `sigma_spatial`: approximately 5-10x the pixel size
+- `sigma_range`: approximately 1-2x the noise level
+- Smaller `sigma_range` values preserve sharper edges
 
 ### Median filter
-- `size`: 3-5 x pixel size dla spike removal
-- Zwiększaj size jeśli szum jest większy
+- `size`: approximately 3-5x the pixel size for spike removal
+- Increase `size` when noise spikes are larger
 
 ### Polynomial removal
-- `order=1`: tylko tilt (równoważne plane leveling)
-- `order=2`: standardowa korekcja (bending, warping)
-- `order=3`: tylko jeśli widzisz złożone krzywe
-- `order>3`: rzadko potrzebne, może usunąć rzeczywiste cechy!
+- `order=1`: tilt only; roughly equivalent to plane leveling
+- `order=2`: standard correction for bending or warping
+- `order=3`: use only when the surface clearly shows more complex curvature
+- `order>3`: rarely needed; may remove real surface features
 
 ### Auto-registration methods
-- `'correlation'`: tylko translacja, SZYBKA, dobra na start
-- `'icp'`: translacja + rotacja, WOLNIEJSZA, lepsza precyzja
+- `'correlation'`: translation only; fast; good for initial alignment
+- `'icp'`: translation plus rotation; slower; usually more precise
 
 ---
 
-## Pro Tips
+## Practical Tips
 
-1. **Zawsze sprawdzaj wynik wizualnie** - nie ufaj ślepo algorytmom
-2. **Zapisuj parametry** dla reprodukowalności
-3. **Bilateral filter jest wolny** - rozważ downsampling dla dużych danych
-4. **Robust methods** (RANSAC, robust gaussian) są wolniejsze ale lepsze przy outlierach
-5. **Order polynomial** - rozpocznij od 2, zwiększaj tylko gdy potrzeba
-6. **ICP wymaga dobrego overlap** - użyj correlation najpierw dla rough alignment
+1. Always inspect the result visually; automated routines are helpful but should
+   be treated as aids rather than unquestioned ground truth.
+2. Save parameters used in each workflow for reproducibility.
+3. Bilateral filtering is slow; consider downsampling very large grids first.
+4. Robust methods such as RANSAC and robust Gaussian filtering are slower but
+   usually better when outliers are present.
+5. Start polynomial correction with `order=2` and increase the order only when
+   the surface clearly requires it.
+6. ICP requires reasonable overlap; use correlation first for rough alignment.
 
 ---
 
-## Porównanie wydajności (dla 500x500 grid)
+## Approximate Performance on a 500x500 Grid
 
-| Funkcja | Czas | Uwagi |
+| Function | Time | Notes |
 |---------|------|-------|
-| `median_filter` | ~0.1s | Szybka |
-| `bilateral_filter` | ~30s | Wolna (Python impl) |
-| `level_by_plane` | <0.01s | Bardzo szybka |
-| `remove_polynomial_form` (order=2) | ~0.05s | Szybka |
-| `auto_register` (correlation) | ~0.5s | Średnia |
-| `auto_register` (ICP) | ~2-5s | Wolniejsza |
+| `median_filter` | ~0.1 s | Fast |
+| `bilateral_filter` | ~30 s | Slow; Python implementation |
+| `level_by_plane` | <0.01 s | Very fast |
+| `remove_polynomial_form` (order=2) | ~0.05 s | Fast |
+| `auto_register` (correlation) | ~0.5 s | Moderate |
+| `auto_register` (ICP) | ~2-5 s | Slower |
 
 ---
 
-## Przykłady w akcji
+## See Also
 
-Zobacz: `examples/advanced_processing.py`
+Run the example script:
 
 ```bash
 python examples/advanced_processing.py
 ```
 
----
-
-## Pełna dokumentacja
-
-[docs/ADVANCED_PROCESSING.md](ADVANCED_PROCESSING.md)
+For fuller descriptions, see [Advanced Processing Guide](ADVANCED_PROCESSING.md).

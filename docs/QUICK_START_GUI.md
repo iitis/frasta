@@ -1,9 +1,14 @@
-﻿# Quick Start — FRASTA-toolbox GUI
+# Quick Start — FRASTA-toolbox GUI
 
 This guide walks you through two representative workflows using the included
-synthetic demo datasets.  It is intended for first-time users who want to
-verify that the software is installed correctly and to explore the main
+synthetic demo datasets. It is intended for first-time users who want to
+verify that the software is installed correctly and explore the main
 interactive features before working with their own data.
+
+Use this guide when you want a practical first session in the GUI. If you only
+need a short list of operations, skip to [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md).
+If you want implementation details and computational assumptions, continue with
+[`METHODS.md`](METHODS.md) after finishing the workflows below.
 
 ---
 
@@ -32,7 +37,7 @@ interactive features before working with their own data.
 ## Workflow 1 — Tilt correction (`fracture_tilt_demo.npz`)
 
 **What it shows.** One surface carries a systematic linear ramp from a
-simulated unlevel mounting.  You will remove this tilt and observe the
+simulated unlevel mounting. You will remove this tilt and observe the
 flattened difference map.
 
 ### 1.1  Load the dataset
@@ -43,8 +48,8 @@ flattened difference map.
 ### 1.2  Inspect and fill measurement holes
 
 - In the **Surface\_A** tab you will see circular white patches — these are
-  NaN artefacts (simulated reflectance dropouts).
-- Open **Scan Actions → Fill holes** (nearest-neighbour); repeat for
+  NaN artifacts (simulated reflectance dropouts).
+- Open **Scan Actions → Fill holes** (nearest-neighbor); repeat for
   **Surface\_B\_tilted**.
 - The patches disappear and the height map becomes continuous.
 
@@ -62,12 +67,12 @@ flattened difference map.
   The gradient should largely disappear.
 - **Processing → Remove relative offset**  
   Removes the remaining constant height difference.
-- The difference map should now appear flat, centred near 0 µm.
+- The difference map should now appear flat, centered near 0 µm.
 
 ### 1.5  Quantitative check
 
 - Hover over the difference map; the status bar shows the local height value.
-- The displayed colour scale range should shrink substantially compared to the
+- The displayed color scale range should shrink substantially compared to the
   initial state (from ~±50 µm to ~±10 µm or less).
 
 ### 1.6  Save the session
@@ -85,7 +90,7 @@ flattened difference map.
 **What it shows.** Two conjugate fracture faces with a spatially varying
 crack-opening displacement (COD): near zero on the left (contact /
 crack-arrest line) and rising to ~35 µm on the right (fully separated
-fatigue region).  You will visualise the COD field and identify the contact
+fatigue region). You will visualize the COD field and identify the contact
 zone.
 
 ### 2.1  Load the dataset
@@ -102,13 +107,13 @@ zone.
 - Switch to **Alignment view**.
 - The difference map shows a smooth gradient from dark (low COD, left edge)
   to bright (high COD, right edge).
-- The colour scale represents local COD in µm; values near zero indicate
+- The color scale represents local COD in µm; values near zero indicate
   the crack-arrest line.
 
 ### 2.4  Build a contact map
 
 - Switch to **Cross-section / Profile view**.
-- Place a horizontal section line near the centre of the surface (drag
+- Place a horizontal section line near the center of the surface (drag
   across the 2D map).
 - In the profile panel, locate the **Separation** slider and set it to
   **8 µm** (conservative threshold): the left portion of the profile is
