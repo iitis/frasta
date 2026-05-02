@@ -63,6 +63,7 @@ class ScanTab(QtWidgets.QWidget):
         self.image_view.ui.menuBtn.hide()
         self.image_view.ui.histogram.hide()
         self.image_view.getView().setMenuEnabled(False)
+        self.image_view.getView().setAspectLocked(True)
         self.image_view.ui.graphicsView.setBackground((34, 34, 34))
 
         self.hist_widget = pg.PlotWidget(viewBox=HistogramViewBox())
@@ -87,6 +88,7 @@ class ScanTab(QtWidgets.QWidget):
         self.yi = None
         self.dx = None
         self.dy = None
+        self.unit = "µm"
 
         # Display settings
         self.is_colormap = False
@@ -168,6 +170,7 @@ class ScanTab(QtWidgets.QWidget):
             dy=self.dy,
             x0=x0,
             y0=y0,
+            unit=self.unit,
             vmin=grid_min,
             vmax=grid_max
         )
@@ -191,6 +194,7 @@ class ScanTab(QtWidgets.QWidget):
         self.yi = data.yi
         self.dx = data.dx
         self.dy = data.dy
+        self.unit = getattr(data, "unit", "µm")
         logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
         
         # Update histogram first to set threshold lines
@@ -351,7 +355,43 @@ class ScanTab(QtWidgets.QWidget):
             autoRange=False,
             levels=(vmin, vmax),
         )
+        self._apply_physical_image_rect()
         self.interactive_handler.clear_seed_points()
+
+    def _apply_physical_image_rect(self):
+        """Map the image to physical coordinates using scan spacing and origin."""
+        if self.grid is None:
+            return
+
+        image_item = self.image_view.getImageItem()
+        if image_item is None:
+            return
+
+        dx = self.dx if self.dx not in (None, 0) else 1.0
+        dy = self.dy if self.dy not in (None, 0) else 1.0
+        x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
+        y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
+        width = self.grid.shape[1] * dx
+        height = self.grid.shape[0] * dy
+        image_item.setRect(QtCore.QRectF(x0 - dx / 2.0, y0 - dy / 2.0, width, height))
+
+    def physical_to_indices(self, x_phys: float, y_phys: float) -> tuple[int, int]:
+        """Convert physical coordinates to nearest grid indices."""
+        dx = self.dx if self.dx not in (None, 0) else 1.0
+        dy = self.dy if self.dy not in (None, 0) else 1.0
+        x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
+        y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
+        x_idx = int(round((x_phys - x0) / dx))
+        y_idx = int(round((y_phys - y0) / dy))
+        return x_idx, y_idx
+
+    def indices_to_physical(self, x_idx: int, y_idx: int) -> tuple[float, float]:
+        """Convert grid indices to physical coordinates at pixel centers."""
+        dx = self.dx if self.dx not in (None, 0) else 1.0
+        dy = self.dy if self.dy not in (None, 0) else 1.0
+        x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
+        y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
+        return x0 + x_idx * dx, y0 + y_idx * dy
     
     def toggle_colormap(self):
         """Toggle between grayscale and color display."""

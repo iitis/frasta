@@ -25,8 +25,18 @@ File | Edit | Scan Actions | Processing | Tools | Help
                                    +-- Morphology & Leveling...
                                    +-- Geometric Transforms...
                                    +-- ----------------------
-                                   +-- Auto-Register Surfaces...
+                                    +-- Auto-Register Surfaces...
 ```
+
+The **Edit** menu also contains **ROI settings...**, a dialog for:
+- enabling or disabling the ROI,
+- choosing the ROI behavior mode,
+- selecting the ROI shape,
+- entering the ROI position and size numerically in physical units.
+
+The dialog supports two behavior modes:
+- **Shared across scans** - one ROI geometry reused for every scan
+- **Independent per scan** - each tab keeps its own ROI position and size
 
 ### Toolbar
 
@@ -39,7 +49,26 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 
 ## Feature Dialogs
 
-### 1. Advanced Filtering Dialog
+### 1. ROI Settings Dialog
+
+**Access**: `Edit -> ROI settings...`
+
+**Available controls**:
+- **ROI enabled** - show or hide the ROI
+- **Mode** - shared across scans or independent per scan
+- **Units** - native scan units or `mm` when available
+- **ROI type** - currently circle or rectangle
+- **Geometry** - center coordinates plus radius or width/height
+
+**Behavior**:
+- In **shared** mode, the dialog updates the common ROI used by all scans.
+- In **independent** mode, the dialog updates only the ROI stored for the current tab.
+- The ROI remains interactive in the image view after being created from the dialog.
+- The ROI geometry is stored in physical coordinates rather than pixel indices, so the displayed shape remains correct even when `dx` and `dy` differ.
+
+---
+
+### 2. Advanced Filtering Dialog
 
 **Access**: `Processing -> Advanced Filtering...` or toolbar button
 
@@ -71,12 +100,13 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 4. Adjust parameters (descriptions appear below each parameter)
 5. Click OK and choose whether to replace the current scan or create a derived tab
 
-**Result**: The filtered data can either replace the current scan or be stored in a new tab
-If an ROI is visible, filtering is automatically restricted to that ROI.
+**Result**: The filtered data can either replace the current scan or be stored in a new tab.
+If an ROI is visible, filtering is automatically restricted to that ROI. In
+per-scan mode, the ROI of the active tab is used.
 
 ---
 
-### 2. Morphology & Leveling Dialog
+### 3. Morphology & Leveling Dialog
 
 **Access**: `Processing -> Morphology & Leveling...` or toolbar button
 
@@ -105,12 +135,12 @@ If an ROI is visible, filtering is automatically restricted to that ROI.
 4. Configure parameters
 5. Click OK and choose whether to replace the current scan or create a derived tab
 
-**Result**: The processed data can either replace the current scan or be stored in a new tab
+**Result**: The processed data can either replace the current scan or be stored in a new tab.
 If an ROI is visible, leveling and polynomial form removal use that ROI automatically.
 
 ---
 
-### 3. Geometric Transforms Dialog
+### 4. Geometric Transforms Dialog
 
 **Access**: `Processing -> Geometric Transforms...` or toolbar button
 
@@ -145,7 +175,7 @@ If an ROI is visible, leveling and polynomial form removal use that ROI automati
 
 ---
 
-### 4. Auto-Register Surfaces Dialog
+### 5. Auto-Register Surfaces Dialog
 
 **Access**: `Processing -> Auto-Register Surfaces...`
 
@@ -163,7 +193,8 @@ If an ROI is visible, leveling and polynomial form removal use that ROI automati
 If cross-correlation is selected for scans of different sizes, the GUI offers
 cropping both scans to their shared rectangular area before registration.
 When a visible ROI is active, automatic registration is restricted to that ROI
-by masking everything outside the selected region.
+by masking everything outside the selected region. In per-scan mode, the
+reference and moving scans each use their own stored ROI geometry.
 
 **Workflow**:
 1. Load 2+ scans in different tabs

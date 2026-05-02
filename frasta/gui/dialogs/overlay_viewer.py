@@ -28,7 +28,15 @@ class OverlayViewer(QtWidgets.QWidget):
         on_accept (callable, optional): Callback when alignment is accepted.
     """
     
-    def __init__(self, scan1_data: Surface, scan2_data: Surface, on_accept=None, parent=None):
+    def __init__(
+        self,
+        scan1_data: Surface,
+        scan2_data: Surface,
+        on_accept=None,
+        parent=None,
+        reference_tab=None,
+        moving_tab=None,
+    ):
         """Initialize the overlay viewer.
         
         Args:
@@ -43,6 +51,8 @@ class OverlayViewer(QtWidgets.QWidget):
         self.create_gui()
 
         self.on_accept = on_accept
+        self.reference_tab = reference_tab
+        self.moving_tab = moving_tab
 
         self.scan1_data = scan1_data
         self.scan2_data = scan2_data
@@ -536,8 +546,14 @@ class OverlayViewer(QtWidgets.QWidget):
         parent = self.parent()
         roi_controller = getattr(parent, "roi_controller", None) if parent is not None else None
         if roi_controller is not None:
-            reference_mask = roi_controller.create_mask(*reference_grid.shape)
-            moving_mask = roi_controller.create_mask(*moving_grid.shape)
+            reference_mask = roi_controller.create_mask(
+                *reference_grid.shape,
+                tab=self.reference_tab,
+            )
+            moving_mask = roi_controller.create_mask(
+                *moving_grid.shape,
+                tab=self.moving_tab,
+            )
             if isinstance(reference_mask, np.ndarray) and isinstance(moving_mask, np.ndarray):
                 reference_roi = self._crop_to_mask_bounds(reference_grid, reference_mask)
                 moving_roi = self._crop_to_mask_bounds(moving_grid, moving_mask)

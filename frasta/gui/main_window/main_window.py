@@ -79,6 +79,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         widget = self.tabs.widget(index)
         if widget is not None:
+            self.roi_controller.remove_tab_state(widget)
             self.tabs.removeTab(index)
             widget.deleteLater()
 
@@ -121,11 +122,14 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             ScanTab: Newly created and selected scan tab.
         """
+        source_tab = self.current_tab()
         tab = ScanTab()
         unique_title = self.make_unique_tab_title(title)
         self.tabs.addTab(tab, unique_title)
         self.tabs.setCurrentWidget(tab)
         tab.set_surface(surface)
+        self.roi_controller.initialize_tab_roi_state(tab, source_tab=source_tab)
+        self.roi_controller.move_roi_to_current_tab(self.tabs.currentIndex())
         return tab
 
     def prompt_result_target(

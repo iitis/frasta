@@ -106,7 +106,7 @@ class ProcessingController:
         roi_controller = getattr(self.main_window, "roi_controller", None)
         if roi_controller is None:
             return None
-        mask = roi_controller.create_mask(*shape)
+        mask = roi_controller.create_mask(*shape, tab=self.main_window.current_tab())
         if isinstance(mask, np.ndarray):
             return mask
         return None
@@ -142,7 +142,7 @@ class ProcessingController:
         if tab is None or tab.grid is None:
             return
         h, w = tab.grid.shape
-        mask = self.main_window.roi_controller.create_mask(h, w)
+        mask = self.main_window.roi_controller.create_mask(h, w, tab=tab)
         tab.repair_grid(mask=mask)
 
     def show_surface_roughness_summary(self):

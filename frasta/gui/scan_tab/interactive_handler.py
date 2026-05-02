@@ -53,8 +53,7 @@ class InteractiveHandler:
         # Get click coordinates
         vb = self.parent_tab.image_view.getView()
         mouse_point = vb.mapSceneToView(event.scenePos())
-        x = int(round(mouse_point.x()))
-        y = int(round(mouse_point.y()))
+        x, y = self.parent_tab.physical_to_indices(mouse_point.x(), mouse_point.y())
         
         if not (0 <= x < grid.shape[1] and 0 <= y < grid.shape[0]):
             return
@@ -138,7 +137,8 @@ class InteractiveHandler:
             view_box: PyQtGraph ViewBox to add marker
         """
         self.seed_points.append((y, x))
-        scatter = pg.ScatterPlotItem([x], [y], size=10, brush=pg.mkBrush('r'))
+        x_phys, y_phys = self.parent_tab.indices_to_physical(x, y)
+        scatter = pg.ScatterPlotItem([x_phys], [y_phys], size=10, brush=pg.mkBrush('r'))
         view_box.addItem(scatter)
     
     def _get_zero_point_value(self, x: int, y: int) -> float:

@@ -60,7 +60,9 @@ The usual GUI workflow is:
 
 1. Import one or more fracture-surface scans in CSV (XYZ grid) format.
 2. Apply basic preprocessing:
-   - Define a region of interest (ROI).
+   - Define a region of interest (ROI) from `Edit -> ROI settings...`.
+   - Choose whether the ROI should stay shared across scans or become independent per scan.
+   - Adjust ROI type, position, and size numerically in physical units, with optional display in `mm` when available.
    - Adjust the value range using histogram thresholding.
    - Use the mouse wheel over the histogram to zoom its visible value range.
    - Drag the histogram background horizontally to pan the zoomed range.
@@ -71,6 +73,7 @@ The usual GUI workflow is:
 3. Apply advanced processing steps:
    - Use the **Processing** menu for filtering, leveling, and transforms.
    - The active ROI is used automatically by local processing and registration operations; geometric transforms still apply to the full grid.
+   - In shared mode, all scans use the same ROI geometry. In per-scan mode, each tab keeps its own ROI position and size.
    - Interactive dialogs guide parameter selection.
    - Processed and registered results consistently offer a choice between replacing the current scan and creating a derived tab.
    - See the [GUI Integration Guide](docs/GUI_INTEGRATION.md) for details.

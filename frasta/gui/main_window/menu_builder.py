@@ -58,8 +58,7 @@ class MenuBuilder:
             # ROI actions
             "del_outside": QtWidgets.QAction("outside of the mask", self.main_window),
             "del_inside": QtWidgets.QAction("inside of the mask", self.main_window),
-            "show_mask": QtWidgets.QAction("Show/hide the circle mask", self.main_window),
-            "show_rmask": QtWidgets.QAction("Show/hide the rectangle mask", self.main_window),
+            "roi_settings": QtWidgets.QAction("ROI settings...", self.main_window),
         }
 
         # Set icons
@@ -86,13 +85,13 @@ class MenuBuilder:
         # Set checkable
         self.actions["colormap"].setCheckable(True)
         self.actions["colormap"].setChecked(False)
-        
         # Set tooltips for advanced processing actions
         self.actions["filter"].setToolTip("Apply advanced filtering (bilateral, median, morphological)")
         self.actions["morphology"].setToolTip("Level surface and remove polynomial forms")
         self.actions["transform"].setToolTip("Rotate, rescale, or crop grid")
         self.actions["register"].setToolTip("Automatically align two surfaces")
         self.actions["roughness"].setToolTip("Show minimal Sa, Sq, and Sz summary for the current scan")
+        self.actions["roi_settings"].setToolTip("Choose ROI mode, shape, position, and size")
     
     def connect_actions(self):
         """Connect all actions to their respective handlers."""
@@ -128,8 +127,7 @@ class MenuBuilder:
         # ROI actions
         self.actions["del_outside"].triggered.connect(roi_ctrl.del_outside_mask)
         self.actions["del_inside"].triggered.connect(roi_ctrl.del_inside_mask)
-        self.actions["show_mask"].triggered.connect(roi_ctrl.show_circle_roi)
-        self.actions["show_rmask"].triggered.connect(roi_ctrl.show_rectangle_roi)
+        self.actions["roi_settings"].triggered.connect(roi_ctrl.open_roi_settings_dialog)
         
         # View actions
         self.actions["zero"].triggered.connect(self.main_window.set_zero_point_mode)
@@ -152,7 +150,7 @@ class MenuBuilder:
                 "exit"
             ]),
             ("&Edit", [
-                "show_mask", "show_rmask",
+                "roi_settings",
                 ("delete", [
                     "del_outside",
                     "del_inside"

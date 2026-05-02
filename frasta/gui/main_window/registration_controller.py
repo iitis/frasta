@@ -78,7 +78,7 @@ class RegistrationController:
             moving_grid[:common_height, :common_width],
         )
 
-    def _apply_roi_mask_if_needed(self, reference_grid, moving_grid):
+    def _apply_roi_mask_if_needed(self, reference_grid, moving_grid, ref_tab=None, mov_tab=None):
         """Restrict automatic registration to the active ROI when present.
 
         Args:
@@ -92,8 +92,8 @@ class RegistrationController:
         if roi_controller is None:
             return reference_grid, moving_grid
 
-        reference_mask = roi_controller.create_mask(*reference_grid.shape)
-        moving_mask = roi_controller.create_mask(*moving_grid.shape)
+        reference_mask = roi_controller.create_mask(*reference_grid.shape, tab=ref_tab)
+        moving_mask = roi_controller.create_mask(*moving_grid.shape, tab=mov_tab)
         if (
             reference_mask is None or moving_mask is None or
             not isinstance(reference_mask, np.ndarray) or
@@ -118,14 +118,14 @@ class RegistrationController:
             return None
         return grid[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
 
-    def _extract_roi_subgrids_if_possible(self, reference_grid, moving_grid):
+    def _extract_roi_subgrids_if_possible(self, reference_grid, moving_grid, ref_tab=None, mov_tab=None):
         """Crop both grids to the active ROI bounds when ROI is available."""
         roi_controller = getattr(self.main_window, "roi_controller", None)
         if roi_controller is None:
             return reference_grid, moving_grid, False
 
-        reference_mask = roi_controller.create_mask(*reference_grid.shape)
-        moving_mask = roi_controller.create_mask(*moving_grid.shape)
+        reference_mask = roi_controller.create_mask(*reference_grid.shape, tab=ref_tab)
+        moving_mask = roi_controller.create_mask(*moving_grid.shape, tab=mov_tab)
         if (
             not isinstance(reference_mask, np.ndarray) or
             not isinstance(moving_mask, np.ndarray)
@@ -220,7 +220,9 @@ class RegistrationController:
             tab1.get_surface(),
             tab2.get_surface(),
             on_accept=partial(receive_aligned_grids, idx1=idx1, idx2=idx2),
-            parent=self.main_window
+            parent=self.main_window,
+            reference_tab=tab1,
+            moving_tab=tab2,
         )
 
         self.viewer.setWindowTitle(f"Comparison: {names[idx1]} vs {names[idx2]}")
@@ -337,6 +339,8 @@ class RegistrationController:
         reference_grid, moving_grid, used_roi_subgrids = self._extract_roi_subgrids_if_possible(
             ref_tab.grid,
             mov_tab.grid,
+            ref_tab=ref_tab,
+            mov_tab=mov_tab,
         )
         registration_inputs = self._crop_to_common_area_if_needed(
             type("GridHolder", (), {"grid": reference_grid})(),
@@ -347,7 +351,12 @@ class RegistrationController:
             return
         reference_grid, moving_grid = registration_inputs
         if not used_roi_subgrids:
-            reference_grid, moving_grid = self._apply_roi_mask_if_needed(reference_grid, moving_grid)
+            reference_grid, moving_grid = self._apply_roi_mask_if_needed(
+                reference_grid,
+                moving_grid,
+                ref_tab=ref_tab,
+                mov_tab=mov_tab,
+            )
         if np.all(np.isnan(reference_grid)) or np.all(np.isnan(moving_grid)):
             QtWidgets.QMessageBox.warning(
                 self.main_window,
