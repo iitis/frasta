@@ -8,25 +8,75 @@ from PyQt5 import QtWidgets
 class ROIDialog(QtWidgets.QDialog):
     """Dialog for editing ROI mode, shape, geometry, and display units."""
 
-    def __init__(self, roi_config: dict, unit_label: str, native_to_mm: float | None, parent=None):
+    UNIT_LADDER: list[tuple[str, str, float]] = [
+        ("nm", "Nanometers (nm)", 1e-6),
+        ("µm", "Micrometers (µm)", 1e-3),
+        ("mm", "Millimeters (mm)", 1.0),
+    ]
+
+    def __init__(self, roi_config: dict, unit_label: str, parent=None):
         """Initialize the ROI settings dialog.
 
         Args:
             roi_config (dict): Initial ROI configuration in native scan units.
             unit_label (str): Native physical unit label of the active scan.
-            native_to_mm (float | None): Multiplicative factor converting native
-                units to millimeters. ``None`` means millimeter conversion is unavailable.
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self.setWindowTitle("ROI settings")
-        self.unit_label = unit_label
-        self.native_to_mm = native_to_mm
+        self.unit_label = self._normalize_unit_label(unit_label)
+        self.display_unit_options = self._build_display_unit_options(self.unit_label)
         self._last_units_mode = "native"
         self._init_ui()
         self._load_config(roi_config)
         self._update_enabled_state()
         self._update_shape_fields()
+
+    @classmethod
+    def _normalize_unit_label(cls, unit_label: str | None) -> str:
+        """Map equivalent unit strings to the dialog's canonical labels."""
+        normalized = (unit_label or "").strip().lower()
+        alias_map = {
+            "nm": "nm",
+            "nanometer": "nm",
+            "nanometers": "nm",
+            "µm": "µm",
+            "um": "µm",
+            "micrometer": "µm",
+            "micrometers": "µm",
+            "mm": "mm",
+            "millimeter": "mm",
+            "millimeters": "mm",
+        }
+        return alias_map.get(normalized, unit_label or "native units")
+
+    @classmethod
+    def _build_display_unit_options(cls, native_unit_label: str) -> dict[str, dict[str, float | str]]:
+        """Return available display units around the native unit when recognized."""
+        options: dict[str, dict[str, float | str]] = {
+            "native": {
+                "label": f"Native ({native_unit_label})",
+                "suffix": native_unit_label,
+                "factor": 1.0,
+            }
+        }
+
+        canonical_units = [entry[0] for entry in cls.UNIT_LADDER]
+        if native_unit_label not in canonical_units:
+            return options
+
+        native_index = canonical_units.index(native_unit_label)
+        candidate_indices = [native_index - 1, native_index + 1]
+        for index in candidate_indices:
+            if 0 <= index < len(cls.UNIT_LADDER):
+                token, label, mm_factor = cls.UNIT_LADDER[index]
+                native_mm_factor = cls.UNIT_LADDER[native_index][2]
+                options[token] = {
+                    "label": label,
+                    "suffix": token,
+                    "factor": native_mm_factor / mm_factor,
+                }
+        return options
 
     def _init_ui(self):
         """Build the dialog widgets."""
@@ -38,9 +88,8 @@ class ROIDialog(QtWidgets.QDialog):
         self.mode_combo.addItem("Shared across scans", "global")
         self.mode_combo.addItem("Independent per scan", "per_scan")
         self.units_combo = QtWidgets.QComboBox(self)
-        self.units_combo.addItem(f"Native ({self.unit_label})", "native")
-        if self.native_to_mm is not None:
-            self.units_combo.addItem("Millimeters (mm)", "mm")
+        for token, option in self.display_unit_options.items():
+            self.units_combo.addItem(str(option["label"]), token)
         self.units_combo.currentIndexChanged.connect(self._reload_geometry_for_units)
         self.enabled_checkbox = QtWidgets.QCheckBox("ROI enabled", self)
         self.enabled_checkbox.toggled.connect(self._update_enabled_state)
@@ -104,16 +153,14 @@ class ROIDialog(QtWidgets.QDialog):
     def _native_to_display(self, value: float, units_mode: str | None = None) -> float:
         """Convert a native-unit value to the currently selected display units."""
         mode = self.units_combo.currentData() if units_mode is None else units_mode
-        if mode == "mm" and self.native_to_mm is not None:
-            return value * self.native_to_mm
-        return value
+        factor = float(self.display_unit_options.get(mode, {}).get("factor", 1.0))
+        return value * factor
 
     def _display_to_native(self, value: float, units_mode: str | None = None) -> float:
         """Convert a displayed value back to native scan units."""
         mode = self.units_combo.currentData() if units_mode is None else units_mode
-        if mode == "mm" and self.native_to_mm is not None:
-            return value / self.native_to_mm
-        return value
+        factor = float(self.display_unit_options.get(mode, {}).get("factor", 1.0))
+        return value / factor
 
     def _load_config(self, roi_config: dict):
         """Populate widgets from the supplied ROI configuration."""
@@ -121,7 +168,7 @@ class ROIDialog(QtWidgets.QDialog):
         if mode_index >= 0:
             self.mode_combo.setCurrentIndex(mode_index)
 
-        preferred_units = "mm" if self.native_to_mm is not None else "native"
+        preferred_units = next((token for token in ("mm", "µm", "nm") if token in self.display_unit_options), "native")
         units_index = self.units_combo.findData(preferred_units)
         if units_index >= 0:
             self.units_combo.setCurrentIndex(units_index)
@@ -186,7 +233,8 @@ class ROIDialog(QtWidgets.QDialog):
 
     def _current_unit_suffix(self) -> str:
         """Return the unit suffix shown beside geometry labels."""
-        return "mm" if self.units_combo.currentData() == "mm" else self.unit_label
+        mode = self.units_combo.currentData()
+        return str(self.display_unit_options.get(mode, {}).get("suffix", self.unit_label))
 
     def _update_geometry_labels(self):
         """Refresh geometry labels to match the selected display units."""

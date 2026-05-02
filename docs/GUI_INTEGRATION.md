@@ -34,6 +34,12 @@ The **Edit** menu also contains **ROI settings...**, a dialog for:
 - selecting the ROI shape,
 - entering the ROI position and size numerically in physical units.
 
+The **Tools** menu also contains **Scan info...**, a read-only summary dialog for:
+- grid shape and physical spacing,
+- coordinate extents and origin,
+- valid-data coverage and basic height statistics,
+- stored scan metadata such as the imported scan name.
+
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
 - **Independent per scan** - each tab keeps its own ROI position and size
@@ -56,7 +62,7 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 **Available controls**:
 - **ROI enabled** - show or hide the ROI
 - **Mode** - shared across scans or independent per scan
-- **Units** - native scan units or `mm` when available
+- **Units** - the native scan unit plus a nearby smaller or larger unit when meaningful
 - **ROI type** - currently circle or rectangle
 - **Geometry** - center coordinates plus radius or width/height
 

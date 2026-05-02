@@ -62,7 +62,8 @@ The usual GUI workflow is:
 2. Apply basic preprocessing:
    - Define a region of interest (ROI) from `Edit -> ROI settings...`.
    - Choose whether the ROI should stay shared across scans or become independent per scan.
-   - Adjust ROI type, position, and size numerically in physical units, with optional display in `mm` when available.
+   - Adjust ROI type, position, and size numerically in physical units, with the dialog offering the native unit and nearby smaller or larger units when they are meaningful.
+   - Use `Tools -> Scan info...` whenever you need a quick summary of spacing, extents, valid-data coverage, and stored metadata for the active scan.
    - Adjust the value range using histogram thresholding.
    - Use the mouse wheel over the histogram to zoom its visible value range.
    - Drag the histogram background horizontally to pan the zoomed range.

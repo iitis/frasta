@@ -47,6 +47,7 @@ class MenuBuilder:
             "view3d": QtWidgets.QAction("View 3d...", self.main_window),
             "compare": QtWidgets.QAction("Scan positioning...", self.main_window),
             "profile": QtWidgets.QAction("Profile analysis...", self.main_window),
+            "scan_info": QtWidgets.QAction("Scan info...", self.main_window),
             "about": QtWidgets.QAction("About...", self.main_window),
             "exit": QtWidgets.QAction("Exit", self.main_window),
             # Advanced processing actions
@@ -92,6 +93,7 @@ class MenuBuilder:
         self.actions["register"].setToolTip("Automatically align two surfaces")
         self.actions["roughness"].setToolTip("Show minimal Sa, Sq, and Sz summary for the current scan")
         self.actions["roi_settings"].setToolTip("Choose ROI mode, shape, position, and size")
+        self.actions["scan_info"].setToolTip("Show geometry, statistics, and metadata for the active scan")
     
     def connect_actions(self):
         """Connect all actions to their respective handlers."""
@@ -123,6 +125,7 @@ class MenuBuilder:
         self.actions["compare"].triggered.connect(reg_ctrl.compare_scans)
         self.actions["profile"].triggered.connect(reg_ctrl.start_profile_analysis)
         self.actions["register"].triggered.connect(reg_ctrl.auto_register_surfaces)
+        self.actions["scan_info"].triggered.connect(self.main_window.show_scan_info_dialog)
         
         # ROI actions
         self.actions["del_outside"].triggered.connect(roi_ctrl.del_outside_mask)
@@ -163,7 +166,7 @@ class MenuBuilder:
                 "filter", "morphology", "transform", "roughness", "separator", "register"
             ]),
             ("&Tools", [
-                "compare", "profile"
+                "compare", "profile", "scan_info"
             ]),
             ("&Help", [
                 "about"

@@ -13,7 +13,7 @@ The main window delegates functionality to:
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtGui import QIcon
 
-from ..dialogs import AboutDialog
+from ..dialogs import AboutDialog, ScanInfoDialog
 from ..scan_tab import ScanTab
 from ..viewers import show_3d_viewer
 from ...core import Surface
@@ -224,6 +224,24 @@ class MainWindow(QtWidgets.QMainWindow):
         """Show about dialog."""
         dlg = AboutDialog(self)
         dlg.exec_()
+
+    def show_scan_info_dialog(self):
+        """Show a read-only dialog with information about the active scan."""
+        tab = self.current_tab()
+        if tab is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Scan information",
+                "Load or select a scan tab first.",
+            )
+            return
+
+        dialog = ScanInfoDialog(
+            tab=tab,
+            tab_title=self.tabs.tabText(self.tabs.currentIndex()),
+            parent=self,
+        )
+        dialog.exec_()
 
     def closeEvent(self, event):
         """Handle window close event.

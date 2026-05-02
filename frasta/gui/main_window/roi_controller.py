@@ -37,24 +37,6 @@ class ROIController:
         self._tab_roi_states: dict[int, dict] = {}
         self._last_tab = None
 
-    @staticmethod
-    def _unit_to_mm_factor(unit_label: str | None) -> float | None:
-        """Return a conversion factor from native scan units to millimeters."""
-        normalized = (unit_label or "").strip().lower()
-        mapping = {
-            "mm": 1.0,
-            "millimeter": 1.0,
-            "millimeters": 1.0,
-            "µm": 0.001,
-            "um": 0.001,
-            "micrometer": 0.001,
-            "micrometers": 0.001,
-            "nm": 0.000001,
-            "nanometer": 0.000001,
-            "nanometers": 0.000001,
-        }
-        return mapping.get(normalized)
-
     def _tab_physical_bounds(self, tab) -> tuple[float, float, float, float]:
         """Return physical bounds of a tab image in native units."""
         dx = tab.dx if tab.dx not in (None, 0) else 1.0
@@ -397,7 +379,6 @@ class ROIController:
         dialog = ROIDialog(
             self.get_dialog_config(tab),
             unit_label=getattr(tab, "unit", "µm"),
-            native_to_mm=self._unit_to_mm_factor(getattr(tab, "unit", "µm")),
             parent=self.main_window,
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
