@@ -112,6 +112,13 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.open_3d_action = QtWidgets.QAction('Show 3D view', self)
         self.open_3d_action.triggered.connect(self.visualization_manager.show_3d_view)
         view_menu.addAction(self.open_3d_action)
+
+        if self.visualization_manager.is_legacy_3d_viewer_enabled():
+            self.open_3d_legacy_action = QtWidgets.QAction('Show legacy 3D view', self)
+            self.open_3d_legacy_action.triggered.connect(
+                self.visualization_manager.show_legacy_3d_view
+            )
+            view_menu.addAction(self.open_3d_legacy_action)
         
         view_menu.addSeparator()
         

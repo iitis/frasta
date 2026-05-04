@@ -7,7 +7,11 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtCore import QPointF
 
-from ...viewers import show_3d_viewer
+from ...viewers import (
+    legacy_3d_viewer_enabled,
+    show_3d_viewer,
+    show_point_3d_viewer,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -33,7 +37,27 @@ class VisualizationManager:
     # ==========================================================================
     
     def show_3d_view(self):
-        """Open 3D viewer showing both scans and profile line."""
+        """Open the default 3D viewer showing both scans and the profile line."""
+        self._show_3d_view_with_backend(show_point_3d_viewer)
+
+    def show_3d_point_view(self):
+        """Open the default QOpenGLWidget-based 3D viewer for the current profile view."""
+        self._show_3d_view_with_backend(show_point_3d_viewer)
+
+    def show_legacy_3d_view(self):
+        """Open the legacy pyqtgraph-based 3D viewer for the current profile view."""
+        self._show_3d_view_with_backend(show_3d_viewer)
+
+    def is_legacy_3d_viewer_enabled(self) -> bool:
+        """Return whether the legacy 3D backend should be exposed in the GUI."""
+        return legacy_3d_viewer_enabled()
+
+    def _show_3d_view_with_backend(self, viewer_callable):
+        """Open a 3D viewer backend showing both scans and the profile line.
+
+        Args:
+            viewer_callable: Function used to display the chosen 3D backend.
+        """
         viewbox = self.parent.image_view.getView()
         x_range, y_range = viewbox.viewRange()
         
@@ -71,12 +95,11 @@ class VisualizationManager:
         else:
             line_points = None
         
-        show_3d_viewer(
+        viewer_callable(
             reference_grid=ref,
             adjusted_grid=adj,
             line_points=line_points,
             separation=self.parent.separation,
-            show_controls=True,
             pixel_size_x=self.parent.ref_pixel_um.x(),
             pixel_size_y=self.parent.ref_pixel_um.y()
         )

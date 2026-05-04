@@ -5,6 +5,7 @@ file formats without blocking the GUI.
 """
 
 from .csv_loader_worker import GridWorker
+from .mesh_geometry_worker import MeshGeometryWorker
 from .profile_loader_worker import ProfileWorker
 
-__all__ = ['GridWorker', 'ProfileWorker']
+__all__ = ['GridWorker', 'MeshGeometryWorker', 'ProfileWorker']

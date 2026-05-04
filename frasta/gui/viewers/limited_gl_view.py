@@ -7,6 +7,7 @@ in 3D visualizations.
 
 import numpy as np
 from pyqtgraph.opengl import GLViewWidget
+from PyQt5 import QtWidgets
 
 class LimitedGLView(GLViewWidget):
     """OpenGL view widget with constrained camera rotation angles.
@@ -36,6 +37,8 @@ class LimitedGLView(GLViewWidget):
             **kwargs: Additional keyword arguments for GLViewWidget.
         """
         super().__init__(*args, **kwargs)
+        if hasattr(self, "setUpdateBehavior"):
+            self.setUpdateBehavior(QtWidgets.QOpenGLWidget.NoPartialUpdate)
         self.az_range = azimuth_range
         self.el_range = elevation_range
         self.wrap_az = wrap_azimuth

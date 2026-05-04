@@ -179,6 +179,9 @@ frasta/
 |   |   |   +-- camera_controller.py
 |   |   +-- lod_surface.py
 |   |   +-- limited_gl_view.py
+|   |   +-- point_cloud_geometry.py
+|   |   +-- point_cloud_gl_widget.py
+|   |   +-- point_3d_viewer.py
 |   +-- widgets/
 |   |   +-- surface_control_panel.py
 |   |   +-- responsive_infinite_line.py
@@ -314,6 +317,9 @@ gui/
 |   |   +-- camera_controller.py   # Camera positioning
 |   +-- lod_surface.py        # Level-of-detail mesh for performance
 |   +-- limited_gl_view.py    # Custom view with limited controls
+|   +-- point_cloud_geometry.py # Grid-to-point-cloud conversion helpers
+|   +-- point_cloud_gl_widget.py # QOpenGLWidget 3D backend used by the default GUI path
+|   +-- point_3d_viewer.py    # Default 3D viewer wrapper with points/mesh modes
 +-- widgets/                # Reusable UI components
 |   +-- surface_control_panel.py
 |   +-- responsive_infinite_line.py

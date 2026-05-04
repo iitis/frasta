@@ -233,12 +233,11 @@ class TestVisualizationManager:
         mock_viewbox.viewRange = Mock(return_value=([0, 50], [0, 50]))
         mock_parent.image_view.getView.return_value = mock_viewbox
         
-        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_3d_viewer'):
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
             viz_manager.show_3d_view()
             
-            # Should call show_3d_viewer with grids
-            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_3d_viewer
-            show_3d_viewer.assert_called_once()
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            show_point_3d_viewer.assert_called_once()
     
     def test_show_3d_view_with_profile_line(self, viz_manager, mock_parent):
         """Test show_3d_view includes profile line points."""
@@ -250,12 +249,24 @@ class TestVisualizationManager:
         mock_parent.rr_full = np.array([10, 20, 30])
         mock_parent.cc_full = np.array([10, 20, 30])
         
-        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_3d_viewer'):
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
             viz_manager.show_3d_view()
             
-            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_3d_viewer
-            call_kwargs = show_3d_viewer.call_args[1]
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            call_kwargs = show_point_3d_viewer.call_args[1]
             assert call_kwargs['line_points'] is not None
+
+    def test_show_3d_point_view_uses_point_backend(self, viz_manager, mock_parent):
+        """Test show_3d_point_view opens the experimental point backend."""
+        mock_viewbox = Mock()
+        mock_viewbox.viewRange = Mock(return_value=([0, 50], [0, 50]))
+        mock_parent.image_view.getView.return_value = mock_viewbox
+
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
+            viz_manager.show_3d_point_view()
+
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            show_point_3d_viewer.assert_called_once()
     
     def test_show_preview_creates_window(self, viz_manager, mock_parent):
         """Test show_preview creates preview window."""

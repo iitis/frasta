@@ -233,6 +233,33 @@ When packaging with PyInstaller, include the `icons` directory using the platfor
 
 Check that the system has a working OpenGL-capable desktop session. Remote, headless, or software-rendered sessions may not provide the OpenGL features required by `pyqtgraph.opengl`.
 
+On Windows systems with fractional display scaling, OpenGL views may also show
+partially updated or clipped content if Qt is started without consistent
+High-DPI handling. The application now enables Qt High-DPI scaling explicitly
+at startup and requests full-buffer updates for its OpenGL widgets to reduce
+white borders, clipped viewports, and partially refreshed 3D frames.
+
+An experimental point-based 3D backend based on `QOpenGLWidget` is also
+available in `frasta.gui.viewers.point_3d_viewer`. It is intended for
+performance experiments on large regular grids and currently focuses on point
+cloud rendering rather than shaded surface meshes. In the GUI it is exposed as
+the default `Tools -> View 3d...` action and from the profile viewer as the
+default 3D backend. To reduce startup latency, the point viewer opens first
+with a coarser stride and then refines the point density progressively.
+Point colors are mapped on the GPU from height values and the active display
+range using a compact lookup texture instead of a per-point CPU color buffer.
+Inside that experimental window, the user can now switch between `Points` and
+`Shaded mesh`; the mesh mode uses the same GPU colormap pipeline and a more
+aggressive progressive stride schedule during startup. To avoid UI stalls on
+large comparison views, automatic mesh refinement currently stops at a coarser
+stride than the point mode, especially when two surfaces are rendered at once.
+During startup and refinement, the experimental mesh viewer now stays in a
+point-preview state until mesh geometry is ready for all currently visible
+surfaces at the active stride, avoiding partially mixed point/mesh frames.
+The older pyqtgraph-based 3D backend remains available only as a fallback path
+when the `FRASTA_ENABLE_LEGACY_3D_VIEWER=1` environment variable is set before
+launching the application.
+
 ### Qt platform plugin errors
 
 Recreate the virtual environment and reinstall dependencies from `requirements.txt`. On Linux, also check that the system Qt/X11 or Wayland libraries required by PyQt5 are installed.

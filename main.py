@@ -1,5 +1,5 @@
 import sys
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 from frasta.gui import MainWindow
 
 def set_logger():
@@ -12,6 +12,17 @@ def set_logger():
 
 def run():
     set_logger()
+    if hasattr(QtCore.Qt, "AA_EnableHighDpiScaling"):
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(QtCore.Qt, "AA_UseHighDpiPixmaps"):
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+    if hasattr(QtWidgets.QApplication, "setHighDpiScaleFactorRoundingPolicy") and hasattr(
+        QtCore.Qt,
+        "HighDpiScaleFactorRoundingPolicy",
+    ):
+        QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
     app = QtWidgets.QApplication(sys.argv)
     win = MainWindow()
     win.show()

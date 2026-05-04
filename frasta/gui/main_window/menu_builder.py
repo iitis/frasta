@@ -45,6 +45,7 @@ class MenuBuilder:
             "tilt": QtWidgets.QAction("Set tilt", self.main_window),
             "colormap": QtWidgets.QAction("Toggle colormap", self.main_window),
             "view3d": QtWidgets.QAction("View 3d...", self.main_window),
+            "view3d_legacy": QtWidgets.QAction("Legacy 3d view...", self.main_window),
             "compare": QtWidgets.QAction("Scan positioning...", self.main_window),
             "profile": QtWidgets.QAction("Profile analysis...", self.main_window),
             "scan_info": QtWidgets.QAction("Scan info...", self.main_window),
@@ -75,6 +76,7 @@ class MenuBuilder:
         self.actions["tilt"].setIcon(QIcon(resource_path("icons/icons8-tilt-64.png")))
         self.actions["colormap"].setIcon(QIcon(resource_path("icons/icons8-color-palette-50.png")))
         self.actions["view3d"].setIcon(QIcon(resource_path("icons/icons8-3d-80.png")))
+        self.actions["view3d_legacy"].setIcon(QIcon(resource_path("icons/icons8-3d-80.png")))
         self.actions["compare"].setIcon(QIcon(resource_path("icons/icons8-compare-50.png")))
         self.actions["profile"].setIcon(QIcon(resource_path("icons/icons8-graph-50.png")))
         self.actions["about"].setIcon(QIcon(resource_path("icons/icons8-about-50.png")))
@@ -137,6 +139,7 @@ class MenuBuilder:
         self.actions["tilt"].triggered.connect(self.main_window.set_tilt_mode)
         self.actions["colormap"].triggered.connect(self.main_window.toggle_colormap_current_tab)
         self.actions["view3d"].triggered.connect(self.main_window.view3d)
+        self.actions["view3d_legacy"].triggered.connect(self.main_window.view3d_legacy)
         self.actions["about"].triggered.connect(self.main_window.show_about_dialog)
     
     def create_menubar(self):
@@ -166,6 +169,7 @@ class MenuBuilder:
                 "filter", "morphology", "transform", "roughness", "separator", "register"
             ]),
             ("&Tools", [
+                "view3d",
                 "compare", "profile", "scan_info"
             ]),
             ("&Help", [
@@ -195,6 +199,11 @@ class MenuBuilder:
         for menu_name, items in menu_structure:
             menu = menubar.addMenu(menu_name)
             add_menu_items(menu, items)
+            if menu_name == "&Tools" and self.main_window.is_legacy_3d_viewer_enabled():
+                menu.insertAction(
+                    self.actions["compare"],
+                    self.actions["view3d_legacy"],
+                )
     
     def update_recent_files_menu(self):
         """Update recent files menu with current list."""
