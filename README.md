@@ -256,6 +256,15 @@ stride than the point mode, especially when two surfaces are rendered at once.
 During startup and refinement, the experimental mesh viewer now stays in a
 point-preview state until mesh geometry is ready for all currently visible
 surfaces at the active stride, avoiding partially mixed point/mesh frames.
+Both surfaces can also discard fragments outside the active `lo/hi` display
+range directly in the shader, so hiding out-of-range regions does not require
+rebuilding point or mesh geometry.
+The same window now supports PNG screenshot export with optional transparent
+background and an explicit output size in pixels, rendered from an off-screen
+OpenGL framebuffer rather than from the current desktop capture.
+It can also export a standalone PNG colorbar for the current reference or
+adjusted surface, using the active colormap and the current numeric `lo/hi`
+range labels.
 The older pyqtgraph-based 3D backend remains available only as a fallback path
 when the `FRASTA_ENABLE_LEGACY_3D_VIEWER=1` environment variable is set before
 launching the application.

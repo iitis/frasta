@@ -11,8 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCAN_VIEW_AZIMUTH_DEGREES = -90.0
-SCAN_VIEW_ELEVATION_DEGREES = 60.0
+SCAN_VIEW_AZIMUTH_DEGREES = 90.0
+SCAN_VIEW_ELEVATION_DEGREES = -89.0
 
 
 class CameraController:

@@ -20,6 +20,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
     """Render one or more point clouds with a simple orbit camera."""
 
     frameSwapped = QtCore.pyqtSignal()
+    DEFAULT_CAMERA_AZIMUTH = 90.0
+    DEFAULT_CAMERA_ELEVATION = -89.0
 
     def __init__(self, parent=None):
         """Initialize the OpenGL widget and camera state."""
@@ -46,8 +48,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
         self._camera_center = np.zeros(3, dtype=np.float32)
         self._camera_distance = 100.0
-        self._camera_azimuth = -90.0
-        self._camera_elevation = 60.0
+        # Match the 2D scan orientation used in tabs: the default view starts
+        # almost top-down, looking against the Z axis like the 2D image view.
+        self._camera_azimuth = self.DEFAULT_CAMERA_AZIMUTH
+        self._camera_elevation = self.DEFAULT_CAMERA_ELEVATION
         self._point_size = 2.0
         self._render_mode = "points"
         self._last_mouse_pos = QtCore.QPoint()
@@ -122,8 +126,17 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         colormap_lut: np.ndarray,
         value_range: tuple[float, float],
         visible: bool = True,
+        hide_outside_range: bool = False,
     ) -> None:
-        """Update the GPU colormap texture and range for a named point cloud."""
+        """Update the GPU colormap texture and range for a named point cloud.
+
+        Args:
+            name: Cloud identifier.
+            colormap_lut: Compact RGBA lookup table uploaded to the GPU.
+            value_range: Active ``(lo, hi)`` color range.
+            visible: Visibility toggle for the cloud.
+            hide_outside_range: If True, discard fragments outside ``lo/hi``.
+        """
         entry = self._clouds.get(name)
         if entry is None:
             self.set_cloud_data(name, np.empty((0, 3), dtype=np.float32))
@@ -132,6 +145,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
             hi = lo + 1e-6
         entry["visible"] = bool(visible)
+        entry["hide_outside_range"] = bool(hide_outside_range)
         entry["value_range"] = (float(lo), float(hi))
         entry["texture_id"] = self._upload_or_replace_texture(
             entry.get("texture_id"),
@@ -234,18 +248,50 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
     def paintGL(self) -> None:
         """Draw visible clouds and the optional profile line."""
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
-        projection = self._build_projection_matrix()
-        view = self._build_view_matrix()
-        mvp = projection * view
-
-        if self._render_mode == "mesh" and not self._should_use_point_fallback():
-            self._draw_meshes(mvp)
-        else:
-            self._draw_clouds(mvp)
-        self._draw_profile_plane(mvp)
-        self._draw_profile_line(mvp)
+        self._render_scene(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
         self.frameSwapped.emit()
+
+    def render_to_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+        transparent_background: bool = True,
+    ) -> QtGui.QImage:
+        """Render the current 3D scene to an image using an off-screen FBO.
+
+        Args:
+            width: Target output width in pixels. Defaults to current widget width.
+            height: Target output height in pixels. Defaults to current widget height.
+            transparent_background: If True, clear the off-screen buffer with
+                alpha 0 instead of the viewer background color.
+
+        Returns:
+            Rendered image in top-left origin orientation.
+        """
+        target_width = max(1, int(width or self.width() or 1))
+        target_height = max(1, int(height or self.height() or 1))
+
+        self.makeCurrent()
+        try:
+            fmt = QtGui.QOpenGLFramebufferObjectFormat()
+            fmt.setAttachment(QtGui.QOpenGLFramebufferObject.CombinedDepthStencil)
+            fbo = QtGui.QOpenGLFramebufferObject(target_width, target_height, fmt)
+            if not fbo.isValid():
+                raise RuntimeError("Failed to create OpenGL framebuffer for screenshot export.")
+
+            clear_rgba = (
+                (0.0, 0.0, 0.0, 0.0)
+                if transparent_background
+                else (0.08, 0.08, 0.10, 1.0)
+            )
+            fbo.bind()
+            self._render_scene(target_width, target_height, clear_rgba=clear_rgba)
+            image = fbo.toImage()
+            fbo.release()
+        finally:
+            self.doneCurrent()
+
+        return image
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Remember the last mouse position for drag interactions."""
@@ -297,6 +343,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             lo, hi = entry.get("value_range", (0.0, 1.0))
             self._program.setUniformValue("u_lo", float(lo))
             self._program.setUniformValue("u_hi", float(hi))
+            self._program.setUniformValue(
+                "u_hide_outside_range",
+                1 if entry.get("hide_outside_range", False) else 0,
+            )
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
             vbo_positions.bind()
@@ -357,7 +407,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
         self._plane_program.bind()
         self._plane_program.setUniformValue("u_mvp", mvp)
-        self._plane_program.setUniformValue("u_color", QtGui.QVector4D(0.5, 0.5, 0.7, 0.25))
+        self._plane_program.setUniformValue("u_color", QtGui.QVector4D(0.5, 0.5, 0.7, 0.5)) # RGBA with alpha for translucency
         pos_loc = self._plane_program.attributeLocation("a_position")
         self._plane_vbo.bind()
         self._plane_program.enableAttributeArray(pos_loc)
@@ -393,6 +443,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             lo, hi = entry.get("value_range", (0.0, 1.0))
             self._mesh_program.setUniformValue("u_lo", float(lo))
             self._mesh_program.setUniformValue("u_hi", float(hi))
+            self._mesh_program.setUniformValue(
+                "u_hide_outside_range",
+                1 if entry.get("hide_outside_range", False) else 0,
+            )
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
             vbo_positions.bind()
@@ -412,9 +466,9 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._mesh_program.disableAttributeArray(norm_loc)
         self._mesh_program.release()
 
-    def _build_projection_matrix(self) -> QtGui.QMatrix4x4:
-        """Create a perspective projection matrix."""
-        aspect_ratio = max(1.0, self.width() / max(1.0, float(self.height())))
+    def _build_projection_matrix(self, width: int, height: int) -> QtGui.QMatrix4x4:
+        """Create a perspective projection matrix for the given viewport size."""
+        aspect_ratio = max(1.0, width / max(1.0, float(height)))
         projection = QtGui.QMatrix4x4()
         projection.perspective(45.0, aspect_ratio, 0.1, max(10.0, self._camera_distance * 20.0))
         return projection
@@ -473,9 +527,17 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         span = np.max(maxs - mins)
         self._camera_distance = max(10.0, float(span) * 1.8)
 
-    def fit_camera_to_scene(self) -> None:
-        """Recenter the camera once using the current scene bounds."""
+    def fit_camera_to_scene(self, reset_orientation: bool = False) -> None:
+        """Recenter the camera using the current scene bounds.
+
+        Args:
+            reset_orientation: If True, restore the default azimuth and
+                elevation before updating the view.
+        """
         self._recenter_camera()
+        if reset_orientation:
+            self._camera_azimuth = self.DEFAULT_CAMERA_AZIMUTH
+            self._camera_elevation = self.DEFAULT_CAMERA_ELEVATION
         self.update()
 
     def _should_use_point_fallback(self) -> bool:
@@ -612,6 +674,33 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             raise RuntimeError(program.log())
         return program
 
+    def _render_scene(
+        self,
+        width: int,
+        height: int,
+        clear_rgba: tuple[float, float, float, float],
+    ) -> None:
+        """Render the full scene into the currently bound framebuffer.
+
+        Args:
+            width: Active framebuffer width in pixels.
+            height: Active framebuffer height in pixels.
+            clear_rgba: Background clear color including alpha.
+        """
+        GL.glViewport(0, 0, max(1, int(width)), max(1, int(height)))
+        GL.glClearColor(*clear_rgba)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        projection = self._build_projection_matrix(width, height)
+        view = self._build_view_matrix()
+        mvp = projection * view
+
+        if self._render_mode == "mesh" and not self._should_use_point_fallback():
+            self._draw_meshes(mvp)
+        else:
+            self._draw_clouds(mvp)
+        self._draw_profile_plane(mvp)
+        self._draw_profile_line(mvp)
+
 _POINT_VERTEX_SHADER = """
 #version 120
 attribute vec3 a_position;
@@ -620,11 +709,13 @@ uniform float u_point_size;
 uniform float u_lo;
 uniform float u_hi;
 varying float v_t;
+varying float v_z;
 
 void main() {
     gl_Position = u_mvp * vec4(a_position, 1.0);
     gl_PointSize = u_point_size;
     v_t = clamp((a_position.z - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
+    v_z = a_position.z;
 }
 """
 
@@ -632,9 +723,16 @@ void main() {
 _POINT_FRAGMENT_SHADER = """
 #version 120
 uniform sampler2D u_colormap;
+uniform float u_lo;
+uniform float u_hi;
+uniform int u_hide_outside_range;
 varying float v_t;
+varying float v_z;
 
 void main() {
+    if (u_hide_outside_range != 0 && (v_z < u_lo || v_z > u_hi)) {
+        discard;
+    }
     gl_FragColor = texture2D(u_colormap, vec2(v_t, 0.5));
 }
 """
@@ -691,11 +789,13 @@ uniform float u_lo;
 uniform float u_hi;
 varying float v_t;
 varying vec3 v_normal;
+varying float v_z;
 
 void main() {
     gl_Position = u_mvp * vec4(a_position, 1.0);
     v_t = clamp((a_position.z - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
     v_normal = normalize(a_normal);
+    v_z = a_position.z;
 }
 """
 
@@ -704,10 +804,17 @@ _MESH_FRAGMENT_SHADER = """
 #version 120
 uniform sampler2D u_colormap;
 uniform vec3 u_light_dir;
+uniform float u_lo;
+uniform float u_hi;
+uniform int u_hide_outside_range;
 varying float v_t;
 varying vec3 v_normal;
+varying float v_z;
 
 void main() {
+    if (u_hide_outside_range != 0 && (v_z < u_lo || v_z > u_hi)) {
+        discard;
+    }
     vec4 base = texture2D(u_colormap, vec2(v_t, 0.5));
     float diffuse = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.0);
     float lighting = 0.28 + 0.72 * diffuse;

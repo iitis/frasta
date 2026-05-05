@@ -8,7 +8,7 @@ incremental experiments.
 from __future__ import annotations
 
 import numpy as np
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .point_cloud_geometry import (
     build_colormap_lut,
@@ -19,6 +19,7 @@ from .point_cloud_geometry import (
 from .point_cloud_gl_widget import PointCloudGLWidget
 from .grid_3d_viewer.colormap_manager import ColormapManager
 from ..workers.mesh_geometry_worker import MeshGeometryWorker
+from ...utils import get_colormap
 
 import logging
 
@@ -91,6 +92,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.chk_auto_adj = QtWidgets.QCheckBox("Adj auto range")
         self.chk_auto_adj.setChecked(True)
         self.chk_link_ranges = QtWidgets.QCheckBox("Link ranges")
+        self.chk_hide_outside_ref = QtWidgets.QCheckBox("Ref hide outside")
+        self.chk_hide_outside_adj = QtWidgets.QCheckBox("Adj hide outside")
 
         self.spin_lo_ref = QtWidgets.QDoubleSpinBox()
         self.spin_hi_ref = QtWidgets.QDoubleSpinBox()
@@ -106,6 +109,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_point_size.setRange(1.0, 20.0)
         self.spin_point_size.setSingleStep(0.5)
         self.spin_point_size.setValue(2.0)
+        self.button_screenshot = QtWidgets.QPushButton("Screenshot...")
+        self.button_colorbar = QtWidgets.QPushButton("Colorbar...")
         self.checkbox_line = QtWidgets.QCheckBox("Show Profile Line")
         self.checkbox_line.setChecked(True)
         self.checkbox_plane = QtWidgets.QCheckBox("Show Section Plane")
@@ -121,11 +126,16 @@ class Point3DViewer(QtWidgets.QWidget):
             self.chk_link_ranges,
         )
 
+        self.point_size_label = QtWidgets.QLabel("Point size:")
+
         top_row.addWidget(QtWidgets.QLabel("Render:"))
         top_row.addWidget(self.combo_render_mode)
         top_row.addSpacing(12)
-        top_row.addWidget(QtWidgets.QLabel("Point size:"))
+        top_row.addWidget(self.point_size_label)
         top_row.addWidget(self.spin_point_size)
+        top_row.addSpacing(12)
+        top_row.addWidget(self.button_screenshot)
+        top_row.addWidget(self.button_colorbar)
         top_row.addStretch(1)
 
         ref_row.addWidget(self.checkbox_ref)
@@ -135,15 +145,20 @@ class Point3DViewer(QtWidgets.QWidget):
         ref_row.addWidget(self.spin_lo_ref)
         ref_row.addWidget(self.spin_hi_ref)
         ref_row.addWidget(self.chk_auto_ref)
+        ref_row.addWidget(self.chk_hide_outside_ref)
         ref_row.addStretch(1)
 
+        self.adj_cmap_label = QtWidgets.QLabel("Adj cmap:")
+        self.adj_lohi_label = QtWidgets.QLabel("Adj lo/hi:")
+
         adj_row.addWidget(self.checkbox_adj)
-        adj_row.addWidget(QtWidgets.QLabel("Adj cmap:"))
+        adj_row.addWidget(self.adj_cmap_label)
         adj_row.addWidget(self.combo_cmap_adj)
-        adj_row.addWidget(QtWidgets.QLabel("Adj lo/hi:"))
+        adj_row.addWidget(self.adj_lohi_label)
         adj_row.addWidget(self.spin_lo_adj)
         adj_row.addWidget(self.spin_hi_adj)
         adj_row.addWidget(self.chk_auto_adj)
+        adj_row.addWidget(self.chk_hide_outside_adj)
         adj_row.addWidget(self.chk_link_ranges)
         adj_row.addStretch(1)
 
@@ -166,11 +181,15 @@ class Point3DViewer(QtWidgets.QWidget):
         self.chk_auto_ref.toggled.connect(self._auto_ref_toggled)
         self.chk_auto_adj.toggled.connect(self._auto_adj_toggled)
         self.chk_link_ranges.toggled.connect(self._link_toggled)
+        self.chk_hide_outside_ref.toggled.connect(lambda _: self._refresh_clouds())
+        self.chk_hide_outside_adj.toggled.connect(lambda _: self._refresh_clouds())
         self.spin_lo_ref.valueChanged.connect(lambda _: self._range_changed("ref"))
         self.spin_hi_ref.valueChanged.connect(lambda _: self._range_changed("ref"))
         self.spin_lo_adj.valueChanged.connect(lambda _: self._range_changed("adj"))
         self.spin_hi_adj.valueChanged.connect(lambda _: self._range_changed("adj"))
         self.spin_point_size.valueChanged.connect(self.gl_widget.set_point_size)
+        self.button_screenshot.clicked.connect(self._export_screenshot)
+        self.button_colorbar.clicked.connect(self._export_colorbar)
         return panel
 
     def update_data(
@@ -203,10 +222,18 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_hi_adj.setVisible(has_adjusted)
         self.chk_auto_adj.setVisible(has_adjusted)
         self.chk_link_ranges.setVisible(has_adjusted)
+        self.chk_hide_outside_adj.setVisible(has_adjusted)
+        self.adj_cmap_label.setVisible(has_adjusted)
+        self.adj_lohi_label.setVisible(has_adjusted)
+        
+        has_profile = line_points is not None and len(line_points) >= 2
+        self.checkbox_line.setVisible(has_profile)
+        self.checkbox_plane.setVisible(has_profile)
+
         self._apply_render_mode_to_ui()
         self._refresh_clouds()
         self._refresh_profile_line()
-        self.gl_widget.fit_camera_to_scene()
+        self.gl_widget.fit_camera_to_scene(reset_orientation=True)
         self._schedule_next_refinement()
 
     def _refresh_clouds(self) -> None:
@@ -222,6 +249,7 @@ class Point3DViewer(QtWidgets.QWidget):
             self._build_lut(self.combo_cmap_ref),
             ref_range,
             visible=self.checkbox_ref.isChecked(),
+            hide_outside_range=self.chk_hide_outside_ref.isChecked(),
         )
         self.colormap_manager.set_data_cache((None, None, self._ref_grid), (None, None, self._adj_grid))
         self._sync_range_widgets("ref", self._ref_grid)
@@ -237,6 +265,7 @@ class Point3DViewer(QtWidgets.QWidget):
             self._build_lut(self.combo_cmap_adj),
             adj_range,
             visible=self.checkbox_adj.isChecked(),
+            hide_outside_range=self.chk_hide_outside_adj.isChecked(),
         )
         self._sync_range_widgets("adj", self._adj_grid)
 
@@ -289,7 +318,7 @@ class Point3DViewer(QtWidgets.QWidget):
 
         z_min = float(np.min(z_all))
         z_max = float(np.max(z_all))
-        margin = max(0.1 * (z_max - z_min), 1.0)
+        margin = max(0.2 * (z_max - z_min), 1.0)
         z_min -= margin
         z_max += margin
         plane_vertices = np.array(
@@ -474,6 +503,7 @@ class Point3DViewer(QtWidgets.QWidget):
         """Synchronize UI controls with the active render mode."""
         is_points = self._render_mode == "points"
         self.spin_point_size.setVisible(is_points)
+        self.point_size_label.setVisible(is_points)
         self.gl_widget.set_render_mode(self._render_mode)
         self.checkbox_ref.setText("Ref points" if is_points else "Ref mesh")
         self.checkbox_adj.setText("Adj points" if is_points else "Adj mesh")
@@ -551,6 +581,243 @@ class Point3DViewer(QtWidgets.QWidget):
             stride,
             message,
         )
+
+    def _export_screenshot(self) -> None:
+        """Export the current 3D view to a PNG image."""
+        current_width = max(1, self.gl_widget.width())
+        current_height = max(1, self.gl_widget.height())
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Export 3D screenshot")
+        form = QtWidgets.QFormLayout(dialog)
+
+        spin_width = QtWidgets.QSpinBox(dialog)
+        spin_width.setRange(1, 16384)
+        spin_width.setValue(current_width)
+
+        spin_height = QtWidgets.QSpinBox(dialog)
+        spin_height.setRange(1, 16384)
+        spin_height.setValue(current_height)
+
+        chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
+        chk_transparent.setChecked(True)
+
+        form.addRow("Width [px]:", spin_width)
+        form.addRow("Height [px]:", spin_height)
+        form.addRow("", chk_transparent)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        output_path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save 3D screenshot",
+            "frasta-3d-view.png",
+            "PNG Images (*.png)",
+        )
+        if not output_path:
+            return
+
+        image = self.gl_widget.render_to_image(
+            width=spin_width.value(),
+            height=spin_height.value(),
+            transparent_background=chk_transparent.isChecked(),
+        )
+        if not image.save(output_path, "PNG"):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Export failed",
+                "Could not save the screenshot to the selected file.",
+            )
+
+    def _export_colorbar(self) -> None:
+        """Export a standalone colorbar image for the current surface styling."""
+        has_adjusted = self._adj_grid is not None
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Export colorbar")
+        form = QtWidgets.QFormLayout(dialog)
+
+        combo_surface = QtWidgets.QComboBox(dialog)
+        combo_surface.addItem("Reference", userData="ref")
+        if has_adjusted:
+            combo_surface.addItem("Adjusted", userData="adj")
+
+        spin_width = QtWidgets.QSpinBox(dialog)
+        spin_width.setRange(32, 4096)
+        spin_width.setValue(220)
+
+        spin_height = QtWidgets.QSpinBox(dialog)
+        spin_height.setRange(64, 4096)
+        spin_height.setValue(900)
+
+        chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
+        chk_transparent.setChecked(True)
+
+        form.addRow("Surface:", combo_surface)
+        form.addRow("Width [px]:", spin_width)
+        form.addRow("Height [px]:", spin_height)
+        form.addRow("", chk_transparent)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        which = combo_surface.currentData() or "ref"
+        output_path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save colorbar",
+            f"frasta-{which}-colorbar.png",
+            "PNG Images (*.png)",
+        )
+        if not output_path:
+            return
+
+        image = self._build_colorbar_image(
+            which=which,
+            width=spin_width.value(),
+            height=spin_height.value(),
+            transparent_background=chk_transparent.isChecked(),
+        )
+        if not image.save(output_path, "PNG"):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Export failed",
+                "Could not save the colorbar to the selected file.",
+            )
+
+    def _build_colorbar_image(
+        self,
+        which: str,
+        width: int,
+        height: int,
+        transparent_background: bool,
+    ) -> QtGui.QImage:
+        """Build a standalone colorbar image for one surface.
+
+        Args:
+            which: Surface identifier, ``"ref"`` or ``"adj"``.
+            width: Output image width in pixels.
+            height: Output image height in pixels.
+            transparent_background: If True, use an alpha-0 background.
+
+        Returns:
+            A rendered QImage containing the colorbar and labels.
+        """
+        width = max(32, int(width))
+        height = max(64, int(height))
+
+        if which == "adj" and self._adj_grid is not None:
+            grid = self._adj_grid
+            combo = self.combo_cmap_adj
+            title = "Adjusted"
+        else:
+            which = "ref"
+            grid = self._ref_grid
+            combo = self.combo_cmap_ref
+            title = "Reference"
+
+        lo, hi = self._get_value_range(which, grid)
+        cmap_name = combo.currentText()
+
+        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
+        background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
+        image.fill(background)
+
+        painter = QtGui.QPainter(image)
+        try:
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+
+            text_color = QtGui.QColor(255, 255, 255) if transparent_background else QtGui.QColor(20, 20, 20)
+            border_color = QtGui.QColor(255, 255, 255, 180) if transparent_background else QtGui.QColor(40, 40, 40)
+            painter.setPen(text_color)
+
+            title_font = QtGui.QFont()
+            title_font.setBold(True)
+            title_font.setPointSize(11)
+            painter.setFont(title_font)
+            title_rect = QtCore.QRectF(12, 10, width - 24, 28)
+            painter.drawText(title_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, f"{title} ({cmap_name})")
+
+            label_font = QtGui.QFont()
+            label_font.setPointSize(10)
+            painter.setFont(label_font)
+
+            bar_top = 52
+            bar_bottom = max(bar_top + 40, height - 24)
+            bar_height = bar_bottom - bar_top
+            bar_width = max(28, min(40, width // 5))
+            bar_left = 20
+            bar_rect = QtCore.QRect(bar_left, bar_top, bar_width, bar_height)
+
+            gradient = QtGui.QLinearGradient(
+                float(bar_rect.left()),
+                float(bar_rect.bottom()),
+                float(bar_rect.left()),
+                float(bar_rect.top()),
+            )
+            if cmap_name == "None":
+                gradient.setColorAt(0.0, QtGui.QColor.fromRgbF(0.85, 0.85, 0.85, 1.0))
+                gradient.setColorAt(1.0, QtGui.QColor.fromRgbF(0.85, 0.85, 0.85, 1.0))
+            elif cmap_name == "RG":
+                gradient.setColorAt(0.0, QtGui.QColor(255, 0, 0))
+                gradient.setColorAt(1.0, QtGui.QColor(0, 255, 0))
+            elif cmap_name == "B&W":
+                gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0))
+                gradient.setColorAt(1.0, QtGui.QColor(255, 255, 255))
+            else:
+                cmap = get_colormap(None if cmap_name == "None" else cmap_name)
+                stops = cmap.getStops(mode="byte")
+                for position, rgba in zip(stops[0], stops[1]):
+                    gradient.setColorAt(
+                        float(position),
+                        QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
+                    )
+
+            painter.fillRect(bar_rect, gradient)
+            painter.setPen(QtGui.QPen(border_color, 1.0))
+            painter.drawRect(bar_rect)
+
+            tick_values = [hi, 0.5 * (lo + hi), lo]
+            tick_labels = [self._format_colorbar_value(value) for value in tick_values]
+            tick_positions = [bar_rect.top(), bar_rect.center().y(), bar_rect.bottom()]
+            label_left = bar_rect.right() + 12
+
+            painter.setPen(text_color)
+            for value, label, y in zip(tick_values, tick_labels, tick_positions):
+                painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + 8, int(y))
+                text_rect = QtCore.QRectF(label_left, y - 12, width - label_left - 12, 24)
+                painter.drawText(text_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label)
+        finally:
+            painter.end()
+
+        return image
+
+    @staticmethod
+    def _format_colorbar_value(value: float) -> str:
+        """Format one colorbar tick label compactly for export."""
+        if not np.isfinite(value):
+            return "nan"
+        magnitude = abs(float(value))
+        if magnitude >= 1e4 or (0 < magnitude < 1e-3):
+            return f"{value:.3e}"
+        return f"{value:.6f}".rstrip("0").rstrip(".")
 
     def _visible_cloud_names(self) -> list[str]:
         """Return cloud names that should participate in the current scene."""
