@@ -55,6 +55,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._point_size = 2.0
         self._render_mode = "points"
         self._last_mouse_pos = QtCore.QPoint()
+        self._resize_active = False
+        self._resize_debounce_timer = QtCore.QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.timeout.connect(self._finish_resize_interaction)
 
     def set_cloud_data(
         self,
@@ -251,8 +255,17 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
     def paintGL(self) -> None:
         """Draw visible clouds and the optional profile line."""
-        self._render_scene(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
+        if self._resize_active:
+            self._render_resize_placeholder(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
+        else:
+            self._render_scene(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
         self.frameSwapped.emit()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        """Debounce live-resize updates to reduce OpenGL driver pressure."""
+        self._resize_active = True
+        self._resize_debounce_timer.start(180)
+        super().resizeEvent(event)
 
     def render_to_image(
         self,
@@ -806,6 +819,29 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._draw_export_axes(mvp, axes_overlay)
         self._draw_profile_plane(mvp)
         self._draw_profile_line(mvp)
+
+    def _render_resize_placeholder(
+        self,
+        width: int,
+        height: int,
+        clear_rgba: tuple[float, float, float, float],
+    ) -> None:
+        """Render only a clean background while the user is actively resizing.
+
+        Continuous resize events can trigger a large number of full-scene
+        redraws and FBO reallocations inside QOpenGLWidget. On some Windows
+        drivers this can leave the OpenGL context in a corrupted visual state.
+        A cheap placeholder render during the resize interaction avoids that
+        pressure and restores the real scene once resizing stops briefly.
+        """
+        GL.glViewport(0, 0, max(1, int(width)), max(1, int(height)))
+        GL.glClearColor(*clear_rgba)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+
+    def _finish_resize_interaction(self) -> None:
+        """Resume normal scene rendering after resize input settles."""
+        self._resize_active = False
+        self.update()
 
     def _draw_export_axes(self, mvp: QtGui.QMatrix4x4, axes_overlay: dict[str, object]) -> None:
         """Draw an export-only X/Y frame directly in the 3D scene."""

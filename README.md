@@ -236,7 +236,9 @@ Check that the system has a working OpenGL-capable desktop session. Remote, head
 On Windows systems with fractional display scaling, OpenGL views may also show
 partially updated or clipped content if Qt is started without consistent
 High-DPI handling. The application now enables Qt High-DPI scaling explicitly
-at startup and requests full-buffer updates for its OpenGL widgets to reduce
+at startup, requests desktop OpenGL explicitly, installs a fixed OpenGL 2.1
+surface format with stable depth/stencil buffers, and requests full-buffer
+updates for its OpenGL widgets to reduce
 white borders, clipped viewports, and partially refreshed 3D frames.
 
 An experimental point-based 3D backend based on `QOpenGLWidget` is also
@@ -273,6 +275,10 @@ range labels.
 When the experimental 3D window is closed, it now explicitly releases its
 OpenGL buffers, textures, overlay geometry, and background mesh workers instead
 of keeping the previous viewer instance alive for reuse across later opens.
+During aggressive live-resize on some Windows GPU drivers, repeated full-scene
+redraws could also leave the 3D widget in a corrupted visual state. The
+experimental viewer now debounces resize interactions and temporarily renders
+only a clean background until the window size settles.
 The 2D scan tabs now support analogous export helpers: a PNG image of either
 the full grid or the current viewport, plus a standalone colorbar image with
 the active 2D colormap, current `lo/hi` labels, and an optional overlaid
