@@ -195,6 +195,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """Return whether the legacy 3D backend should be exposed in the GUI."""
         return legacy_3d_viewer_enabled()
 
+    def export_2d_image(self):
+        """Export the active 2D scan view as a PNG image."""
+        if tab := self.current_tab():
+            tab.export_2d_image()
+
+    def export_2d_colorbar(self):
+        """Export the active 2D scan colorbar as a PNG image."""
+        if tab := self.current_tab():
+            tab.export_2d_colorbar()
+
     def toggle_colormap_current_tab(self):
         """Toggle colormap for current tab."""
         if tab := self.current_tab():

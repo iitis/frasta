@@ -10,15 +10,17 @@ The widget delegates specific functionality to specialized components:
 - TransformOperations: Geometric transformations
 """
 
+from pathlib import Path
+
 import numpy as np
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
 from skimage.segmentation import flood
 from scipy.interpolate import griddata
 import trimesh
 
 from ...core import Surface
-from ...utils import get_lookup_table
+from ...utils import get_colormap, get_lookup_table
 from ...processing import fill_holes, remove_outliers, nan_aware_gaussian
 from ..widgets import HistogramViewBox
 
@@ -424,6 +426,452 @@ class ScanTab(QtWidgets.QWidget):
         if self.current_colormap == "metrology":
             return "Metrology"
         return self.current_colormap
+
+    def export_2d_image(self) -> None:
+        """Export either the full grid or the current viewport as a PNG image."""
+        if self.grid is None:
+            QtWidgets.QMessageBox.information(self, "No data", "Load a scan first.")
+            return
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Export 2D image")
+        form = QtWidgets.QFormLayout(dialog)
+
+        combo_source = QtWidgets.QComboBox(dialog)
+        combo_source.addItem("Full grid", userData="full")
+        combo_source.addItem("Current viewport", userData="viewport")
+
+        chk_transparent = QtWidgets.QCheckBox("Transparent hidden pixels", dialog)
+        chk_transparent.setChecked(True)
+
+        form.addRow("Source:", combo_source)
+        form.addRow("", chk_transparent)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        output_path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save 2D image",
+            "frasta-2d-image.png",
+            "PNG Images (*.png)",
+        )
+        if not output_path:
+            return
+
+        image = self.build_export_image(
+            source=combo_source.currentData() or "full",
+            transparent_background=chk_transparent.isChecked(),
+        )
+
+        # print(f"Exporting 2D image to {output_path} (source={combo_source.currentData()}, transparent={chk_transparent.isChecked()})")
+        # print(f"Image size: {image.width()}x{image.height()}, format: {image.format()}")
+        
+        self._save_png_image(image, output_path, "2D image")
+
+    def export_2d_colorbar(self) -> None:
+        """Export a standalone colorbar for the current 2D display settings."""
+        if self.grid is None:
+            QtWidgets.QMessageBox.information(self, "No data", "Load a scan first.")
+            return
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Export 2D colorbar")
+        form = QtWidgets.QFormLayout(dialog)
+
+        combo_source = QtWidgets.QComboBox(dialog)
+        combo_source.addItem("Full grid", userData="full")
+        combo_source.addItem("Current viewport", userData="viewport")
+
+        spin_width = QtWidgets.QSpinBox(dialog)
+        spin_width.setRange(32, 4096)
+        spin_width.setValue(220)
+
+        spin_height = QtWidgets.QSpinBox(dialog)
+        spin_height.setRange(64, 4096)
+        spin_height.setValue(900)
+
+        chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
+        chk_transparent.setChecked(True)
+
+        chk_histogram = QtWidgets.QCheckBox("Include histogram", dialog)
+        chk_histogram.setChecked(True)
+
+        form.addRow("Source:", combo_source)
+        form.addRow("Width [px]:", spin_width)
+        form.addRow("Height [px]:", spin_height)
+        form.addRow("", chk_transparent)
+        form.addRow("", chk_histogram)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        output_path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save 2D colorbar",
+            "frasta-2d-colorbar.png",
+            "PNG Images (*.png)",
+        )
+        if not output_path:
+            return
+
+        image = self.build_export_colorbar(
+            source=combo_source.currentData() or "full",
+            width=spin_width.value(),
+            height=spin_height.value(),
+            transparent_background=chk_transparent.isChecked(),
+            include_histogram=chk_histogram.isChecked(),
+        )
+        self._save_png_image(image, output_path, "2D colorbar")
+
+    def build_export_image(
+        self,
+        source: str = "full",
+        transparent_background: bool = True,
+    ) -> QtGui.QImage:
+        """Build a PNG-ready image matching the current 2D display settings.
+
+        Args:
+            source: ``"full"`` for the whole grid or ``"viewport"`` for the
+                current visible window.
+            transparent_background: If True, hidden or invalid pixels use alpha 0.
+
+        Returns:
+            RGBA image representing the current 2D view configuration.
+        """
+        image_data, vmin, vmax = self._build_display_array(source)
+        return self._display_array_to_qimage(image_data, vmin, vmax, transparent_background)
+
+    def build_export_colorbar(
+        self,
+        source: str = "full",
+        width: int = 220,
+        height: int = 900,
+        transparent_background: bool = True,
+        include_histogram: bool = True,
+    ) -> QtGui.QImage:
+        """Build a standalone colorbar image for the current 2D display.
+
+        Args:
+            source: ``"full"`` or ``"viewport"`` to match the exported image scope.
+            width: Output image width in pixels.
+            height: Output image height in pixels.
+            transparent_background: If True, use an alpha-0 canvas.
+            include_histogram: If True, draw the data histogram beside the bar.
+
+        Returns:
+            QImage containing the colorbar, labels, and optional histogram.
+        """
+        width = max(32, int(width))
+        height = max(64, int(height))
+        image_data, vmin, vmax = self._build_display_array(source)
+        values = self._get_histogram_values(image_data)
+
+        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
+        background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
+        image.fill(background)
+
+        painter = QtGui.QPainter(image)
+        try:
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+
+            text_color = QtGui.QColor(255, 255, 255) if transparent_background else QtGui.QColor(20, 20, 20)
+            border_color = QtGui.QColor(255, 255, 255, 180) if transparent_background else QtGui.QColor(40, 40, 40)
+            hist_color = QtGui.QColor(180, 180, 180, 170)
+
+            title_font = QtGui.QFont()
+            title_font.setBold(True)
+            title_font.setPointSize(11)
+            painter.setFont(title_font)
+            painter.setPen(text_color)
+            title_rect = QtCore.QRectF(12, 8, width - 24, 28)
+            painter.drawText(title_rect, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, self.unit)
+
+            bar_top = 48
+            bar_bottom = max(bar_top + 40, height - 24)
+            bar_height = bar_bottom - bar_top
+            bar_width = max(28, min(40, width // 5))
+            bar_left = 12
+            bar_rect = QtCore.QRect(bar_left, bar_top, bar_width, bar_height)
+
+            gradient = self._build_colorbar_gradient(bar_rect)
+            painter.fillRect(bar_rect, gradient)
+            painter.setPen(QtGui.QPen(border_color, 1.0))
+            painter.drawRect(bar_rect)
+
+            if include_histogram and values.size > 0:
+                hist_left = bar_rect.right() + 4
+                hist_width = max(20, min(60, width // 4))
+                hist_rect = QtCore.QRect(hist_left, bar_top, hist_width, bar_height)
+                self._draw_colorbar_histogram(painter, hist_rect, values, vmin, vmax, hist_color)
+
+            label_left = bar_rect.right() + (max(20, min(60, width // 4)) + 12 if include_histogram else 12)
+            self._draw_colorbar_ticks(painter, bar_rect, label_left, width, vmin, vmax, text_color, border_color)
+        finally:
+            painter.end()
+
+        return image
+
+    def _build_display_array(self, source: str) -> tuple[np.ndarray, float, float]:
+        """Return the display array used for image and colorbar export."""
+        grid = self._extract_export_grid(source)
+        vmin, vmax = self.histogram_manager.get_threshold_range()
+        if vmin is None or vmax is None:
+            data_min, data_max = self.histogram_manager.get_data_range()
+            vmin = 0.0 if data_min is None else float(data_min)
+            vmax = 1.0 if data_max is None else float(data_max)
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
+
+        image_data = grid.T.copy()
+        invalid_mask = np.isnan(image_data)
+        if self.hide_below_range:
+            image_data[image_data < vmin] = np.nan
+        else:
+            image_data[image_data < vmin] = vmin
+        if self.hide_above_range:
+            image_data[image_data > vmax] = np.nan
+        else:
+            image_data[image_data > vmax] = vmax
+        image_data[invalid_mask] = np.nan
+        return image_data, float(vmin), float(vmax)
+
+    def _display_array_to_qimage(
+        self,
+        image_data: np.ndarray,
+        vmin: float,
+        vmax: float,
+        transparent_background: bool,
+    ) -> QtGui.QImage:
+        """Convert a display-ready array into an ARGB image."""
+        if image_data.size == 0:
+            return QtGui.QImage(1, 1, QtGui.QImage.Format_ARGB32_Premultiplied)
+
+        normalized = np.clip((image_data - vmin) / max(vmax - vmin, 1e-9), 0.0, 1.0)
+        rgba = np.zeros(image_data.shape + (4,), dtype=np.uint8)
+        valid_mask = np.isfinite(image_data)
+
+        if self.is_colormap and self.current_colormap is not None:
+            lut = get_lookup_table(self.get_colormap_name(), 256)
+            lut_index = np.zeros(image_data.shape, dtype=np.int32)
+            lut_index[valid_mask] = np.round(normalized[valid_mask] * 255.0).astype(np.int32, copy=False)
+            sampled = lut[lut_index[valid_mask]]
+            if sampled.shape[1] >= 4:
+                rgba[valid_mask] = sampled[:, :4]
+            else:
+                rgba[valid_mask, :3] = sampled[:, :3]
+                rgba[valid_mask, 3] = 255
+        else:
+            gray = np.round(normalized * 255.0).astype(np.uint8, copy=False)
+            rgba[..., 0] = gray
+            rgba[..., 1] = gray
+            rgba[..., 2] = gray
+            rgba[..., 3] = np.where(valid_mask, 255, 0 if transparent_background else 255).astype(np.uint8)
+
+        if self.is_colormap and self.current_colormap is not None:
+            rgba[..., 3] = np.where(valid_mask, 255, 0 if transparent_background else 255).astype(np.uint8)
+        elif not transparent_background:
+            rgba[~valid_mask, :3] = 255
+
+        if transparent_background:
+            rgba[~valid_mask, 3] = 0
+        else:
+            rgba[~valid_mask, :3] = 255
+            rgba[~valid_mask, 3] = 255
+
+        image = QtGui.QImage(rgba.shape[1], rgba.shape[0], QtGui.QImage.Format_ARGB32)
+        for row_index in range(rgba.shape[0]):
+            scanline = image.scanLine(row_index)
+            scanline.setsize(image.bytesPerLine())
+            row_buffer = np.frombuffer(scanline, dtype=np.uint8, count=image.bytesPerLine())
+            row_buffer[: rgba.shape[1] * 4 : 4] = rgba[row_index, :, 2]
+            row_buffer[1 : rgba.shape[1] * 4 : 4] = rgba[row_index, :, 1]
+            row_buffer[2 : rgba.shape[1] * 4 : 4] = rgba[row_index, :, 0]
+            row_buffer[3 : rgba.shape[1] * 4 : 4] = rgba[row_index, :, 3]
+        return image
+
+    def _extract_export_grid(self, source: str) -> np.ndarray:
+        """Extract either the full grid or the current viewport fragment."""
+        if self.grid is None:
+            return np.empty((0, 0), dtype=np.float32)
+        if source != "viewport":
+            return np.asarray(self.grid, dtype=np.float32)
+
+        x_min, x_max, y_min, y_max = self._current_viewport_indices()
+        return np.asarray(self.grid[y_min:y_max + 1, x_min:x_max + 1], dtype=np.float32)
+
+    def _current_viewport_indices(self) -> tuple[int, int, int, int]:
+        """Return current visible index bounds in the 2D view."""
+        view = self.image_view.getView()
+        x_range, y_range = view.viewRange()
+        x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
+        y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
+        dx = self.dx if self.dx not in (None, 0) else 1.0
+        dy = self.dy if self.dy not in (None, 0) else 1.0
+
+        x_start = int(np.floor((min(x_range) - (x0 - dx / 2.0)) / dx))
+        x_stop = int(np.ceil((max(x_range) - (x0 - dx / 2.0)) / dx)) - 1
+        y_start = int(np.floor((min(y_range) - (y0 - dy / 2.0)) / dy))
+        y_stop = int(np.ceil((max(y_range) - (y0 - dy / 2.0)) / dy)) - 1
+
+        x_start = max(0, x_start)
+        y_start = max(0, y_start)
+        x_stop = min(self.grid.shape[1] - 1, x_stop)
+        y_stop = min(self.grid.shape[0] - 1, y_stop)
+        return x_start, x_stop, y_start, y_stop
+
+    def _get_histogram_values(self, image_data: np.ndarray) -> np.ndarray:
+        """Return finite displayed values contributing to the colorbar histogram."""
+        return np.asarray(image_data[np.isfinite(image_data)], dtype=np.float32)
+
+    def _build_colorbar_gradient(self, bar_rect: QtCore.QRect) -> QtGui.QLinearGradient:
+        """Return a vertical gradient matching the active 2D colormap."""
+        gradient = QtGui.QLinearGradient(
+            float(bar_rect.left()),
+            float(bar_rect.bottom()),
+            float(bar_rect.left()),
+            float(bar_rect.top()),
+        )
+        if not self.is_colormap or self.current_colormap is None:
+            gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0))
+            gradient.setColorAt(1.0, QtGui.QColor(255, 255, 255))
+            return gradient
+
+        cmap = get_colormap(self.get_colormap_name())
+        if cmap is None:
+            gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0))
+            gradient.setColorAt(1.0, QtGui.QColor(255, 255, 255))
+            return gradient
+
+        positions, colors = cmap.getStops(mode="byte")
+        for position, rgba in zip(positions, colors):
+            gradient.setColorAt(
+                float(position),
+                QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
+            )
+        return gradient
+
+    def _draw_colorbar_histogram(
+        self,
+        painter: QtGui.QPainter,
+        hist_rect: QtCore.QRect,
+        values: np.ndarray,
+        vmin: float,
+        vmax: float,
+        color: QtGui.QColor,
+    ) -> None:
+        """Draw a normalized histogram beside the colorbar."""
+        if values.size < 1 or vmax <= vmin:
+            return
+        counts, edges = np.histogram(values, bins=min(128, max(16, hist_rect.height() // 4)), range=(vmin, vmax))
+        if counts.size < 1 or np.max(counts) <= 0:
+            return
+
+        counts = counts.astype(np.float32)
+        counts /= float(np.max(counts))
+        if counts.size >= 5:
+            kernel = np.array([1.0, 2.0, 3.0, 2.0, 1.0], dtype=np.float32)
+            kernel /= np.sum(kernel)
+            counts = np.convolve(counts, kernel, mode="same")
+            counts /= max(float(np.max(counts)), 1e-9)
+        path = QtGui.QPainterPath()
+        path.moveTo(hist_rect.left(), hist_rect.bottom())
+        for idx, count in enumerate(counts):
+            y0 = hist_rect.bottom() - (edges[idx] - vmin) / (vmax - vmin) * hist_rect.height()
+            y1 = hist_rect.bottom() - (edges[idx + 1] - vmin) / (vmax - vmin) * hist_rect.height()
+            x = hist_rect.left() + count * hist_rect.width()
+            if idx == 0:
+                path.lineTo(x, y0)
+            path.lineTo(x, y1)
+        path.lineTo(hist_rect.left(), hist_rect.top())
+        path.closeSubpath()
+        painter.fillPath(path, QtGui.QBrush(color))
+        painter.setPen(QtGui.QPen(color.darker(130), 1.0))
+        painter.drawPath(path)
+
+    def _draw_colorbar_ticks(
+        self,
+        painter: QtGui.QPainter,
+        bar_rect: QtCore.QRect,
+        label_left: int,
+        image_width: int,
+        vmin: float,
+        vmax: float,
+        text_color: QtGui.QColor,
+        tick_color: QtGui.QColor,
+    ) -> None:
+        """Draw major and minor tick marks with labels beside the colorbar."""
+        painter.setPen(text_color)
+        label_font = QtGui.QFont()
+        label_font.setPointSize(10)
+        painter.setFont(label_font)
+
+        major_count = 6
+        minor_per_interval = 1
+        for major_index in range(major_count):
+            fraction = major_index / float(max(1, major_count - 1))
+            y = bar_rect.bottom() - fraction * bar_rect.height()
+            value = vmin + fraction * (vmax - vmin)
+            painter.setPen(QtGui.QPen(tick_color, 1.2))
+            painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + 10, int(y))
+            painter.setPen(text_color)
+            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 8, 24)
+            painter.drawText(
+                text_rect,
+                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                self._format_export_value(value),
+            )
+
+            if major_index >= major_count - 1:
+                continue
+            next_fraction = (major_index + 1) / float(max(1, major_count - 1))
+            for minor_index in range(1, minor_per_interval + 1):
+                local_fraction = minor_index / float(minor_per_interval + 1)
+                minor_fraction = fraction + (next_fraction - fraction) * local_fraction
+                minor_y = bar_rect.bottom() - minor_fraction * bar_rect.height()
+                painter.setPen(QtGui.QPen(tick_color, 1.0))
+                painter.drawLine(bar_rect.right() + 1, int(minor_y), bar_rect.right() + 6, int(minor_y))
+
+    @staticmethod
+    def _format_export_value(value: float) -> str:
+        """Format numeric labels compactly for export annotations."""
+        if not np.isfinite(value):
+            return "nan"
+        magnitude = abs(float(value))
+        if magnitude >= 1e4 or (0 < magnitude < 1e-3):
+            return f"{value:.3e}"
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+
+    def _save_png_image(self, image: QtGui.QImage, output_path: str, label: str) -> None:
+        """Save an image as PNG and show a detailed error on failure."""
+        path = Path(output_path)
+        if path.suffix.lower() != ".png":
+            path = path.with_suffix(".png")
+
+        writer = QtGui.QImageWriter(str(path), b"png")
+        if not writer.write(image):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Export failed",
+                f"Could not save the {label}.\n{writer.errorString()}",
+            )
 
     # ==========================================================================
     # Interactive Mode Methods

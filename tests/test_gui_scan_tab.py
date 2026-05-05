@@ -9,7 +9,7 @@ This module tests the scan tab components:
 import pytest
 import numpy as np
 from unittest.mock import Mock, MagicMock, patch, call
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
 from frasta.gui.scan_tab.histogram_manager import HistogramManager
@@ -284,6 +284,8 @@ class TestInteractiveHandler:
         tab.histogram_manager.set_threshold_values = Mock()
         tab.update_image = Mock()
         tab.update_histogram = Mock()
+        tab.physical_to_indices = Mock(side_effect=lambda x, y: (int(x), int(y)))
+        tab.indices_to_physical = Mock(side_effect=lambda x, y: (float(x), float(y)))
         return tab
     
     @pytest.fixture
@@ -677,3 +679,41 @@ class TestScanTabColormap:
         assert scan_tab.hide_above_range is True
         scan_tab.histogram_manager.set_out_of_range_visibility.assert_called_with(False, True)
         assert scan_tab.update_image.call_count >= 1
+
+    def test_build_export_image_returns_qimage(self, scan_tab):
+        """Export image builder should return a non-empty raster."""
+        scan_tab.grid = np.arange(12, dtype=float).reshape(3, 4)
+        scan_tab.xi = np.arange(4, dtype=float)
+        scan_tab.yi = np.arange(3, dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 11.0))
+
+        image = scan_tab.build_export_image(source="full", transparent_background=True)
+
+        assert isinstance(image, QtGui.QImage)
+        assert image.width() > 0
+        assert image.height() > 0
+
+    def test_build_export_colorbar_returns_requested_size(self, scan_tab):
+        """Colorbar builder should respect explicit output dimensions."""
+        scan_tab.grid = np.linspace(0.0, 1.0, 12, dtype=float).reshape(3, 4)
+        scan_tab.xi = np.arange(4, dtype=float)
+        scan_tab.yi = np.arange(3, dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 1.0))
+        scan_tab.is_colormap = True
+        scan_tab.current_colormap = "metrology"
+
+        image = scan_tab.build_export_colorbar(
+            source="full",
+            width=180,
+            height=640,
+            transparent_background=True,
+            include_histogram=True,
+        )
+
+        assert isinstance(image, QtGui.QImage)
+        assert image.width() == 180
+        assert image.height() == 640

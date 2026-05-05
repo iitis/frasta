@@ -258,13 +258,25 @@ point-preview state until mesh geometry is ready for all currently visible
 surfaces at the active stride, avoiding partially mixed point/mesh frames.
 Both surfaces can also discard fragments outside the active `lo/hi` display
 range directly in the shader, so hiding out-of-range regions does not require
-rebuilding point or mesh geometry.
+rebuilding point or mesh geometry. The 3D viewer now exposes separate
+`hide below` and `hide above` toggles per surface, mirroring the independent
+low/high masking controls already available in the 2D tabs.
 The same window now supports PNG screenshot export with optional transparent
 background and an explicit output size in pixels, rendered from an off-screen
-OpenGL framebuffer rather than from the current desktop capture.
+OpenGL framebuffer rather than from the current desktop capture. Screenshot
+export can also add an optional X/Y frame with tick labels, anchored near
+`Z = 0` inside the 3D scene so the frame follows depth relationships with the
+surface instead of always appearing on top.
 It can also export a standalone PNG colorbar for the current reference or
 adjusted surface, using the active colormap and the current numeric `lo/hi`
 range labels.
+When the experimental 3D window is closed, it now explicitly releases its
+OpenGL buffers, textures, overlay geometry, and background mesh workers instead
+of keeping the previous viewer instance alive for reuse across later opens.
+The 2D scan tabs now support analogous export helpers: a PNG image of either
+the full grid or the current viewport, plus a standalone colorbar image with
+the active 2D colormap, current `lo/hi` labels, and an optional overlaid
+histogram of the exported data range.
 The older pyqtgraph-based 3D backend remains available only as a fallback path
 when the `FRASTA_ENABLE_LEGACY_3D_VIEWER=1` environment variable is set before
 launching the application.

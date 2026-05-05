@@ -35,6 +35,8 @@ class MenuBuilder:
             "open": QtWidgets.QAction("Open...", self.main_window),
             "save_scan": QtWidgets.QAction("Save current scan...", self.main_window),
             "save_multi": QtWidgets.QAction("Save multiple scans...", self.main_window),
+            "export_2d_image": QtWidgets.QAction("Export 2D image...", self.main_window),
+            "export_2d_colorbar": QtWidgets.QAction("Export 2D colorbar...", self.main_window),
             "fill": QtWidgets.QAction("Fill holes", self.main_window),
             "repair": QtWidgets.QAction("Remove holes and outliers", self.main_window),
             "flipUD": QtWidgets.QAction("Flip Up/Down", self.main_window),
@@ -67,6 +69,8 @@ class MenuBuilder:
         self.actions["open"].setIcon(QIcon(resource_path("icons/icons8-open-file1-50.png")))
         self.actions["save_scan"].setIcon(QIcon(resource_path("icons/icons8-save1-50.png")))
         self.actions["save_multi"].setIcon(QIcon(resource_path("icons/icons8-save2-50.png")))
+        self.actions["export_2d_image"].setIcon(QIcon(resource_path("icons/icons8-save1-50.png")))
+        self.actions["export_2d_colorbar"].setIcon(QIcon(resource_path("icons/icons8-save1-50.png")))
         self.actions["repair"].setIcon(QIcon(resource_path("icons/icons8-job-50.png")))
         self.actions["flipUD"].setIcon(QIcon(resource_path("icons/flipUD.png")))
         self.actions["flipLR"].setIcon(QIcon(resource_path("icons/flipLR.png")))
@@ -109,6 +113,8 @@ class MenuBuilder:
         self.actions["open"].triggered.connect(file_ctrl.open_file)
         self.actions["save_scan"].triggered.connect(file_ctrl.save_single_scan)
         self.actions["save_multi"].triggered.connect(file_ctrl.save_multiple_scans)
+        self.actions["export_2d_image"].triggered.connect(self.main_window.export_2d_image)
+        self.actions["export_2d_colorbar"].triggered.connect(self.main_window.export_2d_colorbar)
         self.actions["exit"].triggered.connect(self.main_window.close)
         
         # Processing actions
@@ -151,6 +157,8 @@ class MenuBuilder:
                 "open",
                 "save_scan",
                 "save_multi",
+                "export_2d_image",
+                "export_2d_colorbar",
                 ("recent_menu", []),
                 "separator",
                 "exit"

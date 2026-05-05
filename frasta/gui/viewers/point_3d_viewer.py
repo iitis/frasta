@@ -34,6 +34,7 @@ class Point3DViewer(QtWidgets.QWidget):
         super().__init__(parent)
         self.setWindowTitle("3D Point Viewer (Experimental)")
         self.resize(900, 700)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
 
         self.colormap_manager = ColormapManager()
         self.gl_widget = PointCloudGLWidget(self)
@@ -92,8 +93,10 @@ class Point3DViewer(QtWidgets.QWidget):
         self.chk_auto_adj = QtWidgets.QCheckBox("Adj auto range")
         self.chk_auto_adj.setChecked(True)
         self.chk_link_ranges = QtWidgets.QCheckBox("Link ranges")
-        self.chk_hide_outside_ref = QtWidgets.QCheckBox("Ref hide outside")
-        self.chk_hide_outside_adj = QtWidgets.QCheckBox("Adj hide outside")
+        self.chk_hide_below_ref = QtWidgets.QCheckBox("Ref hide below")
+        self.chk_hide_above_ref = QtWidgets.QCheckBox("Ref hide above")
+        self.chk_hide_below_adj = QtWidgets.QCheckBox("Adj hide below")
+        self.chk_hide_above_adj = QtWidgets.QCheckBox("Adj hide above")
 
         self.spin_lo_ref = QtWidgets.QDoubleSpinBox()
         self.spin_hi_ref = QtWidgets.QDoubleSpinBox()
@@ -145,7 +148,8 @@ class Point3DViewer(QtWidgets.QWidget):
         ref_row.addWidget(self.spin_lo_ref)
         ref_row.addWidget(self.spin_hi_ref)
         ref_row.addWidget(self.chk_auto_ref)
-        ref_row.addWidget(self.chk_hide_outside_ref)
+        ref_row.addWidget(self.chk_hide_below_ref)
+        ref_row.addWidget(self.chk_hide_above_ref)
         ref_row.addStretch(1)
 
         self.adj_cmap_label = QtWidgets.QLabel("Adj cmap:")
@@ -158,7 +162,8 @@ class Point3DViewer(QtWidgets.QWidget):
         adj_row.addWidget(self.spin_lo_adj)
         adj_row.addWidget(self.spin_hi_adj)
         adj_row.addWidget(self.chk_auto_adj)
-        adj_row.addWidget(self.chk_hide_outside_adj)
+        adj_row.addWidget(self.chk_hide_below_adj)
+        adj_row.addWidget(self.chk_hide_above_adj)
         adj_row.addWidget(self.chk_link_ranges)
         adj_row.addStretch(1)
 
@@ -181,8 +186,10 @@ class Point3DViewer(QtWidgets.QWidget):
         self.chk_auto_ref.toggled.connect(self._auto_ref_toggled)
         self.chk_auto_adj.toggled.connect(self._auto_adj_toggled)
         self.chk_link_ranges.toggled.connect(self._link_toggled)
-        self.chk_hide_outside_ref.toggled.connect(lambda _: self._refresh_clouds())
-        self.chk_hide_outside_adj.toggled.connect(lambda _: self._refresh_clouds())
+        self.chk_hide_below_ref.toggled.connect(lambda _: self._refresh_clouds())
+        self.chk_hide_above_ref.toggled.connect(lambda _: self._refresh_clouds())
+        self.chk_hide_below_adj.toggled.connect(lambda _: self._refresh_clouds())
+        self.chk_hide_above_adj.toggled.connect(lambda _: self._refresh_clouds())
         self.spin_lo_ref.valueChanged.connect(lambda _: self._range_changed("ref"))
         self.spin_hi_ref.valueChanged.connect(lambda _: self._range_changed("ref"))
         self.spin_lo_adj.valueChanged.connect(lambda _: self._range_changed("adj"))
@@ -222,7 +229,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_hi_adj.setVisible(has_adjusted)
         self.chk_auto_adj.setVisible(has_adjusted)
         self.chk_link_ranges.setVisible(has_adjusted)
-        self.chk_hide_outside_adj.setVisible(has_adjusted)
+        self.chk_hide_below_adj.setVisible(has_adjusted)
+        self.chk_hide_above_adj.setVisible(has_adjusted)
         self.adj_cmap_label.setVisible(has_adjusted)
         self.adj_lohi_label.setVisible(has_adjusted)
         
@@ -249,7 +257,8 @@ class Point3DViewer(QtWidgets.QWidget):
             self._build_lut(self.combo_cmap_ref),
             ref_range,
             visible=self.checkbox_ref.isChecked(),
-            hide_outside_range=self.chk_hide_outside_ref.isChecked(),
+            hide_below_range=self.chk_hide_below_ref.isChecked(),
+            hide_above_range=self.chk_hide_above_ref.isChecked(),
         )
         self.colormap_manager.set_data_cache((None, None, self._ref_grid), (None, None, self._adj_grid))
         self._sync_range_widgets("ref", self._ref_grid)
@@ -265,7 +274,8 @@ class Point3DViewer(QtWidgets.QWidget):
             self._build_lut(self.combo_cmap_adj),
             adj_range,
             visible=self.checkbox_adj.isChecked(),
-            hide_outside_range=self.chk_hide_outside_adj.isChecked(),
+            hide_below_range=self.chk_hide_below_adj.isChecked(),
+            hide_above_range=self.chk_hide_above_adj.isChecked(),
         )
         self._sync_range_widgets("adj", self._adj_grid)
 
@@ -554,6 +564,18 @@ class Point3DViewer(QtWidgets.QWidget):
         self._mesh_workers[key] = worker
         worker.start()
 
+    def _stop_mesh_workers(self) -> None:
+        """Stop and forget all active background mesh workers."""
+        workers = list(self._mesh_workers.values())
+        self._mesh_workers.clear()
+        for worker in workers:
+            try:
+                worker.requestInterruption()
+            except Exception:
+                pass
+            worker.quit()
+            worker.wait(250)
+
     def _on_mesh_geometry_ready(self, request_id: int, which: str, stride: int, geometry) -> None:
         """Store finished mesh geometry and upload it if still relevant."""
         if request_id != self._mesh_request_id:
@@ -601,10 +623,13 @@ class Point3DViewer(QtWidgets.QWidget):
 
         chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
         chk_transparent.setChecked(True)
+        chk_axes = QtWidgets.QCheckBox("Show X/Y frame and ticks", dialog)
+        chk_axes.setChecked(False)
 
         form.addRow("Width [px]:", spin_width)
         form.addRow("Height [px]:", spin_height)
         form.addRow("", chk_transparent)
+        form.addRow("", chk_axes)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -626,10 +651,11 @@ class Point3DViewer(QtWidgets.QWidget):
         if not output_path:
             return
 
-        image = self.gl_widget.render_to_image(
+        image = self._build_screenshot_image(
             width=spin_width.value(),
             height=spin_height.value(),
             transparent_background=chk_transparent.isChecked(),
+            include_axes_overlay=chk_axes.isChecked(),
         )
         if not image.save(output_path, "PNG"):
             QtWidgets.QMessageBox.warning(
@@ -637,6 +663,274 @@ class Point3DViewer(QtWidgets.QWidget):
                 "Export failed",
                 "Could not save the screenshot to the selected file.",
             )
+
+    def _build_screenshot_image(
+        self,
+        width: int,
+        height: int,
+        transparent_background: bool,
+        include_axes_overlay: bool,
+    ) -> QtGui.QImage:
+        """Build the exported 3D screenshot image.
+
+        Args:
+            width: Final image width in pixels.
+            height: Final image height in pixels.
+            transparent_background: If True, keep the background alpha at 0.
+            include_axes_overlay: If True, reserve margins and draw a 2D X/Y
+                frame with tick labels around the rendered 3D scene.
+
+        Returns:
+            Final PNG-ready screenshot image.
+        """
+        width = max(1, int(width))
+        height = max(1, int(height))
+        axes_overlay = self._build_export_axes_overlay() if include_axes_overlay else None
+        if not include_axes_overlay:
+            return self.gl_widget.render_to_image(
+                width=width,
+                height=height,
+                transparent_background=transparent_background,
+            )
+
+        margins = QtCore.QMargins(76, 20, 24, 60)
+        content_width = max(1, width - margins.left() - margins.right())
+        content_height = max(1, height - margins.top() - margins.bottom())
+        content_image = self.gl_widget.render_to_image(
+            width=content_width,
+            height=content_height,
+            transparent_background=transparent_background,
+            axes_overlay=axes_overlay,
+        )
+
+        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
+        background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
+        image.fill(background)
+
+        painter = QtGui.QPainter(image)
+        try:
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+            painter.drawImage(margins.left(), margins.top(), content_image)
+            self._draw_export_axes_overlay(
+                painter,
+                content_width=content_width,
+                content_height=content_height,
+                offset=QtCore.QPointF(float(margins.left()), float(margins.top())),
+            )
+        finally:
+            painter.end()
+        return image
+
+    def _draw_export_axes_overlay(
+        self,
+        painter: QtGui.QPainter,
+        content_width: int,
+        content_height: int,
+        offset: QtCore.QPointF,
+    ) -> None:
+        """Draw label-only X/Y annotations around the screenshot."""
+        axes_overlay = self._build_export_axes_overlay()
+        if axes_overlay is None:
+            return
+
+        frame_world = np.asarray(axes_overlay["frame_world"], dtype=np.float32)
+        projected = self.gl_widget.project_world_points(frame_world, content_width, content_height)
+        projected += np.array([[offset.x(), offset.y()]], dtype=np.float32)
+
+        origin_index = int(axes_overlay["origin_index"])
+        x_adjacent_index = int(axes_overlay["x_adjacent_index"])
+        y_adjacent_index = int(axes_overlay["y_adjacent_index"])
+        x_extent = float(axes_overlay["x_extent"])
+        y_extent = float(axes_overlay["y_extent"])
+        unit_scale = float(axes_overlay["unit_scale"])
+        unit_label = str(axes_overlay["unit_label"])
+        center = np.mean(projected, axis=0)
+        self._draw_export_axis(
+            painter,
+            start=projected[origin_index],
+            end=projected[x_adjacent_index],
+            center=center,
+            extent=x_extent,
+            unit_scale=unit_scale,
+            unit_label=unit_label,
+            axis_name="X",
+        )
+        self._draw_export_axis(
+            painter,
+            start=projected[origin_index],
+            end=projected[y_adjacent_index],
+            center=center,
+            extent=y_extent,
+            unit_scale=unit_scale,
+            unit_label=unit_label,
+            axis_name="Y",
+        )
+
+    def _build_export_axes_overlay(self) -> dict[str, object] | None:
+        """Build export-only X/Y frame geometry anchored near ``Z = 0``."""
+        bounds = self.gl_widget.get_scene_bounds()
+        if bounds is None:
+            return None
+
+        mins, maxs = bounds
+        z_plane = 0.0
+        frame_world = np.array(
+            [
+                [mins[0], mins[1], z_plane],
+                [maxs[0], mins[1], z_plane],
+                [maxs[0], maxs[1], z_plane],
+                [mins[0], maxs[1], z_plane],
+            ],
+            dtype=np.float32,
+        )
+        projected = self.gl_widget.project_world_points(frame_world, max(1, self.gl_widget.width()), max(1, self.gl_widget.height()))
+        origin_index = int(np.argmin(projected[:, 0] - projected[:, 1]))
+        x_adjacent_index = origin_index + 1 if origin_index in (0, 3) else origin_index - 1
+        y_adjacent_index = 3 if origin_index == 0 else 2 if origin_index == 1 else 1 if origin_index == 2 else 0
+
+        x_extent = abs(float(frame_world[x_adjacent_index, 0] - frame_world[origin_index, 0]))
+        y_extent = abs(float(frame_world[y_adjacent_index, 1] - frame_world[origin_index, 1]))
+        unit_scale, unit_label = self._select_export_axis_unit(max(x_extent, y_extent))
+
+        positions = self._build_export_axes_positions(
+            frame_world=frame_world,
+            origin_index=origin_index,
+            x_adjacent_index=x_adjacent_index,
+            y_adjacent_index=y_adjacent_index,
+        )
+        return {
+            "positions": positions,
+            "frame_world": frame_world,
+            "origin_index": origin_index,
+            "x_adjacent_index": x_adjacent_index,
+            "y_adjacent_index": y_adjacent_index,
+            "x_extent": x_extent,
+            "y_extent": y_extent,
+            "unit_scale": unit_scale,
+            "unit_label": unit_label,
+            "color": (0.35, 0.35, 0.35, 0.85),
+        }
+
+    @staticmethod
+    def _build_export_axes_positions(
+        frame_world: np.ndarray,
+        origin_index: int,
+        x_adjacent_index: int,
+        y_adjacent_index: int,
+    ) -> np.ndarray:
+        """Build 3D line segments for the screenshot X/Y frame and ticks."""
+        segments: list[np.ndarray] = []
+        frame_edges = ((0, 1), (1, 2), (2, 3), (3, 0))
+        for start_idx, end_idx in frame_edges:
+            segments.append(frame_world[start_idx])
+            segments.append(frame_world[end_idx])
+
+        for end_index in (x_adjacent_index, y_adjacent_index):
+            start = frame_world[origin_index]
+            end = frame_world[end_index]
+            edge = end - start
+            edge_length = float(np.linalg.norm(edge))
+            if edge_length <= 1e-6:
+                continue
+            edge_dir = edge / edge_length
+            tick_dir = np.array([0.0, 0.0, -1.0], dtype=np.float32)
+            tick_length = max(0.01 * edge_length, 0.75)
+            tick_count = 5
+            for tick_index in range(tick_count):
+                t = tick_index / (tick_count - 1)
+                point = start + edge_dir * (edge_length * t)
+                segments.append(point)
+                segments.append(point + tick_dir * tick_length)
+
+        return np.asarray(segments, dtype=np.float32)
+
+    def _draw_export_axis(
+        self,
+        painter: QtGui.QPainter,
+        start: np.ndarray,
+        end: np.ndarray,
+        center: np.ndarray,
+        extent: float,
+        unit_scale: float,
+        unit_label: str,
+        axis_name: str,
+    ) -> None:
+        """Draw one labeled screenshot axis with ticks and numeric labels."""
+        direction = np.asarray(end - start, dtype=np.float32)
+        length = float(np.linalg.norm(direction))
+        if length <= 1e-6:
+            return
+
+        direction /= length
+        normal = np.array([-direction[1], direction[0]], dtype=np.float32)
+        midpoint = 0.5 * (start + end)
+        if np.linalg.norm((midpoint + normal * 12.0) - center) < np.linalg.norm((midpoint - normal * 12.0) - center):
+            normal *= -1.0
+
+        axis_pen = QtGui.QPen(QtGui.QColor(40, 40, 40, 230), 1.4)
+        tick_pen = QtGui.QPen(QtGui.QColor(70, 70, 70, 220), 1.0)
+        painter.setPen(axis_pen)
+        painter.drawLine(
+            QtCore.QPointF(float(start[0]), float(start[1])),
+            QtCore.QPointF(float(end[0]), float(end[1])),
+        )
+
+        tick_count = 5
+        label_font = QtGui.QFont()
+        label_font.setPointSize(9)
+        painter.setFont(label_font)
+        for tick_index in range(tick_count):
+            t = tick_index / (tick_count - 1)
+            tick_point = start + direction * (length * t)
+            tick_out = tick_point + normal * 6.0
+            painter.setPen(tick_pen)
+            painter.drawLine(
+                QtCore.QPointF(float(tick_point[0]), float(tick_point[1])),
+                QtCore.QPointF(float(tick_out[0]), float(tick_out[1])),
+            )
+
+            value = (extent * t) / unit_scale
+            label = self._format_axis_value(value)
+            label_anchor = tick_out + normal * 10.0
+            label_rect = QtCore.QRectF(
+                float(label_anchor[0] - 28.0),
+                float(label_anchor[1] - 10.0),
+                56.0,
+                20.0,
+            )
+            painter.setPen(axis_pen)
+            painter.drawText(label_rect, QtCore.Qt.AlignCenter, label)
+
+        title_font = QtGui.QFont()
+        title_font.setBold(True)
+        title_font.setPointSize(10)
+        painter.setFont(title_font)
+        title_anchor = end + normal * 26.0
+        title_rect = QtCore.QRectF(
+            float(title_anchor[0] - 44.0),
+            float(title_anchor[1] - 12.0),
+            88.0,
+            24.0,
+        )
+        painter.drawText(title_rect, QtCore.Qt.AlignCenter, f"{axis_name} [{unit_label}]")
+
+    @staticmethod
+    def _select_export_axis_unit(max_extent_um: float) -> tuple[float, str]:
+        """Choose a compact XY unit for screenshot axis labels."""
+        if max_extent_um >= 1000.0:
+            return 1000.0, "mm"
+        return 1.0, "um"
+
+    @staticmethod
+    def _format_axis_value(value: float) -> str:
+        """Format one screenshot axis tick label compactly."""
+        if not np.isfinite(value):
+            return "nan"
+        magnitude = abs(float(value))
+        if magnitude >= 1e4 or (0 < magnitude < 1e-3):
+            return f"{value:.3e}"
+        return f"{value:.4f}".rstrip("0").rstrip(".")
 
     def _export_colorbar(self) -> None:
         """Export a standalone colorbar image for the current surface styling."""
@@ -819,6 +1113,18 @@ class Point3DViewer(QtWidgets.QWidget):
             return f"{value:.3e}"
         return f"{value:.6f}".rstrip("0").rstrip(".")
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """Release viewer resources when the 3D window is closed."""
+        self._refinement_timer.stop()
+        self._mesh_request_id += 1
+        self._stop_mesh_workers()
+        self.gl_widget.release_resources()
+        self._geometry_cache = {
+            "points": {"ref": {}, "adj": {}},
+            "mesh": {"ref": {}, "adj": {}},
+        }
+        super().closeEvent(event)
+
     def _visible_cloud_names(self) -> list[str]:
         """Return cloud names that should participate in the current scene."""
         names = []
@@ -844,6 +1150,12 @@ class Point3DViewer(QtWidgets.QWidget):
 _global_point_viewer = None
 
 
+def _reset_global_point_viewer(*_args) -> None:
+    """Forget the cached experimental 3D viewer after it is destroyed."""
+    global _global_point_viewer
+    _global_point_viewer = None
+
+
 def show_point_3d_viewer(
     reference_grid,
     adjusted_grid=None,
@@ -856,6 +1168,7 @@ def show_point_3d_viewer(
     global _global_point_viewer
     if _global_point_viewer is None:
         _global_point_viewer = Point3DViewer()
+        _global_point_viewer.destroyed.connect(_reset_global_point_viewer)
     _global_point_viewer.update_data(
         reference_grid=reference_grid,
         adjusted_grid=adjusted_grid,

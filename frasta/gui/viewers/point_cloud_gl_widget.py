@@ -126,7 +126,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         colormap_lut: np.ndarray,
         value_range: tuple[float, float],
         visible: bool = True,
-        hide_outside_range: bool = False,
+        hide_below_range: bool = False,
+        hide_above_range: bool = False,
     ) -> None:
         """Update the GPU colormap texture and range for a named point cloud.
 
@@ -135,7 +136,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             colormap_lut: Compact RGBA lookup table uploaded to the GPU.
             value_range: Active ``(lo, hi)`` color range.
             visible: Visibility toggle for the cloud.
-            hide_outside_range: If True, discard fragments outside ``lo/hi``.
+            hide_below_range: If True, discard fragments below ``lo``.
+            hide_above_range: If True, discard fragments above ``hi``.
         """
         entry = self._clouds.get(name)
         if entry is None:
@@ -145,7 +147,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
             hi = lo + 1e-6
         entry["visible"] = bool(visible)
-        entry["hide_outside_range"] = bool(hide_outside_range)
+        entry["hide_below_range"] = bool(hide_below_range)
+        entry["hide_above_range"] = bool(hide_above_range)
         entry["value_range"] = (float(lo), float(hi))
         entry["texture_id"] = self._upload_or_replace_texture(
             entry.get("texture_id"),
@@ -256,6 +259,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         width: int | None = None,
         height: int | None = None,
         transparent_background: bool = True,
+        axes_overlay: dict[str, object] | None = None,
     ) -> QtGui.QImage:
         """Render the current 3D scene to an image using an off-screen FBO.
 
@@ -264,6 +268,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             height: Target output height in pixels. Defaults to current widget height.
             transparent_background: If True, clear the off-screen buffer with
                 alpha 0 instead of the viewer background color.
+            axes_overlay: Optional export-only X/Y frame description rendered
+                in 3D with depth testing.
 
         Returns:
             Rendered image in top-left origin orientation.
@@ -285,13 +291,59 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
                 else (0.08, 0.08, 0.10, 1.0)
             )
             fbo.bind()
-            self._render_scene(target_width, target_height, clear_rgba=clear_rgba)
+            self._render_scene(
+                target_width,
+                target_height,
+                clear_rgba=clear_rgba,
+                axes_overlay=axes_overlay,
+            )
             image = fbo.toImage()
             fbo.release()
         finally:
             self.doneCurrent()
 
         return image
+
+    def release_resources(self) -> None:
+        """Release GPU-side resources owned by this widget.
+
+        The experimental 3D viewer can be opened and closed repeatedly during
+        one application session. Explicit cleanup helps avoid leaving textures,
+        buffers, and cached overlay objects alive in the OpenGL driver longer
+        than necessary.
+        """
+        context = self.context()
+        if context is not None and self.isValid():
+            self.makeCurrent()
+            try:
+                for name in list(self._clouds):
+                    self.clear_cloud(name)
+                self._delete_buffer(self._ref_profile_buffer)
+                self._delete_buffer(self._adj_profile_buffer)
+                self._delete_buffer(self._plane_vbo)
+                self._delete_buffer(self._plane_ibo)
+            finally:
+                self.doneCurrent()
+        else:
+            self._clouds.clear()
+
+        self._ref_profile_buffer = None
+        self._adj_profile_buffer = None
+        self._plane_vbo = None
+        self._plane_ibo = None
+        self._ref_profile_positions = np.empty((0, 3), dtype=np.float32)
+        self._adj_profile_positions = np.empty((0, 3), dtype=np.float32)
+        self._plane_vertices = np.empty((0, 3), dtype=np.float32)
+        self._plane_indices = np.empty((0, 3), dtype=np.uint32)
+
+        for program_attr in ("_program", "_mesh_program", "_line_program", "_plane_program"):
+            program = getattr(self, program_attr)
+            if program is not None:
+                try:
+                    program.removeAllShaders()
+                except Exception:
+                    pass
+            setattr(self, program_attr, None)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Remember the last mouse position for drag interactions."""
@@ -344,8 +396,12 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._program.setUniformValue("u_lo", float(lo))
             self._program.setUniformValue("u_hi", float(hi))
             self._program.setUniformValue(
-                "u_hide_outside_range",
-                1 if entry.get("hide_outside_range", False) else 0,
+                "u_hide_below_range",
+                1 if entry.get("hide_below_range", False) else 0,
+            )
+            self._program.setUniformValue(
+                "u_hide_above_range",
+                1 if entry.get("hide_above_range", False) else 0,
             )
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
@@ -444,8 +500,12 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._mesh_program.setUniformValue("u_lo", float(lo))
             self._mesh_program.setUniformValue("u_hi", float(hi))
             self._mesh_program.setUniformValue(
-                "u_hide_outside_range",
-                1 if entry.get("hide_outside_range", False) else 0,
+                "u_hide_below_range",
+                1 if entry.get("hide_below_range", False) else 0,
+            )
+            self._mesh_program.setUniformValue(
+                "u_hide_above_range",
+                1 if entry.get("hide_above_range", False) else 0,
             )
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
@@ -539,6 +599,48 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._camera_azimuth = self.DEFAULT_CAMERA_AZIMUTH
             self._camera_elevation = self.DEFAULT_CAMERA_ELEVATION
         self.update()
+
+    def get_scene_bounds(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return the current point-cloud bounds without overlay geometry.
+
+        Returns:
+            ``(mins, maxs)`` arrays for the visible scene geometry, or ``None``
+            when no cloud positions are available yet.
+        """
+        point_sets = [
+            entry["positions"]
+            for entry in self._clouds.values()
+            if len(entry.get("positions", ())) > 0
+        ]
+        if not point_sets:
+            return None
+        return compute_bounds(*point_sets)
+
+    def project_world_points(self, points: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Project 3D world points into 2D image coordinates.
+
+        Args:
+            points: World-space positions with shape ``(N, 3)``.
+            width: Target image width in pixels.
+            height: Target image height in pixels.
+
+        Returns:
+            Array of projected 2D coordinates with shape ``(N, 2)``.
+        """
+        points = np.ascontiguousarray(points, dtype=np.float32)
+        projection = self._build_projection_matrix(int(width), int(height))
+        view = self._build_view_matrix()
+        mvp = projection * view
+
+        projected = np.empty((len(points), 2), dtype=np.float32)
+        for idx, point in enumerate(points):
+            clip = mvp * QtGui.QVector4D(float(point[0]), float(point[1]), float(point[2]), 1.0)
+            w = clip.w() if abs(clip.w()) > 1e-9 else 1e-9
+            ndc_x = clip.x() / w
+            ndc_y = clip.y() / w
+            projected[idx, 0] = float((ndc_x * 0.5 + 0.5) * width)
+            projected[idx, 1] = float((1.0 - (ndc_y * 0.5 + 0.5)) * height)
+        return projected
 
     def _should_use_point_fallback(self) -> bool:
         """Use point fallback until all visible meshes are ready."""
@@ -679,6 +781,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         width: int,
         height: int,
         clear_rgba: tuple[float, float, float, float],
+        axes_overlay: dict[str, object] | None = None,
     ) -> None:
         """Render the full scene into the currently bound framebuffer.
 
@@ -686,6 +789,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             width: Active framebuffer width in pixels.
             height: Active framebuffer height in pixels.
             clear_rgba: Background clear color including alpha.
+            axes_overlay: Optional export-only X/Y frame description.
         """
         GL.glViewport(0, 0, max(1, int(width)), max(1, int(height)))
         GL.glClearColor(*clear_rgba)
@@ -698,8 +802,37 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._draw_meshes(mvp)
         else:
             self._draw_clouds(mvp)
+        if axes_overlay:
+            self._draw_export_axes(mvp, axes_overlay)
         self._draw_profile_plane(mvp)
         self._draw_profile_line(mvp)
+
+    def _draw_export_axes(self, mvp: QtGui.QMatrix4x4, axes_overlay: dict[str, object]) -> None:
+        """Draw an export-only X/Y frame directly in the 3D scene."""
+        if self._line_program is None:
+            return
+
+        positions = np.asarray(axes_overlay.get("positions", ()), dtype=np.float32)
+        if positions.size == 0:
+            return
+
+        color = axes_overlay.get("color", (0.35, 0.35, 0.35, 0.85))
+        buffer_obj = self._create_or_replace_buffer(None, positions)
+        try:
+            self._line_program.bind()
+            self._line_program.setUniformValue("u_mvp", mvp)
+            self._line_program.setUniformValue("u_color", QtGui.QVector4D(*[float(v) for v in color]))
+            pos_loc = self._line_program.attributeLocation("a_position")
+            self._line_program.enableAttributeArray(pos_loc)
+            buffer_obj.bind()
+            self._line_program.setAttributeBuffer(pos_loc, GL.GL_FLOAT, 0, 3)
+            GL.glLineWidth(1.2)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(positions))
+            buffer_obj.release()
+            self._line_program.disableAttributeArray(pos_loc)
+            self._line_program.release()
+        finally:
+            self._delete_buffer(buffer_obj)
 
 _POINT_VERTEX_SHADER = """
 #version 120
@@ -725,12 +858,16 @@ _POINT_FRAGMENT_SHADER = """
 uniform sampler2D u_colormap;
 uniform float u_lo;
 uniform float u_hi;
-uniform int u_hide_outside_range;
+uniform int u_hide_below_range;
+uniform int u_hide_above_range;
 varying float v_t;
 varying float v_z;
 
 void main() {
-    if (u_hide_outside_range != 0 && (v_z < u_lo || v_z > u_hi)) {
+    if (u_hide_below_range != 0 && v_z < u_lo) {
+        discard;
+    }
+    if (u_hide_above_range != 0 && v_z > u_hi) {
         discard;
     }
     gl_FragColor = texture2D(u_colormap, vec2(v_t, 0.5));
@@ -806,13 +943,17 @@ uniform sampler2D u_colormap;
 uniform vec3 u_light_dir;
 uniform float u_lo;
 uniform float u_hi;
-uniform int u_hide_outside_range;
+uniform int u_hide_below_range;
+uniform int u_hide_above_range;
 varying float v_t;
 varying vec3 v_normal;
 varying float v_z;
 
 void main() {
-    if (u_hide_outside_range != 0 && (v_z < u_lo || v_z > u_hi)) {
+    if (u_hide_below_range != 0 && v_z < u_lo) {
+        discard;
+    }
+    if (u_hide_above_range != 0 && v_z > u_hi) {
         discard;
     }
     vec4 base = texture2D(u_colormap, vec2(v_t, 0.5));
