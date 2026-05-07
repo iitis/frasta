@@ -189,7 +189,12 @@ class ROIHandler:
     # ==========================================================================
     
     def update_profile_from_roi(self):
-        """Extract profile data along ROI line and update plot."""
+        """Extract profile data along ROI line and update dependent views.
+
+        Besides refreshing the 2D profile plot, this method also notifies the
+        experimental 3D viewer so an already-open window can update the profile
+        line and section plane while the ROI is dragged.
+        """
         self.clamp_roi_to_image()
         
         # Get line coordinates
@@ -238,3 +243,4 @@ class ROIHandler:
             pen=pg.mkPen('b', width=2), 
             connect='finite'
         )
+        self.parent.visualization_manager.sync_live_point_view_profile()

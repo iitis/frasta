@@ -275,6 +275,30 @@ class Point3DViewer(QtWidgets.QWidget):
         self.gl_widget.fit_camera_to_scene(reset_orientation=True)
         self._schedule_next_refinement()
 
+    def update_profile_overlay(
+        self,
+        line_points=None,
+        separation: float | None = None,
+    ) -> None:
+        """Refresh only the profile-line and section-plane overlays.
+
+        This lightweight path is used by the profile-analysis window to keep an
+        already-open 3D view in sync while the ROI line is being dragged. The
+        surface geometry and camera are left untouched.
+
+        Args:
+            line_points: Updated profile polyline in local pixel coordinates.
+            separation: Optional adjusted-surface offset applied to the profile.
+        """
+        self._line_points = line_points
+        if separation is not None:
+            self._separation = float(separation)
+
+        has_profile = line_points is not None and len(line_points) >= 2
+        self.checkbox_line.setVisible(has_profile)
+        self.checkbox_plane.setVisible(has_profile)
+        self._refresh_profile_line()
+
     def _refresh_clouds(self) -> None:
         """Rebuild point clouds using the current stride and color settings."""
         if self._ref_grid is None:
@@ -1391,7 +1415,11 @@ def show_point_3d_viewer(
     pixel_size_x=1.0,
     pixel_size_y=1.0,
 ):
-    """Display the experimental point-based 3D viewer window."""
+    """Display the experimental point-based 3D viewer window.
+
+    Returns:
+        Point3DViewer: Shared experimental viewer instance.
+    """
     global _global_point_viewer
     if _global_point_viewer is None:
         _global_point_viewer = Point3DViewer()
@@ -1407,3 +1435,4 @@ def show_point_3d_viewer(
     _global_point_viewer.show()
     _global_point_viewer.raise_()
     _global_point_viewer.activateWindow()
+    return _global_point_viewer

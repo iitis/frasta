@@ -63,6 +63,11 @@ To keep the sidebar narrow enough for the 3D viewport, the reference and
 adjusted range controls use a compact vertical `Min` / `Max` arrangement
 instead of two wide spin boxes in one row.
 
+When the experimental 3D viewer is opened from the profile-analysis window,
+dragging the profile ROI updates the 3D profile line and section plane live in
+the already-open viewer. This live sync keeps the current camera and surface
+geometry intact and refreshes only the profile overlay.
+
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
 - **Independent per scan** - each tab keeps its own ROI position and size

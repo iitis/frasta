@@ -31,6 +31,8 @@ class VisualizationManager:
             parent: ProfileViewer instance.
         """
         self.parent = parent
+        self._live_point_viewer = None
+        self._live_point_view_bounds = None
     
     # ==========================================================================
     # 3D Visualization
@@ -58,44 +60,25 @@ class VisualizationManager:
         Args:
             viewer_callable: Function used to display the chosen 3D backend.
         """
-        viewbox = self.parent.image_view.getView()
-        x_range, y_range = viewbox.viewRange()
-        
-        # Convert ranges to image indices
-        x_min, x_max = int(np.floor(x_range[0])), int(np.ceil(x_range[1]))
-        y_min, y_max = int(np.floor(y_range[0])), int(np.ceil(y_range[1]))
-        
-        # Ensure within image bounds
-        shape = self.parent.reference_grid_smooth.shape
-        x_min = max(0, x_min)
-        x_max = min(shape[1] - 1, x_max)
-        y_min = max(0, y_min)
-        y_max = min(shape[0] - 1, y_max)
-        
-        # Extract grid fragments
-        ref = self.parent.reference_grid_smooth[y_min:y_max + 1, x_min:x_max + 1]
-        adj = self.parent.adjusted_grid_corrected[y_min:y_max + 1, x_min:x_max + 1]
-        
+        payload = self._build_current_3d_payload()
+        if payload is None:
+            return
+        ref, adj, line_points, bounds = payload
+
         logger.debug(f"ref0: {self.parent.reference_grid_smooth.shape}, adj0: {self.parent.adjusted_grid_corrected.shape}")
-        logger.debug(f"x_min: {x_min}, x_max: {x_max}, y_min: {y_min}, y_max: {y_max}")
+        logger.debug(
+            "3D crop bounds: x_min=%s, x_max=%s, y_min=%s, y_max=%s",
+            bounds[0],
+            bounds[1],
+            bounds[2],
+            bounds[3],
+        )
         logger.debug(f"ref min: {np.nanmin(ref)}, ref max: {np.nanmax(ref)}, ref shape: {ref.shape}")
         logger.debug(f"ref NaN count: {np.isnan(ref).sum()}")
         logger.debug(f"adj min: {np.nanmin(adj)}, adj max: {np.nanmax(adj)}, adj shape: {adj.shape}")
         logger.debug(f"adj NaN count: {np.isnan(adj).sum()}")
-        
-        # Prepare profile line (limited to fragment, with NaNs to break line)
-        if hasattr(self.parent, 'rr_full') and hasattr(self.parent, 'cc_full'):
-            line_points = [
-                (int(col - x_min), int(row - y_min))
-                for col, row in zip(self.parent.cc_full, self.parent.rr_full)
-                if x_min <= col <= x_max and y_min <= row <= y_max
-            ]
-            if len(line_points) < 2:
-                line_points = None
-        else:
-            line_points = None
-        
-        viewer_callable(
+
+        viewer = viewer_callable(
             reference_grid=ref,
             adjusted_grid=adj,
             line_points=line_points,
@@ -103,6 +86,71 @@ class VisualizationManager:
             pixel_size_x=self.parent.ref_pixel_um.x(),
             pixel_size_y=self.parent.ref_pixel_um.y()
         )
+        if viewer_callable is show_point_3d_viewer:
+            self._live_point_viewer = viewer
+            self._live_point_view_bounds = bounds
+            if viewer is not None:
+                viewer.destroyed.connect(self._clear_live_point_viewer)
+
+    def _build_current_3d_payload(self):
+        """Build the grid fragment and local ROI polyline for the current image view."""
+        viewbox = self.parent.image_view.getView()
+        x_range, y_range = viewbox.viewRange()
+
+        # Convert the visible image fragment into integer pixel bounds.
+        x_min, x_max = int(np.floor(x_range[0])), int(np.ceil(x_range[1]))
+        y_min, y_max = int(np.floor(y_range[0])), int(np.ceil(y_range[1]))
+
+        shape = self.parent.reference_grid_smooth.shape
+        x_min = max(0, x_min)
+        x_max = min(shape[1] - 1, x_max)
+        y_min = max(0, y_min)
+        y_max = min(shape[0] - 1, y_max)
+        if x_min > x_max or y_min > y_max:
+            return None
+
+        ref = self.parent.reference_grid_smooth[y_min:y_max + 1, x_min:x_max + 1]
+        adj = self.parent.adjusted_grid_corrected[y_min:y_max + 1, x_min:x_max + 1]
+        line_points = self._build_line_points_for_bounds((x_min, x_max, y_min, y_max))
+        return ref, adj, line_points, (x_min, x_max, y_min, y_max)
+
+    def _build_line_points_for_bounds(self, bounds):
+        """Convert the full ROI polyline into local coordinates for a crop."""
+        if not (hasattr(self.parent, 'rr_full') and hasattr(self.parent, 'cc_full')):
+            return None
+
+        x_min, x_max, y_min, y_max = bounds
+        line_points = [
+            (int(col - x_min), int(row - y_min))
+            for col, row in zip(self.parent.cc_full, self.parent.rr_full)
+            if x_min <= col <= x_max and y_min <= row <= y_max
+        ]
+        if len(line_points) < 2:
+            return None
+        return line_points
+
+    def sync_live_point_view_profile(self):
+        """Update the open experimental 3D viewer with the current ROI line.
+
+        The method reuses the crop bounds captured when the 3D view was opened,
+        so dragging the ROI updates only the profile line and section plane
+        without rebuilding meshes or resetting the camera.
+        """
+        if self._live_point_viewer is None or self._live_point_view_bounds is None:
+            return
+        if not self._live_point_viewer.isVisible():
+            return
+
+        line_points = self._build_line_points_for_bounds(self._live_point_view_bounds)
+        self._live_point_viewer.update_profile_overlay(
+            line_points=line_points,
+            separation=self.parent.separation,
+        )
+
+    def _clear_live_point_viewer(self, *_args):
+        """Forget the cached live experimental 3D-viewer connection."""
+        self._live_point_viewer = None
+        self._live_point_view_bounds = None
     
     def show_preview(self, fragment, title="Region preview"):
         """Show preview window with image fragment.
