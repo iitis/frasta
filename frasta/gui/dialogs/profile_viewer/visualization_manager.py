@@ -173,25 +173,124 @@ class VisualizationManager:
     # ==========================================================================
     
     def resize_image_view(self, shape):
-        """Resize image view widget based on aspect ratio.
-        
+        """Refresh image-view geometry without forcing a fixed widget size.
+
+        The profile viewer now relies on normal Qt layout negotiation instead
+        of clamping the FRASTA map to a constant pixel size. Keeping the image
+        view flexible prevents the right-hand panel from dominating the window
+        while still preserving the map aspect ratio through the ViewBox.
+
         Args:
             shape (tuple): Image shape (height, width).
         """
+        if not shape or len(shape) != 2:
+            return
+
         height, width = shape
-        aspect = width / height
-        base = 500
-        
+        if height <= 0 or width <= 0:
+            return
+
+        aspect = float(width) / float(height)
+        base_min = 240
         if aspect >= 1.0:
-            w = base
-            h = int(base / aspect)
+            min_width = base_min
+            min_height = max(180, int(round(base_min / aspect)))
         else:
-            h = base
-            w = int(base * aspect)
-        
-        self.parent.image_view.setFixedSize(w, h)
-        self.parent.image_view.update()
-        self.parent.updateGeometry()
+            min_height = base_min
+            min_width = max(180, int(round(base_min * aspect)))
+
+        self.parent.image_view.setMinimumSize(min_width, min_height)
+        self.parent.image_view.updateGeometry()
+
+    def fit_contact_image_view_to_image(self) -> None:
+        """Fit the FRASTA image to the visible view using the item's true bounds.
+
+        The binary FRASTA map is displayed through ``ImageView`` with a
+        transposed array, so deriving the visible extents from the source-array
+        shape is fragile. Using the actual ``ImageItem`` bounding rectangle keeps
+        the whole map visible after data reloads, updates, and widget resizes.
+        The view range is expanded to match the current viewport aspect ratio,
+        so the complete image is always fitted to the shorter viewport side
+        instead of clipping the long dimension.
+        """
+        image_item = self.parent.image_view.getImageItem()
+        if image_item is None:
+            return
+
+        bounds = image_item.boundingRect()
+        if bounds.isNull() or bounds.width() <= 0 or bounds.height() <= 0:
+            return
+
+        self._update_contact_image_boundary(bounds)
+
+        view_box = self.parent.image_view.getView()
+        viewport_rect = view_box.sceneBoundingRect()
+        if viewport_rect.isNull() or viewport_rect.width() <= 0 or viewport_rect.height() <= 0:
+            return
+
+        image_width = float(bounds.width())
+        image_height = float(bounds.height())
+        viewport_aspect = float(viewport_rect.width()) / float(viewport_rect.height())
+        image_aspect = image_width / image_height
+
+        x_center = float(bounds.left()) + 0.5 * image_width
+        y_center = float(bounds.top()) + 0.5 * image_height
+        target_width = image_width
+        target_height = image_height
+
+        # Expand the shorter data axis so the full image fits inside the
+        # current viewport while preserving the locked aspect ratio.
+        if viewport_aspect >= image_aspect:
+            target_width = image_height * viewport_aspect
+        else:
+            target_height = image_width / viewport_aspect
+
+        x_half = 0.5 * target_width
+        y_half = 0.5 * target_height
+        view_box.setAspectLocked(True)
+        view_box.setLimits(
+            xMin=float(bounds.left()) - image_width,
+            xMax=float(bounds.right()) + image_width,
+            yMin=float(bounds.top()) - image_height,
+            yMax=float(bounds.bottom()) + image_height,
+        )
+        view_box.setRange(
+            xRange=(x_center - x_half, x_center + x_half),
+            yRange=(y_center - y_half, y_center + y_half),
+            padding=0,
+        )
+
+    def _update_contact_image_boundary(self, bounds) -> None:
+        """Draw or refresh an outline showing the actual FRASTA image extent.
+
+        When the viewport aspect ratio leaves free space around the fitted
+        image, this outline makes the true image bounds visible instead of
+        letting the map fade into the surrounding background.
+
+        Args:
+            bounds: Bounding rectangle of the current ``ImageItem``.
+        """
+        x0 = float(bounds.left())
+        x1 = float(bounds.right())
+        y0 = float(bounds.top())
+        y1 = float(bounds.bottom())
+        xs = [x0, x1, x1, x0, x0]
+        ys = [y0, y0, y1, y1, y0]
+
+        if self.parent.image_boundary_item is None:
+            self.parent.image_boundary_item = pg.PlotCurveItem(
+                xs,
+                ys,
+                pen=pg.mkPen((180, 180, 180), width=1),
+            )
+            self.parent.image_view.getView().addItem(
+                self.parent.image_boundary_item,
+                ignoreBounds=True,
+            )
+            self.parent.image_boundary_item.setZValue(5)
+            return
+
+        self.parent.image_boundary_item.setData(xs, ys)
     
     def get_viewbox_ranges_int(self, shape=None, overflow=False):
         """Get current viewbox range as integer pixel coordinates.

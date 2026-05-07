@@ -68,6 +68,14 @@ dragging the profile ROI updates the 3D profile line and section plane live in
 the already-open viewer. This live sync keeps the current camera and surface
 geometry intact and refreshes only the profile overlay.
 
+The profile-analysis window now uses a horizontal splitter only for the two
+main views. Compact profile controls sit in one shared row above them, so the
+profile plot keeps most of the width while the FRASTA map stays in a narrower
+right-hand column. The FRASTA map preserves its aspect ratio through the
+underlying ViewBox rather than by forcing a constant widget size. When free
+space appears around the fitted FRASTA map, a thin outline marks the true
+image boundary.
+
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
 - **Independent per scan** - each tab keeps its own ROI position and size

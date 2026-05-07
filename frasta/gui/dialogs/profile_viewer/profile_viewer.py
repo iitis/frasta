@@ -79,6 +79,7 @@ class ProfileViewer(QtWidgets.QMainWindow):
         self.annotations = []
         self.mytest = []
         self.image_marker = None
+        self.image_boundary_item = None
         self.saved_points = []
         self.saved_point_markers = []
         
@@ -144,62 +145,87 @@ class ProfileViewer(QtWidgets.QMainWindow):
         """Setup user interface widgets and layouts."""
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-        layout = QtWidgets.QHBoxLayout()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
         central_widget.setLayout(layout)
-        
-        # Center column - plot and controls
-        center_layout = QtWidgets.QVBoxLayout()
-        
+
+        controls_group = QtWidgets.QGroupBox("Profile Controls", central_widget)
+        controls_layout = QtWidgets.QHBoxLayout(controls_group)
+        controls_layout.setContentsMargins(10, 8, 10, 8)
+        controls_layout.setSpacing(10)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, central_widget)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(6)
+
+        # Left column - profile plot
+        plot_panel = QtWidgets.QWidget(splitter)
+        center_layout = QtWidgets.QVBoxLayout(plot_panel)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
+
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.getPlotItem().getViewBox().setRange(xRange=(0, 1))
         self.plot_widget.getPlotItem().getViewBox().setMouseEnabled(x=True, y=True)
         center_layout.addWidget(self.plot_widget)
-        
-        # Right column - image view and controls
-        right_layout = QtWidgets.QVBoxLayout()
-        
+        splitter.addWidget(plot_panel)
+
+        # Right column - binary map and compact controls
+        right_panel = QtWidgets.QWidget(splitter)
+        right_panel.setMinimumWidth(260)
+        right_panel.setMaximumWidth(560)
+        right_layout = QtWidgets.QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
         self.image_view = create_image_view()
-        self.image_view.setMinimumWidth(400)
+        self.image_view.setMinimumWidth(240)
+        self.image_view.setMinimumHeight(240)
+        self.image_view.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding,
+        )
         right_layout.addWidget(self.image_view)
-        
+
         vb = self.image_view.getView()
         vb.setRange(xRange=(0, 1000), padding=0)
-        
-        # Separation control
-        sep_layout = QtWidgets.QHBoxLayout()
+
         self.spinbox_separation = QtWidgets.QDoubleSpinBox()
-        self.spinbox_separation.setRange(-1000.0, 1000.0)
+        self.spinbox_separation.setRange(-10000.0, 10000.0)
         self.spinbox_separation.setDecimals(2)
         self.spinbox_separation.setSingleStep(0.1)
         self.spinbox_separation.setValue(self.separation)
-        sep_layout.addWidget(QtWidgets.QLabel("Separation:"))
-        sep_layout.addWidget(self.spinbox_separation)
-        right_layout.addLayout(sep_layout)
-        
-        # Window size and snap controls
+        self.spinbox_separation.setMaximumWidth(110)
+
         self.spinbox_window_mm = QtWidgets.QDoubleSpinBox()
         self.spinbox_window_mm.setRange(0.001, 5.0)
         self.spinbox_window_mm.setValue(0.5)
         self.spinbox_window_mm.setSingleStep(0.001)
         self.spinbox_window_mm.setDecimals(3)
-        
+        self.spinbox_window_mm.setMaximumWidth(110)
+
         self.checkbox_snap = QtWidgets.QCheckBox("Snap to plot")
         self.checkbox_snap.setChecked(True)
-        
-        win_layout = QtWidgets.QHBoxLayout()
-        win_layout.addWidget(QtWidgets.QLabel("Window size [mm]:"))
-        win_layout.addWidget(self.spinbox_window_mm)
-        win_layout.addWidget(self.checkbox_snap)
-        right_layout.addLayout(win_layout)
-        
-        # Tilt correction checkbox
+
         self.checkbox_tilt = QtWidgets.QCheckBox("Tilt correction")
         self.checkbox_tilt.setChecked(True)
-        right_layout.addWidget(self.checkbox_tilt)
-        
-        # Add layouts to main layout
-        layout.addLayout(center_layout)
-        layout.addLayout(right_layout)
+        controls_layout.addWidget(QtWidgets.QLabel("Separation [μm]:"))
+        controls_layout.addWidget(self.spinbox_separation)
+        controls_layout.addSpacing(12)
+        controls_layout.addWidget(QtWidgets.QLabel("Window size [mm]:"))
+        controls_layout.addWidget(self.spinbox_window_mm)
+        controls_layout.addWidget(self.checkbox_snap)
+        controls_layout.addSpacing(12)
+        controls_layout.addWidget(self.checkbox_tilt)
+        controls_layout.addStretch(1)
+
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([720, 420])
+        layout.addWidget(controls_group, 0)
+        layout.addWidget(splitter, 1)
     
     def _connect_signals(self):
         """Connect widget signals to handler methods."""
@@ -272,6 +298,54 @@ class ProfileViewer(QtWidgets.QMainWindow):
         if hasattr(self.parent(), '_profile_viewer'):
             self.parent()._profile_viewer = None
         event.accept()
+
+    def resizeEvent(self, event):
+        """Refit the FRASTA map after window resizes when data is present.
+
+        The map fit depends on the current viewport aspect ratio, so the fit
+        must be recomputed after splitter moves and window resizes.
+
+        Args:
+            event: Qt resize event.
+        """
+        super().resizeEvent(event)
+        if self.binary_contact is None:
+            return
+        QtCore.QTimer.singleShot(0, self.visualization_manager.fit_contact_image_view_to_image)
+
+    def update_separation_spinbox_range(self) -> None:
+        """Adapt the separation-control range to the loaded height data.
+
+        The separation value uses the same height unit as the current scan, so
+        a fixed +/-1000 range may be too small for tall surfaces. The range is
+        expanded from the actual surface amplitudes rather than the absolute
+        height offset, so the control remains large enough without becoming
+        effectively unbounded for scans stored far from zero.
+        """
+        spans = []
+        for values in (
+            getattr(self, "reference_grid_smooth", None),
+            getattr(self, "adjusted_grid_corrected", None),
+        ):
+            if values is None:
+                continue
+            finite = np.asarray(values, dtype=float)[np.isfinite(values)]
+            if finite.size:
+                spans.append(float(np.max(finite) - np.min(finite)))
+
+        if not spans:
+            return
+
+        data_span = max(max(spans), 1.0)
+        separation_limit = max(5000.0, 2.0 * data_span)
+
+        current_value = self.spinbox_separation.value()
+        self.spinbox_separation.blockSignals(True)
+        self.spinbox_separation.setRange(-separation_limit, separation_limit)
+        self.spinbox_separation.setValue(
+            min(max(current_value, -separation_limit), separation_limit)
+        )
+        self.spinbox_separation.blockSignals(False)
     
     def update_plot(self):
         """Update binary contact map and profile plot.
@@ -294,6 +368,7 @@ class ProfileViewer(QtWidgets.QMainWindow):
             autoRange=False, 
             autoLevels=True
         )
+        self.visualization_manager.fit_contact_image_view_to_image()
         
         self.roi_handler.update_profile_from_roi()
         self.binary_contact = binary_contact
