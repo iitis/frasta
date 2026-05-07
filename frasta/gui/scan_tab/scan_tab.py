@@ -595,10 +595,11 @@ class ScanTab(QtWidgets.QWidget):
             text_color = QtGui.QColor(255, 255, 255) if transparent_background else QtGui.QColor(20, 20, 20)
             border_color = QtGui.QColor(255, 255, 255, 180) if transparent_background else QtGui.QColor(40, 40, 40)
             hist_color = QtGui.QColor(180, 180, 180, 170)
+            title_font_size, label_font_size = self._get_colorbar_font_sizes(width, height)
 
             title_font = QtGui.QFont()
             title_font.setBold(True)
-            title_font.setPointSize(11)
+            title_font.setPointSize(title_font_size)
             painter.setFont(title_font)
             painter.setPen(text_color)
             title_rect = QtCore.QRectF(12, 8, width - 24, 28)
@@ -623,7 +624,17 @@ class ScanTab(QtWidgets.QWidget):
                 self._draw_colorbar_histogram(painter, hist_rect, values, vmin, vmax, hist_color)
 
             label_left = bar_rect.right() + (max(20, min(60, width // 4)) + 12 if include_histogram else 12)
-            self._draw_colorbar_ticks(painter, bar_rect, label_left, width, vmin, vmax, text_color, border_color)
+            self._draw_colorbar_ticks(
+                painter,
+                bar_rect,
+                label_left,
+                width,
+                vmin,
+                vmax,
+                text_color,
+                border_color,
+                label_font_size=label_font_size,
+            )
         finally:
             painter.end()
 
@@ -816,38 +827,158 @@ class ScanTab(QtWidgets.QWidget):
         vmax: float,
         text_color: QtGui.QColor,
         tick_color: QtGui.QColor,
+        label_font_size: int = 12,
     ) -> None:
         """Draw major and minor tick marks with labels beside the colorbar."""
         painter.setPen(text_color)
         label_font = QtGui.QFont()
-        label_font.setPointSize(10)
+        label_font.setPointSize(int(label_font_size))
         painter.setFont(label_font)
 
-        major_count = 6
-        minor_per_interval = 1
-        for major_index in range(major_count):
-            fraction = major_index / float(max(1, major_count - 1))
+        tick_layout = self._build_export_colorbar_tick_layout(vmin, vmax)
+        major_ticks = tick_layout["major"]
+        minor_ticks = tick_layout["minor"]
+
+        for tick in major_ticks:
+            value = float(tick["value"])
+            fraction = float(tick["fraction"])
+            is_zero = bool(tick["is_zero"])
             y = bar_rect.bottom() - fraction * bar_rect.height()
-            value = vmin + fraction * (vmax - vmin)
+            tick_length = 12 if is_zero else 10
             painter.setPen(QtGui.QPen(tick_color, 1.2))
-            painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + 10, int(y))
-            painter.setPen(text_color)
+            painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + tick_length, int(y))
+            font = QtGui.QFont(label_font)
+            font.setBold(is_zero)
+            painter.setFont(font)
+            painter.setPen(QtGui.QPen(text_color, 1.0))
             text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 8, 24)
             painter.drawText(
                 text_rect,
                 QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
                 self._format_export_value(value),
             )
+        painter.setFont(label_font)
 
-            if major_index >= major_count - 1:
+        for tick in minor_ticks:
+            fraction = float(tick["fraction"])
+            minor_y = bar_rect.bottom() - fraction * bar_rect.height()
+            painter.setPen(QtGui.QPen(tick_color, 1.0))
+            painter.drawLine(bar_rect.right() + 1, int(minor_y), bar_rect.right() + 6, int(minor_y))
+
+        self._draw_colorbar_edge_labels(
+            painter,
+            bar_rect,
+            label_left,
+            image_width,
+            vmin,
+            vmax,
+            major_ticks,
+            text_color,
+            label_font,
+        )
+
+    def _build_export_colorbar_tick_layout(self, vmin: float, vmax: float) -> dict[str, list[dict[str, float | bool]]]:
+        """Build regular major and minor colorbar ticks with an explicit zero tick.
+
+        Args:
+            vmin: Lower end of the displayed data range.
+            vmax: Upper end of the displayed data range.
+
+        Returns:
+            Dictionary with ``major`` and ``minor`` tick definitions.
+        """
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            return {"major": [], "minor": []}
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
+
+        major_step = self._select_export_tick_step(vmin, vmax, target_count=6.0)
+        major_ticks = self._build_ticks_for_step(vmin, vmax, major_step)
+        minor_ticks = self._build_minor_ticks(vmin, vmax, major_step, subdivisions=2)
+        return {"major": major_ticks, "minor": minor_ticks}
+
+    @staticmethod
+    def _select_export_tick_step(vmin: float, vmax: float, target_count: float = 6.0) -> float:
+        """Choose a rounded major-tick step for colorbar exports."""
+        extent = max(float(vmax) - float(vmin), 1e-9)
+        raw_step = extent / max(float(target_count), 1.0)
+        exponent = np.floor(np.log10(raw_step))
+        base = 10.0 ** exponent
+        normalized = raw_step / base
+        if normalized <= 1.0:
+            nice = 1.0
+        elif normalized <= 2.0:
+            nice = 2.0
+        elif normalized <= 5.0:
+            nice = 5.0
+        else:
+            nice = 10.0
+        return float(nice * base)
+
+    @staticmethod
+    def _build_ticks_for_step(vmin: float, vmax: float, step: float) -> list[dict[str, float | bool]]:
+        """Build major ticks for a given regular step and include zero if visible."""
+        if step <= 0:
+            return []
+        tolerance = max(1e-9, abs(step) * 1e-6)
+        start_index = int(np.ceil((vmin - tolerance) / step))
+        end_index = int(np.floor((vmax + tolerance) / step))
+        ticks: list[dict[str, float | bool]] = []
+        for index in range(start_index, end_index + 1):
+            value = float(index * step)
+            if value < vmin - tolerance or value > vmax + tolerance:
                 continue
-            next_fraction = (major_index + 1) / float(max(1, major_count - 1))
-            for minor_index in range(1, minor_per_interval + 1):
-                local_fraction = minor_index / float(minor_per_interval + 1)
-                minor_fraction = fraction + (next_fraction - fraction) * local_fraction
-                minor_y = bar_rect.bottom() - minor_fraction * bar_rect.height()
-                painter.setPen(QtGui.QPen(tick_color, 1.0))
-                painter.drawLine(bar_rect.right() + 1, int(minor_y), bar_rect.right() + 6, int(minor_y))
+            ticks.append(
+                {
+                    "value": value,
+                    "fraction": (value - vmin) / max(vmax - vmin, 1e-9),
+                    "is_zero": abs(value) <= tolerance,
+                }
+            )
+
+        if vmin <= 0.0 <= vmax and not any(bool(tick["is_zero"]) for tick in ticks):
+            ticks.append(
+                {
+                    "value": 0.0,
+                    "fraction": (0.0 - vmin) / max(vmax - vmin, 1e-9),
+                    "is_zero": True,
+                }
+            )
+
+        if not ticks:
+            midpoint = 0.5 * (vmin + vmax)
+            ticks = [
+                {"value": float(vmax), "fraction": 1.0, "is_zero": abs(vmax) <= tolerance},
+                {"value": float(midpoint), "fraction": 0.5, "is_zero": abs(midpoint) <= tolerance},
+                {"value": float(vmin), "fraction": 0.0, "is_zero": abs(vmin) <= tolerance},
+            ]
+
+        ticks.sort(key=lambda item: float(item["fraction"]))
+        return ticks
+
+    @staticmethod
+    def _build_minor_ticks(vmin: float, vmax: float, major_step: float, subdivisions: int) -> list[dict[str, float]]:
+        """Build minor ticks between neighboring major tick values."""
+        if major_step <= 0 or subdivisions < 1:
+            return []
+        tolerance = max(1e-9, abs(major_step) * 1e-6)
+        step = major_step / float(subdivisions + 1)
+        start_index = int(np.ceil((vmin - tolerance) / step))
+        end_index = int(np.floor((vmax + tolerance) / step))
+        minor_ticks: list[dict[str, float]] = []
+        for index in range(start_index, end_index + 1):
+            value = float(index * step)
+            if value < vmin - tolerance or value > vmax + tolerance:
+                continue
+            if abs((value / major_step) - round(value / major_step)) <= 1e-6:
+                continue
+            minor_ticks.append(
+                {
+                    "value": value,
+                    "fraction": (value - vmin) / max(vmax - vmin, 1e-9),
+                }
+            )
+        return minor_ticks
 
     @staticmethod
     def _format_export_value(value: float) -> str:
@@ -858,6 +989,51 @@ class ScanTab(QtWidgets.QWidget):
         if magnitude >= 1e4 or (0 < magnitude < 1e-3):
             return f"{value:.3e}"
         return f"{value:.6f}".rstrip("0").rstrip(".")
+
+    def _draw_colorbar_edge_labels(
+        self,
+        painter: QtGui.QPainter,
+        bar_rect: QtCore.QRect,
+        label_left: int,
+        image_width: int,
+        vmin: float,
+        vmax: float,
+        major_ticks: list[dict[str, float | bool]],
+        text_color: QtGui.QColor,
+        label_font: QtGui.QFont,
+    ) -> None:
+        """Draw endpoint labels when they do not collide with regular major ticks."""
+        if vmax <= vmin:
+            return
+
+        major_ys = [
+            float(bar_rect.bottom() - float(tick["fraction"]) * bar_rect.height())
+            for tick in major_ticks
+        ]
+        collision_threshold = 18.0
+        edge_specs = [
+            (float(vmax), float(bar_rect.top())),
+            (float(vmin), float(bar_rect.bottom())),
+        ]
+        painter.setPen(QtGui.QPen(text_color, 1.0))
+        painter.setFont(label_font)
+        for value, y in edge_specs:
+            if any(abs(y - major_y) < collision_threshold for major_y in major_ys):
+                continue
+            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 8, 24)
+            painter.drawText(
+                text_rect,
+                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                self._format_export_value(value),
+            )
+
+    @staticmethod
+    def _get_colorbar_font_sizes(width: int, height: int) -> tuple[int, int]:
+        """Return title and label font sizes scaled to the export dimensions."""
+        scale_base = max(64, min(int(width), int(height)))
+        title_size = int(np.clip(round(scale_base * 0.055), 10, 18))
+        label_size = int(np.clip(round(scale_base * 0.05), 9, 16))
+        return title_size, label_size
 
     def _save_png_image(self, image: QtGui.QImage, output_path: str, label: str) -> None:
         """Save an image as PNG and show a detailed error on failure."""

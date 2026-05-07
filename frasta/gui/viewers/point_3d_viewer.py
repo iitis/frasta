@@ -81,6 +81,10 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_projection_mode = QtWidgets.QComboBox()
         self.combo_projection_mode.addItem("Perspective", userData="perspective")
         self.combo_projection_mode.addItem("Orthogonal", userData="orthographic")
+        self.combo_auto_range_mode = QtWidgets.QComboBox()
+        self.combo_auto_range_mode.addItem("Full", userData="full")
+        self.combo_auto_range_mode.addItem("Percentile", userData="percentile")
+        self.combo_auto_range_mode.setCurrentIndex(self.combo_auto_range_mode.findData("full"))
 
         self.combo_cmap_ref = QtWidgets.QComboBox()
         self.combo_cmap_adj = QtWidgets.QComboBox()
@@ -140,6 +144,9 @@ class Point3DViewer(QtWidgets.QWidget):
         top_row.addSpacing(12)
         top_row.addWidget(QtWidgets.QLabel("Projection:"))
         top_row.addWidget(self.combo_projection_mode)
+        top_row.addSpacing(12)
+        top_row.addWidget(QtWidgets.QLabel("Auto range:"))
+        top_row.addWidget(self.combo_auto_range_mode)
         top_row.addSpacing(12)
         top_row.addWidget(self.point_size_label)
         top_row.addWidget(self.spin_point_size)
@@ -217,6 +224,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_reference_rect.toggled.connect(self.gl_widget.set_reference_rectangle_visible)
         self.combo_render_mode.currentIndexChanged.connect(self._render_mode_changed)
         self.combo_projection_mode.currentIndexChanged.connect(self._projection_mode_changed)
+        self.combo_auto_range_mode.currentIndexChanged.connect(self._auto_range_mode_changed)
         self.button_background.clicked.connect(self._choose_background_color)
         self.button_background_reset.clicked.connect(self.gl_widget.reset_background_color)
         self.combo_cmap_ref.currentIndexChanged.connect(lambda _: self._refresh_clouds())
@@ -702,6 +710,13 @@ class Point3DViewer(QtWidgets.QWidget):
         self.gl_widget.set_projection_mode(
             self.combo_projection_mode.currentData() or "perspective"
         )
+
+    def _auto_range_mode_changed(self, _index: int) -> None:
+        """Switch how automatic color ranges are computed in the 3D viewer."""
+        if self.colormap_manager.set_auto_range_mode(
+            self.combo_auto_range_mode.currentData() or "full"
+        ):
+            self._refresh_clouds()
 
     def _choose_background_color(self) -> None:
         """Open a color dialog and apply a new viewer background color."""
@@ -1206,11 +1221,14 @@ class Point3DViewer(QtWidgets.QWidget):
 
         chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
         chk_transparent.setChecked(True)
+        chk_histogram = QtWidgets.QCheckBox("Include histogram", dialog)
+        chk_histogram.setChecked(True)
 
         form.addRow("Surface:", combo_surface)
         form.addRow("Width [px]:", spin_width)
         form.addRow("Height [px]:", spin_height)
         form.addRow("", chk_transparent)
+        form.addRow("", chk_histogram)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -1238,6 +1256,7 @@ class Point3DViewer(QtWidgets.QWidget):
             width=spin_width.value(),
             height=spin_height.value(),
             transparent_background=chk_transparent.isChecked(),
+            include_histogram=chk_histogram.isChecked(),
         )
         if not image.save(output_path, "PNG"):
             QtWidgets.QMessageBox.warning(
@@ -1252,6 +1271,7 @@ class Point3DViewer(QtWidgets.QWidget):
         width: int,
         height: int,
         transparent_background: bool,
+        include_histogram: bool,
     ) -> QtGui.QImage:
         """Build a standalone colorbar image for one surface.
 
@@ -1262,7 +1282,7 @@ class Point3DViewer(QtWidgets.QWidget):
             transparent_background: If True, use an alpha-0 background.
 
         Returns:
-            A rendered QImage containing the colorbar and labels.
+            A rendered QImage containing the colorbar, labels, and optional histogram.
         """
         width = max(32, int(width))
         height = max(64, int(height))
@@ -1279,7 +1299,10 @@ class Point3DViewer(QtWidgets.QWidget):
 
         lo, hi = self._get_value_range(which, grid)
         cmap_name = combo.currentText()
+        hist_values = self._get_colorbar_histogram_values(which, grid, lo, hi)
+        unit_label = "μm"
 
+        unit_label = "um"
         image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
         background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
         image.fill(background)
@@ -1292,16 +1315,21 @@ class Point3DViewer(QtWidgets.QWidget):
             text_color = QtGui.QColor(255, 255, 255) if transparent_background else QtGui.QColor(20, 20, 20)
             border_color = QtGui.QColor(255, 255, 255, 180) if transparent_background else QtGui.QColor(40, 40, 40)
             painter.setPen(text_color)
+            title_font_size, label_font_size = self._get_colorbar_font_sizes(width, height)
 
             title_font = QtGui.QFont()
             title_font.setBold(True)
-            title_font.setPointSize(11)
+            title_font.setPointSize(title_font_size)
             painter.setFont(title_font)
             title_rect = QtCore.QRectF(12, 10, width - 24, 28)
-            painter.drawText(title_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, f"{title} ({cmap_name})")
+            painter.drawText(
+                title_rect,
+                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                f"{title} [{unit_label}]",
+            )
 
             label_font = QtGui.QFont()
-            label_font.setPointSize(10)
+            label_font.setPointSize(label_font_size)
             painter.setFont(label_font)
 
             bar_top = 52
@@ -1339,20 +1367,329 @@ class Point3DViewer(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(border_color, 1.0))
             painter.drawRect(bar_rect)
 
-            tick_values = [hi, 0.5 * (lo + hi), lo]
-            tick_labels = [self._format_colorbar_value(value) for value in tick_values]
-            tick_positions = [bar_rect.top(), bar_rect.center().y(), bar_rect.bottom()]
-            label_left = bar_rect.right() + 12
+            if include_histogram and hist_values.size > 0:
+                hist_left = bar_rect.right() + 4
+                hist_width = max(20, min(60, width // 4))
+                hist_rect = QtCore.QRect(hist_left, bar_top, hist_width, bar_height)
+                self._draw_colorbar_histogram(
+                    painter,
+                    hist_rect,
+                    hist_values,
+                    lo,
+                    hi,
+                    QtGui.QColor(180, 180, 180, 170),
+                )
 
-            painter.setPen(text_color)
-            for value, label, y in zip(tick_values, tick_labels, tick_positions):
-                painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + 8, int(y))
-                text_rect = QtCore.QRectF(label_left, y - 12, width - label_left - 12, 24)
-                painter.drawText(text_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label)
+            label_left = bar_rect.right() + (max(20, min(60, width // 4)) + 12 if include_histogram else 12)
+            self._draw_colorbar_ticks(
+                painter,
+                bar_rect,
+                label_left,
+                width,
+                lo,
+                hi,
+                text_color,
+                border_color,
+                label_font_size=label_font_size,
+            )
         finally:
             painter.end()
 
         return image
+
+    def _get_colorbar_histogram_values(
+        self,
+        which: str,
+        grid: np.ndarray | None,
+        lo: float,
+        hi: float,
+    ) -> np.ndarray:
+        """Return displayed finite values contributing to the 3D colorbar histogram."""
+        if grid is None:
+            return np.empty(0, dtype=np.float32)
+
+        values = np.asarray(grid, dtype=np.float32)
+        mask = np.isfinite(values)
+        if which == "ref":
+            if self.chk_hide_below_ref.isChecked():
+                mask &= values >= lo
+            if self.chk_hide_above_ref.isChecked():
+                mask &= values <= hi
+        else:
+            if self.chk_hide_below_adj.isChecked():
+                mask &= values >= lo
+            if self.chk_hide_above_adj.isChecked():
+                mask &= values <= hi
+
+        if not np.any(mask):
+            return np.empty(0, dtype=np.float32)
+
+        clipped = np.clip(values[mask], lo, hi)
+        return clipped[np.isfinite(clipped)].astype(np.float32, copy=False)
+
+    def _draw_colorbar_histogram(
+        self,
+        painter: QtGui.QPainter,
+        hist_rect: QtCore.QRect,
+        values: np.ndarray,
+        vmin: float,
+        vmax: float,
+        color: QtGui.QColor,
+    ) -> None:
+        """Draw a normalized histogram beside the exported 3D colorbar."""
+        if values.size < 1 or vmax <= vmin:
+            return
+        counts, edges = np.histogram(values, bins=min(128, max(16, hist_rect.height() // 4)), range=(vmin, vmax))
+        if counts.size < 1 or np.max(counts) <= 0:
+            return
+
+        counts = counts.astype(np.float32)
+        counts /= float(np.max(counts))
+        if counts.size >= 5:
+            kernel = np.array([1.0, 2.0, 3.0, 2.0, 1.0], dtype=np.float32)
+            kernel /= np.sum(kernel)
+            counts = np.convolve(counts, kernel, mode="same")
+            counts /= max(float(np.max(counts)), 1e-9)
+
+        path = QtGui.QPainterPath()
+        path.moveTo(hist_rect.left(), hist_rect.bottom())
+        for idx, count in enumerate(counts):
+            y0 = hist_rect.bottom() - (edges[idx] - vmin) / (vmax - vmin) * hist_rect.height()
+            y1 = hist_rect.bottom() - (edges[idx + 1] - vmin) / (vmax - vmin) * hist_rect.height()
+            x = hist_rect.left() + count * hist_rect.width()
+            if idx == 0:
+                path.lineTo(x, y0)
+            path.lineTo(x, y1)
+        path.lineTo(hist_rect.left(), hist_rect.top())
+        path.closeSubpath()
+        painter.fillPath(path, QtGui.QBrush(color))
+        painter.setPen(QtGui.QPen(color.darker(130), 1.0))
+        painter.drawPath(path)
+
+    def _draw_colorbar_ticks(
+        self,
+        painter: QtGui.QPainter,
+        bar_rect: QtCore.QRect,
+        label_left: int,
+        image_width: int,
+        vmin: float,
+        vmax: float,
+        text_color: QtGui.QColor,
+        tick_color: QtGui.QColor,
+        label_font_size: int = 11,
+    ) -> None:
+        """Draw major and minor 3D colorbar ticks with a highlighted zero value."""
+        painter.setPen(text_color)
+        label_font = QtGui.QFont()
+        label_font.setPointSize(int(label_font_size))
+        painter.setFont(label_font)
+
+        tick_layout = self._build_colorbar_tick_layout(vmin, vmax)
+        major_ticks = tick_layout["major"]
+        minor_ticks = tick_layout["minor"]
+
+        for tick in major_ticks:
+            value = float(tick["value"])
+            fraction = float(tick["fraction"])
+            is_zero = bool(tick["is_zero"])
+            y = bar_rect.bottom() - fraction * bar_rect.height()
+            tick_length = 12 if is_zero else 10
+            painter.setPen(QtGui.QPen(tick_color, 1.2))
+            painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + tick_length, int(y))
+            font = QtGui.QFont(label_font)
+            font.setBold(is_zero)
+            painter.setFont(font)
+            painter.setPen(QtGui.QPen(text_color, 1.0))
+            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 12, 24)
+            painter.drawText(text_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, self._format_colorbar_value(value))
+        painter.setFont(label_font)
+
+        for tick in minor_ticks:
+            fraction = float(tick["fraction"])
+            minor_y = bar_rect.bottom() - fraction * bar_rect.height()
+            painter.setPen(QtGui.QPen(tick_color, 1.0))
+            painter.drawLine(bar_rect.right() + 1, int(minor_y), bar_rect.right() + 6, int(minor_y))
+
+        self._draw_colorbar_edge_labels(
+            painter,
+            bar_rect,
+            label_left,
+            image_width,
+            vmin,
+            vmax,
+            major_ticks,
+            text_color,
+            label_font,
+        )
+
+    def _build_colorbar_tick_layout(self, vmin: float, vmax: float) -> dict[str, list[dict[str, float | bool]]]:
+        """Build regular major and minor 3D colorbar ticks with explicit zero."""
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            return {"major": [], "minor": []}
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
+
+        major_step = self._select_colorbar_tick_step(vmin, vmax, target_count=6.0)
+        major_ticks = self._build_colorbar_ticks_for_step(vmin, vmax, major_step)
+        minor_ticks = self._build_colorbar_minor_ticks(vmin, vmax, major_step, subdivisions=2)
+        return {"major": major_ticks, "minor": minor_ticks}
+
+    @staticmethod
+    def _select_colorbar_tick_step(vmin: float, vmax: float, target_count: float = 6.0) -> float:
+        """Choose a rounded major-tick step for exported 3D colorbars."""
+        extent = max(float(vmax) - float(vmin), 1e-9)
+        raw_step = extent / max(float(target_count), 1.0)
+        exponent = np.floor(np.log10(raw_step))
+        base = 10.0 ** exponent
+        normalized = raw_step / base
+        if normalized <= 1.0:
+            nice = 1.0
+        elif normalized <= 2.0:
+            nice = 2.0
+        elif normalized <= 5.0:
+            nice = 5.0
+        else:
+            nice = 10.0
+        return float(nice * base)
+
+    @staticmethod
+    def _build_colorbar_ticks_for_step(vmin: float, vmax: float, step: float) -> list[dict[str, float | bool]]:
+        """Build regular major colorbar ticks and force zero into view when needed."""
+        if step <= 0:
+            return []
+        tolerance = max(1e-9, abs(step) * 1e-6)
+        start_index = int(np.ceil((vmin - tolerance) / step))
+        end_index = int(np.floor((vmax + tolerance) / step))
+        ticks: list[dict[str, float | bool]] = []
+        for index in range(start_index, end_index + 1):
+            value = float(index * step)
+            if value < vmin - tolerance or value > vmax + tolerance:
+                continue
+            ticks.append(
+                {
+                    "value": value,
+                    "fraction": (value - vmin) / max(vmax - vmin, 1e-9),
+                    "is_zero": abs(value) <= tolerance,
+                }
+            )
+
+        if vmin <= 0.0 <= vmax and not any(bool(tick["is_zero"]) for tick in ticks):
+            ticks.append(
+                {
+                    "value": 0.0,
+                    "fraction": (0.0 - vmin) / max(vmax - vmin, 1e-9),
+                    "is_zero": True,
+                }
+            )
+
+        if not ticks:
+            midpoint = 0.5 * (vmin + vmax)
+            ticks = [
+                {"value": float(vmax), "fraction": 1.0, "is_zero": abs(vmax) <= tolerance},
+                {"value": float(midpoint), "fraction": 0.5, "is_zero": abs(midpoint) <= tolerance},
+                {"value": float(vmin), "fraction": 0.0, "is_zero": abs(vmin) <= tolerance},
+            ]
+
+        ticks.sort(key=lambda item: float(item["fraction"]))
+        return ticks
+
+    @staticmethod
+    def _build_colorbar_minor_ticks(vmin: float, vmax: float, major_step: float, subdivisions: int) -> list[dict[str, float]]:
+        """Build minor 3D colorbar ticks between the major regular ticks."""
+        if major_step <= 0 or subdivisions < 1:
+            return []
+        tolerance = max(1e-9, abs(major_step) * 1e-6)
+        step = major_step / float(subdivisions + 1)
+        start_index = int(np.ceil((vmin - tolerance) / step))
+        end_index = int(np.floor((vmax + tolerance) / step))
+        minor_ticks: list[dict[str, float]] = []
+        for index in range(start_index, end_index + 1):
+            value = float(index * step)
+            if value < vmin - tolerance or value > vmax + tolerance:
+                continue
+            if abs((value / major_step) - round(value / major_step)) <= 1e-6:
+                continue
+            minor_ticks.append(
+                {
+                    "value": value,
+                    "fraction": (value - vmin) / max(vmax - vmin, 1e-9),
+                }
+            )
+        return minor_ticks
+
+    def _draw_colorbar_edge_labels(
+        self,
+        painter: QtGui.QPainter,
+        bar_rect: QtCore.QRect,
+        label_left: int,
+        image_width: int,
+        vmin: float,
+        vmax: float,
+        major_ticks: list[dict[str, float | bool]],
+        text_color: QtGui.QColor,
+        label_font: QtGui.QFont,
+    ) -> None:
+        """Draw endpoint labels when they do not collide with regular major ticks."""
+        if vmax <= vmin:
+            return
+
+        major_ys = [
+            float(bar_rect.bottom() - float(tick["fraction"]) * bar_rect.height())
+            for tick in major_ticks
+        ]
+        collision_threshold = 18.0
+        edge_specs = [
+            (float(vmax), float(bar_rect.top())),
+            (float(vmin), float(bar_rect.bottom())),
+        ]
+        painter.setPen(QtGui.QPen(text_color, 1.0))
+        painter.setFont(label_font)
+        for value, y in edge_specs:
+            if any(abs(y - major_y) < collision_threshold for major_y in major_ys):
+                continue
+            rounded_value = self._round_colorbar_edge_value(value, major_ticks)
+            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 12, 24)
+            painter.drawText(
+                text_rect,
+                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                self._format_colorbar_value(rounded_value),
+            )
+
+    @staticmethod
+    def _get_colorbar_font_sizes(width: int, height: int) -> tuple[int, int]:
+        """Return title and label font sizes scaled to the export dimensions."""
+        scale_base = max(64, min(int(width), int(height)))
+        title_size = int(np.clip(round(scale_base * 0.055), 10, 18))
+        label_size = int(np.clip(round(scale_base * 0.05), 9, 16))
+        return title_size, label_size
+
+    @staticmethod
+    def _round_colorbar_edge_value(
+        value: float,
+        major_ticks: list[dict[str, float | bool]],
+    ) -> float:
+        """Round an edge label to the precision implied by the major tick step."""
+        major_values = sorted(
+            float(tick["value"])
+            for tick in major_ticks
+            if np.isfinite(float(tick["value"]))
+        )
+        if len(major_values) < 2:
+            return float(value)
+
+        step = min(
+            abs(b - a)
+            for a, b in zip(major_values[:-1], major_values[1:])
+            if abs(b - a) > 1e-12
+        ) if any(abs(b - a) > 1e-12 for a, b in zip(major_values[:-1], major_values[1:])) else 0.0
+        if step <= 0.0:
+            return float(value)
+
+        if step >= 1.0:
+            return float(round(value))
+
+        decimals = int(np.clip(np.ceil(-np.log10(step)) + 1, 0, 6))
+        return float(round(value, decimals))
 
     @staticmethod
     def _format_colorbar_value(value: float) -> str:

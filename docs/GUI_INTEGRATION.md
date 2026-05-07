@@ -50,6 +50,7 @@ The experimental point/mesh-based 3D viewer now separates its controls into:
 The top action bar contains:
 - render mode,
 - projection mode,
+- auto-range mode (`Full` or `Percentile`) for 3D color normalization,
 - point size,
 - background-color actions,
 - screenshot and colorbar export actions.
@@ -75,6 +76,11 @@ right-hand column. The FRASTA map preserves its aspect ratio through the
 underlying ViewBox rather than by forcing a constant widget size. When free
 space appears around the fitted FRASTA map, a thin outline marks the true
 image boundary.
+
+Both the 2D and experimental 3D colorbar exporters now use a matching layout
+style with larger labels, regular rounded major ticks, an explicit zero tick
+when the display range crosses zero, and an optional histogram beside the
+color ramp.
 
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
