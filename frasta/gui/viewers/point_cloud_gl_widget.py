@@ -813,7 +813,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
     def _build_projection_matrix(self, width: int, height: int) -> QtGui.QMatrix4x4:
         """Create a projection matrix for the given viewport size."""
-        aspect_ratio = max(1.0, width / max(1.0, float(height)))
+        aspect_ratio = max(1e-6, float(width) / max(1.0, float(height)))
         projection = QtGui.QMatrix4x4()
         if self._projection_mode == "orthographic":
             ortho_half_height = max(1.0, self._camera_distance * 0.5)

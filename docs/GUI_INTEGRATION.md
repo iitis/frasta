@@ -40,6 +40,29 @@ The **Tools** menu also contains **Scan info...**, a read-only summary dialog fo
 - valid-data coverage and basic height statistics,
 - stored scan metadata such as the imported scan name.
 
+### Experimental 3D Viewer Layout
+
+The experimental point/mesh-based 3D viewer now separates its controls into:
+- a **top action bar** for global view settings and export actions,
+- a **left sidebar** for grouped visibility and surface-style controls,
+- the **main OpenGL viewport** on the right.
+
+The top action bar contains:
+- render mode,
+- projection mode,
+- point size,
+- background-color actions,
+- screenshot and colorbar export actions.
+
+The sidebar groups controls into:
+- **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,
+- **Reference** - colormap, range, and clipping controls for the reference surface,
+- **Adjusted** - matching controls for the adjusted surface, shown only when a second surface is available.
+
+To keep the sidebar narrow enough for the 3D viewport, the reference and
+adjusted range controls use a compact vertical `Min` / `Max` arrangement
+instead of two wide spin boxes in one row.
+
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
 - **Independent per scan** - each tab keeps its own ROI position and size
