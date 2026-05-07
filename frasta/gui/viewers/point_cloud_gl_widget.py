@@ -22,6 +22,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
     frameSwapped = QtCore.pyqtSignal()
     DEFAULT_CAMERA_AZIMUTH = 90.0
     DEFAULT_CAMERA_ELEVATION = -89.0
+    DEFAULT_BACKGROUND_RGBA = (0.08, 0.08, 0.10, 1.0)
 
     def __init__(self, parent=None):
         """Initialize the OpenGL widget and camera state."""
@@ -39,12 +40,18 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._adj_profile_positions = np.empty((0, 3), dtype=np.float32)
         self._ref_profile_buffer = None
         self._adj_profile_buffer = None
+        self._reference_rect_positions = np.empty((0, 3), dtype=np.float32)
+        self._reference_rect_buffer = None
+        self._reference_rect_annotations = None
         self._plane_vertices = np.empty((0, 3), dtype=np.float32)
         self._plane_indices = np.empty((0, 3), dtype=np.uint32)
         self._plane_vbo = None
         self._plane_ibo = None
         self._show_profile_lines = True
         self._show_profile_plane = True
+        self._show_reference_rectangle = True
+        self._projection_mode = "perspective"
+        self._background_rgba = self.DEFAULT_BACKGROUND_RGBA
 
         self._camera_center = np.zeros(3, dtype=np.float32)
         self._camera_distance = 100.0
@@ -186,6 +193,36 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._render_mode = render_mode if render_mode in {"points", "mesh"} else "points"
         self.update()
 
+    def set_projection_mode(self, projection_mode: str) -> None:
+        """Switch between perspective and orthographic camera projection."""
+        self._projection_mode = (
+            projection_mode
+            if projection_mode in {"perspective", "orthographic"}
+            else "perspective"
+        )
+        self.update()
+
+    def set_background_color(self, color: QtGui.QColor) -> None:
+        """Update the non-transparent background color used by the viewer."""
+        if not color.isValid():
+            return
+        self._background_rgba = (
+            float(color.redF()),
+            float(color.greenF()),
+            float(color.blueF()),
+            1.0,
+        )
+        self.update()
+
+    def reset_background_color(self) -> None:
+        """Restore the default background color used by the viewer."""
+        self._background_rgba = self.DEFAULT_BACKGROUND_RGBA
+        self.update()
+
+    def get_background_color(self) -> QtGui.QColor:
+        """Return the current viewer background color as a ``QColor``."""
+        return QtGui.QColor.fromRgbF(*self._background_rgba[:3])
+
     def set_profile_lines(
         self,
         ref_positions: np.ndarray | None = None,
@@ -203,6 +240,26 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             else np.ascontiguousarray(adj_positions, dtype=np.float32)
         )
         self._upload_profile_buffers()
+        self.update()
+
+    def set_reference_rectangle(self, positions: np.ndarray | None) -> None:
+        """Upload the optional reference-grid rectangle drawn at ``Z=0``."""
+        self._reference_rect_positions = (
+            np.empty((0, 3), dtype=np.float32)
+            if positions is None
+            else np.ascontiguousarray(positions, dtype=np.float32)
+        )
+        self._upload_reference_rectangle_buffer()
+        self.update()
+
+    def set_reference_rectangle_annotations(self, annotations: dict[str, object] | None) -> None:
+        """Store optional text annotations for the reference-grid rectangle."""
+        self._reference_rect_annotations = annotations
+        self.update()
+
+    def set_reference_rectangle_visible(self, visible: bool) -> None:
+        """Toggle visibility of the reference-grid rectangle overlay."""
+        self._show_reference_rectangle = bool(visible)
         self.update()
 
     def set_profile_plane(self, vertices: np.ndarray | None, indices: np.ndarray | None = None) -> None:
@@ -230,7 +287,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
     def initializeGL(self) -> None:
         """Create shader programs and configure OpenGL state."""
-        GL.glClearColor(0.08, 0.08, 0.10, 1.0)
+        GL.glClearColor(*self._background_rgba)
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
@@ -244,6 +301,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._upload_cloud_buffers(name)
             self._upload_existing_texture(name)
         self._upload_profile_buffers()
+        self._upload_reference_rectangle_buffer()
         self._upload_plane_buffers()
 
     def resizeGL(self, width: int, height: int) -> None:
@@ -256,9 +314,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
     def paintGL(self) -> None:
         """Draw visible clouds and the optional profile line."""
         if self._resize_active:
-            self._render_resize_placeholder(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
+            self._render_resize_placeholder(self.width(), self.height(), clear_rgba=self._background_rgba)
         else:
-            self._render_scene(self.width(), self.height(), clear_rgba=(0.08, 0.08, 0.10, 1.0))
+            self._render_scene(self.width(), self.height(), clear_rgba=self._background_rgba)
+        self._draw_reference_rectangle_annotations_on_widget()
         self.frameSwapped.emit()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -301,7 +360,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             clear_rgba = (
                 (0.0, 0.0, 0.0, 0.0)
                 if transparent_background
-                else (0.08, 0.08, 0.10, 1.0)
+                else self._background_rgba
             )
             fbo.bind()
             self._render_scene(
@@ -315,6 +374,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         finally:
             self.doneCurrent()
 
+        self._draw_reference_rectangle_annotations_on_image(image)
         return image
 
     def release_resources(self) -> None:
@@ -333,6 +393,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
                     self.clear_cloud(name)
                 self._delete_buffer(self._ref_profile_buffer)
                 self._delete_buffer(self._adj_profile_buffer)
+                self._delete_buffer(self._reference_rect_buffer)
                 self._delete_buffer(self._plane_vbo)
                 self._delete_buffer(self._plane_ibo)
             finally:
@@ -342,10 +403,13 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
         self._ref_profile_buffer = None
         self._adj_profile_buffer = None
+        self._reference_rect_buffer = None
+        self._reference_rect_annotations = None
         self._plane_vbo = None
         self._plane_ibo = None
         self._ref_profile_positions = np.empty((0, 3), dtype=np.float32)
         self._adj_profile_positions = np.empty((0, 3), dtype=np.float32)
+        self._reference_rect_positions = np.empty((0, 3), dtype=np.float32)
         self._plane_vertices = np.empty((0, 3), dtype=np.float32)
         self._plane_indices = np.empty((0, 3), dtype=np.uint32)
 
@@ -369,7 +433,9 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._last_mouse_pos = event.pos()
 
         if event.buttons() & QtCore.Qt.LeftButton:
-            self._camera_azimuth += delta.x() * 0.5
+            # Match common 3D-viewer interaction: dragging left rotates the
+            # scene left, so the camera azimuth changes in the opposite sign.
+            self._camera_azimuth -= delta.x() * 0.5
             self._camera_elevation = float(
                 np.clip(self._camera_elevation - delta.y() * 0.35, -89.0, 89.0)
             )
@@ -467,6 +533,212 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._line_program.disableAttributeArray(pos_loc)
         self._line_program.release()
 
+    def _draw_reference_rectangle_annotations_on_widget(self) -> None:
+        """Draw 2D labels for the reference-grid rectangle on the live widget."""
+        painter = QtGui.QPainter(self)
+        try:
+            self._draw_reference_rectangle_annotations(painter, self.width(), self.height())
+        finally:
+            painter.end()
+
+    def _draw_reference_rectangle_annotations_on_image(self, image: QtGui.QImage) -> None:
+        """Draw 2D labels for the reference-grid rectangle on an exported image."""
+        painter = QtGui.QPainter(image)
+        try:
+            self._draw_reference_rectangle_annotations(painter, image.width(), image.height())
+        finally:
+            painter.end()
+
+    def _draw_reference_rectangle_annotations(
+        self,
+        painter: QtGui.QPainter,
+        target_width: int,
+        target_height: int,
+    ) -> None:
+        """Draw 2D labels for the reference-grid rectangle major ticks."""
+        if not self._show_reference_rectangle or not self._reference_rect_annotations:
+            return
+
+        frame_world = np.asarray(self._reference_rect_annotations.get("frame_world", ()), dtype=np.float32)
+        center_world = np.asarray(self._reference_rect_annotations.get("center", ()), dtype=np.float32)
+        x_ticks = list(self._reference_rect_annotations.get("x_ticks", ()))
+        y_ticks = list(self._reference_rect_annotations.get("y_ticks", ()))
+        unit_scale = float(self._reference_rect_annotations.get("unit_scale", 1.0))
+        unit_label = str(self._reference_rect_annotations.get("unit_label", "um"))
+        if len(frame_world) != 4 or center_world.size != 3:
+            return
+
+        x_edge, y_edge = self._select_reference_rectangle_edges(frame_world)
+
+        x_tick_positions = np.asarray(
+            [[float(tick_value), float(frame_world[x_edge[0], 1]), 0.0] for tick_value in x_ticks],
+            dtype=np.float32,
+        )
+        y_tick_positions = np.asarray(
+            [[float(frame_world[y_edge[0], 0]), float(tick_value), 0.0] for tick_value in y_ticks],
+            dtype=np.float32,
+        )
+        axis_annotations = (
+            {
+                "start": frame_world[x_edge[0]],
+                "end": frame_world[x_edge[1]],
+                "positions": x_tick_positions,
+                "labels": [self._format_reference_label(float(tick_value) / unit_scale) for tick_value in x_ticks],
+                "title": f"X [{unit_label}]",
+            },
+            {
+                "start": frame_world[y_edge[0]],
+                "end": frame_world[y_edge[1]],
+                "positions": y_tick_positions,
+                "labels": [self._format_reference_label(abs(float(tick_value)) / unit_scale) for tick_value in y_ticks],
+                "title": f"Y [{unit_label}]",
+            },
+        )
+
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+        font = QtGui.QFont()
+        font.setPointSize(8)
+        painter.setFont(font)
+        painter.setPen(QtGui.QPen(QtGui.QColor(185, 185, 185, 220)))
+
+        center_projected = self.project_world_points(
+            center_world.reshape(1, 3),
+            max(1, target_width),
+            max(1, target_height),
+        )[0]
+        for axis_annotation in axis_annotations:
+            self._draw_reference_axis_annotation(
+                painter=painter,
+                axis_annotation=axis_annotation,
+                center_projected=center_projected,
+                target_width=target_width,
+                target_height=target_height,
+            )
+
+    def _select_reference_rectangle_edges(self, frame_world: np.ndarray) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Choose the visually nearest X and Y edges of the rectangle."""
+        frame_view = self.transform_world_points_to_view(frame_world)
+        x_edges = ((0, 1), (3, 2))
+        y_edges = ((0, 3), (1, 2))
+        x_edge = max(
+            x_edges,
+            key=lambda edge: float(np.mean(frame_view[list(edge), 2])),
+        )
+        y_edge = max(
+            y_edges,
+            key=lambda edge: float(np.mean(frame_view[list(edge), 2])),
+        )
+        return x_edge, y_edge
+
+    def _draw_reference_axis_annotation(
+        self,
+        painter: QtGui.QPainter,
+        axis_annotation: dict[str, object],
+        center_projected: np.ndarray,
+        target_width: int,
+        target_height: int,
+    ) -> None:
+        """Draw one set of reference-rectangle tick labels in screen space."""
+        axis_start = np.asarray(axis_annotation.get("start", ()), dtype=np.float32)
+        axis_end = np.asarray(axis_annotation.get("end", ()), dtype=np.float32)
+        tick_positions = np.asarray(axis_annotation.get("positions", ()), dtype=np.float32)
+        tick_labels = list(axis_annotation.get("labels", ()))
+        axis_title = str(axis_annotation.get("title", ""))
+        if axis_start.size != 3 or axis_end.size != 3 or len(tick_positions) != len(tick_labels):
+            return
+        if len(tick_positions) == 0:
+            return
+
+        axis_projected = self.project_world_points(
+            np.vstack((axis_start, axis_end)),
+            max(1, target_width),
+            max(1, target_height),
+        )
+        direction = np.asarray(axis_projected[1] - axis_projected[0], dtype=np.float32)
+        length = float(np.linalg.norm(direction))
+        if length <= 1e-6:
+            return
+        direction /= length
+        normal = np.array([-direction[1], direction[0]], dtype=np.float32)
+        midpoint = 0.5 * (axis_projected[0] + axis_projected[1])
+        if np.linalg.norm((midpoint + normal * 12.0) - center_projected) < np.linalg.norm((midpoint - normal * 12.0) - center_projected):
+            normal *= -1.0
+
+        projected_ticks = self.project_world_points(
+            tick_positions,
+            max(1, target_width),
+            max(1, target_height),
+        )
+        metrics = QtGui.QFontMetricsF(painter.font())
+        title_rect = None
+        if axis_title:
+            title_width = max(72.0, float(metrics.horizontalAdvance(axis_title)) + 12.0)
+            title_height = max(20.0, float(metrics.height()) + 4.0)
+            title_anchor = midpoint + normal * 38.0
+            title_rect = QtCore.QRectF(
+                float(title_anchor[0] - title_width * 0.5),
+                float(title_anchor[1] - title_height * 0.5),
+                float(title_width),
+                float(title_height),
+            )
+
+        for tick_point, tick_label in zip(projected_ticks, tick_labels):
+            label_width = max(40.0, float(metrics.horizontalAdvance(str(tick_label))) + 10.0)
+            label_height = max(18.0, float(metrics.height()) + 2.0)
+            tick_along_axis = float(np.dot(tick_point - axis_projected[0], direction))
+            edge_margin = min(label_width * 0.3, 12.0)
+            clamped_along_axis = float(np.clip(tick_along_axis, edge_margin, length - edge_margin))
+            label_offset = 14.0
+            label_anchor = axis_projected[0] + direction * clamped_along_axis + normal * label_offset
+            label_rect = QtCore.QRectF(
+                float(label_anchor[0] - label_width * 0.5),
+                float(label_anchor[1] - label_height * 0.5),
+                float(label_width),
+                float(label_height),
+            )
+            if title_rect is not None and label_rect.intersects(title_rect):
+                continue
+            painter.drawText(label_rect, QtCore.Qt.AlignCenter, str(tick_label))
+
+        if title_rect is not None:
+            painter.drawText(title_rect, QtCore.Qt.AlignCenter, axis_title)
+
+    @staticmethod
+    def _format_reference_label(value: float) -> str:
+        """Format one reference-rectangle tick label compactly."""
+        if not np.isfinite(value):
+            return "nan"
+        magnitude = abs(float(value))
+        if magnitude >= 1e4 or (0 < magnitude < 1e-3):
+            return f"{value:.3e}"
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+
+    def _draw_reference_rectangle(self, mvp: QtGui.QMatrix4x4) -> None:
+        """Render the reference-grid rectangle that marks the ``Z=0`` plane."""
+        if self._line_program is None or not self._show_reference_rectangle:
+            return
+        if self._reference_rect_buffer is None:
+            return
+        if len(self._reference_rect_positions) < 2:
+            return
+
+        self._line_program.bind()
+        self._line_program.setUniformValue("u_mvp", mvp)
+        self._line_program.setUniformValue(
+            "u_color",
+            QtGui.QVector4D(0.45, 0.45, 0.45, 0.9),
+        )
+        pos_loc = self._line_program.attributeLocation("a_position")
+        self._line_program.enableAttributeArray(pos_loc)
+        self._reference_rect_buffer.bind()
+        self._line_program.setAttributeBuffer(pos_loc, GL.GL_FLOAT, 0, 3)
+        GL.glLineWidth(1.1)
+        GL.glDrawArrays(GL.GL_LINES, 0, len(self._reference_rect_positions))
+        self._reference_rect_buffer.release()
+        self._line_program.disableAttributeArray(pos_loc)
+        self._line_program.release()
+
     def _draw_profile_plane(self, mvp: QtGui.QMatrix4x4) -> None:
         """Render the optional translucent cross-section plane."""
         if self._plane_program is None or not self._show_profile_plane:
@@ -540,10 +812,22 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._mesh_program.release()
 
     def _build_projection_matrix(self, width: int, height: int) -> QtGui.QMatrix4x4:
-        """Create a perspective projection matrix for the given viewport size."""
+        """Create a projection matrix for the given viewport size."""
         aspect_ratio = max(1.0, width / max(1.0, float(height)))
         projection = QtGui.QMatrix4x4()
-        projection.perspective(45.0, aspect_ratio, 0.1, max(10.0, self._camera_distance * 20.0))
+        if self._projection_mode == "orthographic":
+            ortho_half_height = max(1.0, self._camera_distance * 0.5)
+            ortho_half_width = ortho_half_height * aspect_ratio
+            projection.ortho(
+                -ortho_half_width,
+                ortho_half_width,
+                -ortho_half_height,
+                ortho_half_height,
+                0.1,
+                max(10.0, self._camera_distance * 20.0),
+            )
+        else:
+            projection.perspective(45.0, aspect_ratio, 0.1, max(10.0, self._camera_distance * 20.0))
         return projection
 
     def _build_view_matrix(self) -> QtGui.QMatrix4x4:
@@ -655,6 +939,18 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             projected[idx, 1] = float((1.0 - (ndc_y * 0.5 + 0.5)) * height)
         return projected
 
+    def transform_world_points_to_view(self, points: np.ndarray) -> np.ndarray:
+        """Transform world-space positions into camera view space."""
+        points = np.ascontiguousarray(points, dtype=np.float32)
+        view = self._build_view_matrix()
+        transformed = np.empty((len(points), 3), dtype=np.float32)
+        for idx, point in enumerate(points):
+            view_point = view * QtGui.QVector4D(float(point[0]), float(point[1]), float(point[2]), 1.0)
+            transformed[idx, 0] = float(view_point.x())
+            transformed[idx, 1] = float(view_point.y())
+            transformed[idx, 2] = float(view_point.z())
+        return transformed
+
     def _should_use_point_fallback(self) -> bool:
         """Use point fallback until all visible meshes are ready."""
         visible_entries = [entry for entry in self._clouds.values() if entry.get("visible")]
@@ -703,6 +999,15 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._adj_profile_buffer = self._create_or_replace_buffer(
             self._adj_profile_buffer,
             self._adj_profile_positions,
+        )
+
+    def _upload_reference_rectangle_buffer(self) -> None:
+        """Upload the optional reference-grid rectangle buffer."""
+        if not self.isValid():
+            return
+        self._reference_rect_buffer = self._create_or_replace_buffer(
+            self._reference_rect_buffer,
+            self._reference_rect_positions,
         )
 
     def _upload_plane_buffers(self) -> None:
@@ -804,6 +1109,13 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             clear_rgba: Background clear color including alpha.
             axes_overlay: Optional export-only X/Y frame description.
         """
+        # QPainter-based 2D overlays can modify GL state between frames, so the
+        # core depth/blend configuration is restored explicitly for each render.
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthMask(GL.GL_TRUE)
+        GL.glDepthFunc(GL.GL_LESS)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glViewport(0, 0, max(1, int(width)), max(1, int(height)))
         GL.glClearColor(*clear_rgba)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
@@ -817,6 +1129,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._draw_clouds(mvp)
         if axes_overlay:
             self._draw_export_axes(mvp, axes_overlay)
+        self._draw_reference_rectangle(mvp)
         self._draw_profile_plane(mvp)
         self._draw_profile_line(mvp)
 

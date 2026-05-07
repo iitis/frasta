@@ -81,6 +81,9 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_render_mode.addItem("Points", userData="points")
         self.combo_render_mode.addItem("Shaded mesh", userData="mesh")
         self.combo_render_mode.setCurrentIndex(self.combo_render_mode.findData("mesh"))
+        self.combo_projection_mode = QtWidgets.QComboBox()
+        self.combo_projection_mode.addItem("Perspective", userData="perspective")
+        self.combo_projection_mode.addItem("Orthographic", userData="orthographic")
 
         self.combo_cmap_ref = QtWidgets.QComboBox()
         self.combo_cmap_adj = QtWidgets.QComboBox()
@@ -112,12 +115,16 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_point_size.setRange(1.0, 20.0)
         self.spin_point_size.setSingleStep(0.5)
         self.spin_point_size.setValue(2.0)
+        self.button_background = QtWidgets.QPushButton("Background...")
+        self.button_background_reset = QtWidgets.QPushButton("Reset Background")
         self.button_screenshot = QtWidgets.QPushButton("Screenshot...")
         self.button_colorbar = QtWidgets.QPushButton("Colorbar...")
         self.checkbox_line = QtWidgets.QCheckBox("Show Profile Line")
         self.checkbox_line.setChecked(True)
         self.checkbox_plane = QtWidgets.QCheckBox("Show Section Plane")
         self.checkbox_plane.setChecked(True)
+        self.checkbox_reference_rect = QtWidgets.QCheckBox("Show Z=0 Rectangle")
+        self.checkbox_reference_rect.setChecked(True)
 
         self.colormap_manager.set_widgets(
             self.spin_lo_ref,
@@ -134,8 +141,14 @@ class Point3DViewer(QtWidgets.QWidget):
         top_row.addWidget(QtWidgets.QLabel("Render:"))
         top_row.addWidget(self.combo_render_mode)
         top_row.addSpacing(12)
+        top_row.addWidget(QtWidgets.QLabel("Projection:"))
+        top_row.addWidget(self.combo_projection_mode)
+        top_row.addSpacing(12)
         top_row.addWidget(self.point_size_label)
         top_row.addWidget(self.spin_point_size)
+        top_row.addSpacing(12)
+        top_row.addWidget(self.button_background)
+        top_row.addWidget(self.button_background_reset)
         top_row.addSpacing(12)
         top_row.addWidget(self.button_screenshot)
         top_row.addWidget(self.button_colorbar)
@@ -169,6 +182,7 @@ class Point3DViewer(QtWidgets.QWidget):
 
         extra_row.addWidget(self.checkbox_line)
         extra_row.addWidget(self.checkbox_plane)
+        extra_row.addWidget(self.checkbox_reference_rect)
         extra_row.addStretch(1)
 
         layout.addLayout(top_row)
@@ -180,7 +194,11 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_adj.toggled.connect(lambda on: self.gl_widget.set_cloud_visible("adj", on))
         self.checkbox_line.toggled.connect(self.gl_widget.set_profile_line_visible)
         self.checkbox_plane.toggled.connect(self.gl_widget.set_profile_plane_visible)
+        self.checkbox_reference_rect.toggled.connect(self.gl_widget.set_reference_rectangle_visible)
         self.combo_render_mode.currentIndexChanged.connect(self._render_mode_changed)
+        self.combo_projection_mode.currentIndexChanged.connect(self._projection_mode_changed)
+        self.button_background.clicked.connect(self._choose_background_color)
+        self.button_background_reset.clicked.connect(self.gl_widget.reset_background_color)
         self.combo_cmap_ref.currentIndexChanged.connect(lambda _: self._refresh_clouds())
         self.combo_cmap_adj.currentIndexChanged.connect(lambda _: self._refresh_clouds())
         self.chk_auto_ref.toggled.connect(self._auto_ref_toggled)
@@ -238,6 +256,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_line.setVisible(has_profile)
         self.checkbox_plane.setVisible(has_profile)
 
+        self._refresh_reference_rectangle()
         self._apply_render_mode_to_ui()
         self._refresh_clouds()
         self._refresh_profile_line()
@@ -341,6 +360,139 @@ class Point3DViewer(QtWidgets.QWidget):
             dtype=np.float32,
         )
         self.gl_widget.set_profile_plane(plane_vertices)
+
+    def _refresh_reference_rectangle(self) -> None:
+        """Build a ``Z=0`` rectangle that matches the reference-grid extents."""
+        if self._ref_grid is None or self._ref_grid.ndim != 2:
+            self.gl_widget.set_reference_rectangle(None)
+            self.gl_widget.set_reference_rectangle_annotations(None)
+            return
+
+        rows, cols = self._ref_grid.shape
+        x_max = max(0.0, (cols - 1) * self._pixel_size_x)
+        y_min = min(0.0, -(rows - 1) * self._pixel_size_y)
+        x_ticks = self._build_reference_axis_ticks(0.0, x_max)
+        y_ticks = self._build_reference_axis_ticks(y_min, 0.0)
+        unit_scale, unit_label = self._select_export_axis_unit(max(x_max, abs(y_min)))
+        rectangle_positions = self._build_reference_rectangle_positions(
+            x_min=0.0,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=0.0,
+            x_ticks=x_ticks,
+            y_ticks=y_ticks,
+        )
+        rectangle_annotations = self._build_reference_rectangle_annotations(
+            x_min=0.0,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=0.0,
+            x_ticks=x_ticks,
+            y_ticks=y_ticks,
+            unit_scale=unit_scale,
+            unit_label=unit_label,
+        )
+        self.gl_widget.set_reference_rectangle(rectangle_positions)
+        self.gl_widget.set_reference_rectangle_annotations(rectangle_annotations)
+
+    def _build_reference_rectangle_positions(
+        self,
+        x_min: float,
+        x_max: float,
+        y_min: float,
+        y_max: float,
+        x_ticks: list[float],
+        y_ticks: list[float],
+    ) -> np.ndarray:
+        """Build rectangle-edge and tick-mark line segments for the ``Z=0`` guide."""
+        segments: list[list[float]] = [
+            [x_min, y_max, 0.0], [x_max, y_max, 0.0],
+            [x_max, y_max, 0.0], [x_max, y_min, 0.0],
+            [x_max, y_min, 0.0], [x_min, y_min, 0.0],
+            [x_min, y_min, 0.0], [x_min, y_max, 0.0],
+        ]
+
+        x_tick_length = max(abs(y_max - y_min) * 0.015, self._pixel_size_y * 3.0, 0.5)
+        y_tick_length = max(abs(x_max - x_min) * 0.015, self._pixel_size_x * 3.0, 0.5)
+        for x_value in x_ticks:
+            segments.append([x_value, y_max, 0.0])
+            segments.append([x_value, y_max + x_tick_length, 0.0])
+            segments.append([x_value, y_min, 0.0])
+            segments.append([x_value, y_min - x_tick_length, 0.0])
+
+        for y_value in y_ticks:
+            segments.append([x_min, y_value, 0.0])
+            segments.append([x_min - y_tick_length, y_value, 0.0])
+            segments.append([x_max, y_value, 0.0])
+            segments.append([x_max + y_tick_length, y_value, 0.0])
+
+        return np.asarray(segments, dtype=np.float32)
+
+    def _build_reference_axis_ticks(self, axis_min: float, axis_max: float) -> list[float]:
+        """Build rounded major-tick positions for one reference-rectangle axis."""
+        if not np.isfinite(axis_min) or not np.isfinite(axis_max):
+            return []
+
+        lower = min(float(axis_min), float(axis_max))
+        upper = max(float(axis_min), float(axis_max))
+        extent = upper - lower
+        if extent <= 1e-9:
+            return [lower]
+
+        step = self._select_export_axis_tick_step(extent)
+        if step <= 0.0:
+            return [lower, upper]
+
+        tick_values: list[float] = []
+        start_index = int(np.ceil((lower - 1e-9) / step))
+        end_index = int(np.floor((upper + 1e-9) / step))
+        for tick_index in range(start_index, end_index + 1):
+            value = tick_index * step
+            if lower - 1e-9 <= value <= upper + 1e-9:
+                tick_values.append(float(value))
+
+        for boundary in (lower, upper):
+            if not any(abs(existing - boundary) <= max(1e-6, step * 1e-6) for existing in tick_values):
+                tick_values.append(float(boundary))
+
+        tick_values.sort()
+        return tick_values
+
+    def _build_reference_rectangle_annotations(
+        self,
+        x_min: float,
+        x_max: float,
+        y_min: float,
+        y_max: float,
+        x_ticks: list[float],
+        y_ticks: list[float],
+        unit_scale: float,
+        unit_label: str,
+    ) -> dict[str, object]:
+        """Build screen-space label metadata for the reference-rectangle ticks."""
+        return {
+            "frame_world": np.array(
+                [
+                    [x_min, y_max, 0.0],
+                    [x_max, y_max, 0.0],
+                    [x_max, y_min, 0.0],
+                    [x_min, y_min, 0.0],
+                ],
+                dtype=np.float32,
+            ),
+            "center": np.array(
+                [
+                    0.5 * (x_min + x_max),
+                    0.5 * (y_min + y_max),
+                    0.0,
+                ],
+                dtype=np.float32,
+            ),
+            "x_ticks": [float(tick_value) for tick_value in x_ticks],
+            "y_ticks": [float(tick_value) for tick_value in y_ticks],
+            "unit_scale": float(unit_scale),
+            "unit_label": str(unit_label),
+        }
 
     def _build_profile_line_positions(
         self,
@@ -509,6 +661,22 @@ class Point3DViewer(QtWidgets.QWidget):
         self._refresh_clouds()
         self._schedule_next_refinement()
 
+    def _projection_mode_changed(self, _index: int) -> None:
+        """Switch the camera projection used by the experimental 3D widget."""
+        self.gl_widget.set_projection_mode(
+            self.combo_projection_mode.currentData() or "perspective"
+        )
+
+    def _choose_background_color(self) -> None:
+        """Open a color dialog and apply a new viewer background color."""
+        color = QtWidgets.QColorDialog.getColor(
+            self.gl_widget.get_background_color(),
+            self,
+            "Choose 3D background color",
+        )
+        if color.isValid():
+            self.gl_widget.set_background_color(color)
+
     def _apply_render_mode_to_ui(self) -> None:
         """Synchronize UI controls with the active render mode."""
         is_points = self._render_mode == "points"
@@ -623,13 +791,10 @@ class Point3DViewer(QtWidgets.QWidget):
 
         chk_transparent = QtWidgets.QCheckBox("Transparent background", dialog)
         chk_transparent.setChecked(True)
-        chk_axes = QtWidgets.QCheckBox("Show X/Y frame and ticks", dialog)
-        chk_axes.setChecked(False)
 
         form.addRow("Width [px]:", spin_width)
         form.addRow("Height [px]:", spin_height)
         form.addRow("", chk_transparent)
-        form.addRow("", chk_axes)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -655,7 +820,6 @@ class Point3DViewer(QtWidgets.QWidget):
             width=spin_width.value(),
             height=spin_height.value(),
             transparent_background=chk_transparent.isChecked(),
-            include_axes_overlay=chk_axes.isChecked(),
         )
         if not image.save(output_path, "PNG"):
             QtWidgets.QMessageBox.warning(
@@ -669,7 +833,6 @@ class Point3DViewer(QtWidgets.QWidget):
         width: int,
         height: int,
         transparent_background: bool,
-        include_axes_overlay: bool,
     ) -> QtGui.QImage:
         """Build the exported 3D screenshot image.
 
@@ -677,60 +840,27 @@ class Point3DViewer(QtWidgets.QWidget):
             width: Final image width in pixels.
             height: Final image height in pixels.
             transparent_background: If True, keep the background alpha at 0.
-            include_axes_overlay: If True, reserve margins and draw a 2D X/Y
-                frame with tick labels around the rendered 3D scene.
 
         Returns:
             Final PNG-ready screenshot image.
         """
         width = max(1, int(width))
         height = max(1, int(height))
-        axes_overlay = self._build_export_axes_overlay() if include_axes_overlay else None
-        if not include_axes_overlay:
-            return self.gl_widget.render_to_image(
-                width=width,
-                height=height,
-                transparent_background=transparent_background,
-            )
-
-        margins = QtCore.QMargins(76, 20, 24, 60)
-        content_width = max(1, width - margins.left() - margins.right())
-        content_height = max(1, height - margins.top() - margins.bottom())
-        content_image = self.gl_widget.render_to_image(
-            width=content_width,
-            height=content_height,
+        return self.gl_widget.render_to_image(
+            width=width,
+            height=height,
             transparent_background=transparent_background,
-            axes_overlay=axes_overlay,
         )
-
-        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
-        background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
-        image.fill(background)
-
-        painter = QtGui.QPainter(image)
-        try:
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-            painter.drawImage(margins.left(), margins.top(), content_image)
-            self._draw_export_axes_overlay(
-                painter,
-                content_width=content_width,
-                content_height=content_height,
-                offset=QtCore.QPointF(float(margins.left()), float(margins.top())),
-            )
-        finally:
-            painter.end()
-        return image
 
     def _draw_export_axes_overlay(
         self,
+        axes_overlay: dict[str, object] | None,
         painter: QtGui.QPainter,
         content_width: int,
         content_height: int,
         offset: QtCore.QPointF,
     ) -> None:
         """Draw label-only X/Y annotations around the screenshot."""
-        axes_overlay = self._build_export_axes_overlay()
         if axes_overlay is None:
             return
 
@@ -745,36 +875,45 @@ class Point3DViewer(QtWidgets.QWidget):
         y_extent = float(axes_overlay["y_extent"])
         unit_scale = float(axes_overlay["unit_scale"])
         unit_label = str(axes_overlay["unit_label"])
+        x_ticks = list(axes_overlay.get("x_ticks", []))
+        y_ticks = list(axes_overlay.get("y_ticks", []))
         center = np.mean(projected, axis=0)
         self._draw_export_axis(
             painter,
             start=projected[origin_index],
             end=projected[x_adjacent_index],
             center=center,
-            extent=x_extent,
-            unit_scale=unit_scale,
             unit_label=unit_label,
             axis_name="X",
+            ticks=x_ticks,
         )
         self._draw_export_axis(
             painter,
             start=projected[origin_index],
             end=projected[y_adjacent_index],
             center=center,
-            extent=y_extent,
-            unit_scale=unit_scale,
             unit_label=unit_label,
             axis_name="Y",
+            ticks=y_ticks,
         )
 
-    def _build_export_axes_overlay(self) -> dict[str, object] | None:
-        """Build export-only X/Y frame geometry anchored near ``Z = 0``."""
+    def _build_export_axes_overlay(self, z_plane: float | None = None) -> dict[str, object] | None:
+        """Build export-only X/Y frame geometry anchored below the scene."""
         bounds = self.gl_widget.get_scene_bounds()
         if bounds is None:
             return None
 
         mins, maxs = bounds
-        z_plane = 0.0
+        if z_plane is None:
+            # Keep the frame clearly below the visible geometry. Using only the
+            # Z span can place the frame too close to wide, relatively flat
+            # surfaces, which makes depth precision artifacts more likely.
+            scene_span = np.asarray(maxs - mins, dtype=np.float32)
+            depth_offset = max(
+                1e-3,
+                0.02 * float(np.max(scene_span)),
+            )
+            z_plane = float(mins[2] - depth_offset)
         frame_world = np.array(
             [
                 [mins[0], mins[1], z_plane],
@@ -786,18 +925,33 @@ class Point3DViewer(QtWidgets.QWidget):
         )
         projected = self.gl_widget.project_world_points(frame_world, max(1, self.gl_widget.width()), max(1, self.gl_widget.height()))
         origin_index = int(np.argmin(projected[:, 0] - projected[:, 1]))
-        x_adjacent_index = origin_index + 1 if origin_index in (0, 3) else origin_index - 1
-        y_adjacent_index = 3 if origin_index == 0 else 2 if origin_index == 1 else 1 if origin_index == 2 else 0
+        # The export frame is a closed 4-corner rectangle, so neighbor lookup
+        # must wrap explicitly instead of relying on ``origin_index +/- 1``.
+        adjacent_indices = {
+            0: (1, 3),
+            1: (0, 2),
+            2: (3, 1),
+            3: (0, 2),
+        }
+        x_adjacent_index, y_adjacent_index = adjacent_indices[origin_index]
 
         x_extent = abs(float(frame_world[x_adjacent_index, 0] - frame_world[origin_index, 0]))
         y_extent = abs(float(frame_world[y_adjacent_index, 1] - frame_world[origin_index, 1]))
         unit_scale, unit_label = self._select_export_axis_unit(max(x_extent, y_extent))
+        x_ticks = self._build_export_axis_ticks(x_extent, unit_scale)
+        y_ticks = self._build_export_axis_ticks(y_extent, unit_scale)
+        if not x_ticks:
+            x_ticks = self._build_fallback_export_axis_ticks()
+        if not y_ticks:
+            y_ticks = self._build_fallback_export_axis_ticks()
 
         positions = self._build_export_axes_positions(
             frame_world=frame_world,
             origin_index=origin_index,
             x_adjacent_index=x_adjacent_index,
             y_adjacent_index=y_adjacent_index,
+            x_tick_fractions=[float(tick["fraction"]) for tick in x_ticks],
+            y_tick_fractions=[float(tick["fraction"]) for tick in y_ticks],
         )
         return {
             "positions": positions,
@@ -809,6 +963,8 @@ class Point3DViewer(QtWidgets.QWidget):
             "y_extent": y_extent,
             "unit_scale": unit_scale,
             "unit_label": unit_label,
+            "x_ticks": x_ticks,
+            "y_ticks": y_ticks,
             "color": (0.35, 0.35, 0.35, 0.85),
         }
 
@@ -818,6 +974,8 @@ class Point3DViewer(QtWidgets.QWidget):
         origin_index: int,
         x_adjacent_index: int,
         y_adjacent_index: int,
+        x_tick_fractions: list[float] | None = None,
+        y_tick_fractions: list[float] | None = None,
     ) -> np.ndarray:
         """Build 3D line segments for the screenshot X/Y frame and ticks."""
         segments: list[np.ndarray] = []
@@ -826,7 +984,11 @@ class Point3DViewer(QtWidgets.QWidget):
             segments.append(frame_world[start_idx])
             segments.append(frame_world[end_idx])
 
-        for end_index in (x_adjacent_index, y_adjacent_index):
+        axis_tick_fractions = (
+            (x_adjacent_index, x_tick_fractions or []),
+            (y_adjacent_index, y_tick_fractions or []),
+        )
+        for end_index, tick_fractions in axis_tick_fractions:
             start = frame_world[origin_index]
             end = frame_world[end_index]
             edge = end - start
@@ -836,9 +998,7 @@ class Point3DViewer(QtWidgets.QWidget):
             edge_dir = edge / edge_length
             tick_dir = np.array([0.0, 0.0, -1.0], dtype=np.float32)
             tick_length = max(0.01 * edge_length, 0.75)
-            tick_count = 5
-            for tick_index in range(tick_count):
-                t = tick_index / (tick_count - 1)
+            for t in tick_fractions:
                 point = start + edge_dir * (edge_length * t)
                 segments.append(point)
                 segments.append(point + tick_dir * tick_length)
@@ -851,10 +1011,9 @@ class Point3DViewer(QtWidgets.QWidget):
         start: np.ndarray,
         end: np.ndarray,
         center: np.ndarray,
-        extent: float,
-        unit_scale: float,
         unit_label: str,
         axis_name: str,
+        ticks: list[dict[str, float | str]],
     ) -> None:
         """Draw one labeled screenshot axis with ticks and numeric labels."""
         direction = np.asarray(end - start, dtype=np.float32)
@@ -876,12 +1035,11 @@ class Point3DViewer(QtWidgets.QWidget):
             QtCore.QPointF(float(end[0]), float(end[1])),
         )
 
-        tick_count = 5
         label_font = QtGui.QFont()
         label_font.setPointSize(9)
         painter.setFont(label_font)
-        for tick_index in range(tick_count):
-            t = tick_index / (tick_count - 1)
+        for tick in ticks:
+            t = float(tick["fraction"])
             tick_point = start + direction * (length * t)
             tick_out = tick_point + normal * 6.0
             painter.setPen(tick_pen)
@@ -890,8 +1048,7 @@ class Point3DViewer(QtWidgets.QWidget):
                 QtCore.QPointF(float(tick_out[0]), float(tick_out[1])),
             )
 
-            value = (extent * t) / unit_scale
-            label = self._format_axis_value(value)
+            label = str(tick["label"])
             label_anchor = tick_out + normal * 10.0
             label_rect = QtCore.QRectF(
                 float(label_anchor[0] - 28.0),
@@ -921,6 +1078,64 @@ class Point3DViewer(QtWidgets.QWidget):
         if max_extent_um >= 1000.0:
             return 1000.0, "mm"
         return 1.0, "um"
+
+    def _build_export_axis_ticks(self, extent_um: float, unit_scale: float) -> list[dict[str, float | str]]:
+        """Build readable export-axis ticks at rounded steps in the active unit."""
+        if not np.isfinite(extent_um) or extent_um <= 1e-9 or unit_scale <= 0.0:
+            return []
+
+        extent_units = extent_um / unit_scale
+        step = self._select_export_axis_tick_step(extent_units)
+        if step <= 0.0:
+            return []
+
+        tick_limit = max(1, int(np.floor((extent_units + 1e-9) / step)))
+        ticks: list[dict[str, float | str]] = []
+        for tick_index in range(1, tick_limit + 1):
+            value = tick_index * step
+            if value > extent_units + 1e-9:
+                break
+            ticks.append(
+                {
+                    "fraction": float((value * unit_scale) / extent_um),
+                    "value": float(value),
+                    "label": self._format_axis_value(value),
+                }
+            )
+        return ticks
+
+    @staticmethod
+    def _select_export_axis_tick_step(extent_units: float) -> float:
+        """Choose a rounded major-tick step that keeps the export axis readable."""
+        if not np.isfinite(extent_units) or extent_units <= 0.0:
+            return 0.0
+
+        target_tick_count = 8.0
+        raw_step = extent_units / target_tick_count
+        magnitude = 10.0 ** np.floor(np.log10(raw_step)) if raw_step > 0.0 else 1.0
+        normalized = raw_step / magnitude
+        if normalized <= 1.0:
+            nice_factor = 1.0
+        elif normalized <= 2.0:
+            nice_factor = 2.0
+        elif normalized <= 5.0:
+            nice_factor = 5.0
+        else:
+            nice_factor = 10.0
+        return nice_factor * magnitude
+
+    @staticmethod
+    def _build_fallback_export_axis_ticks() -> list[dict[str, float | str]]:
+        """Build a minimal fallback tick layout if rounded ticks cannot be derived."""
+        fractions = (0.25, 0.5, 0.75, 1.0)
+        return [
+            {
+                "fraction": float(fraction),
+                "value": float(fraction),
+                "label": "",
+            }
+            for fraction in fractions
+        ]
 
     @staticmethod
     def _format_axis_value(value: float) -> str:
