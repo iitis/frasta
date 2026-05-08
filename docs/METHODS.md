@@ -67,6 +67,11 @@ to one surface while showing a live difference map. This makes the manual
 choice of alignment parameters visible and repeatable: once the same parameters
 are used on the same input grids, the transformation is deterministic.
 
+In the GUI implementation, the live update uses a two-stage refresh path for
+responsiveness: a throttled reduced-resolution preview is shown while the user
+drags the controls, and the full-resolution difference map is recomputed
+automatically after a short pause or when the control is released.
+
 Automatic registration is available in two modes:
 
 - **Cross-correlation** estimates translation between same-sized grids. It

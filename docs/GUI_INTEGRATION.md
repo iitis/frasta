@@ -271,10 +271,31 @@ reference and moving scans each use their own stored ROI geometry.
 ### Overlay viewer assistance
 
 The manual scan-comparison window includes one helper action:
-- **Auto align (ICP)** - estimates translation and in-plane rotation with a fast ICP pass and writes both into the manual sliders
+- **Auto align (ICP, Experimental)** - estimates translation and in-plane rotation with a fast ICP pass and writes both into the manual sliders
 
 This action does not save anything on its own; it only provides a starting
 point for further manual refinement before accepting the alignment.
+
+The same window now refreshes the difference map automatically while the
+translation or rotation sliders are moving:
+- a throttled lower-resolution preview is rendered during dragging,
+- a reduced-resolution working difference map is rendered automatically after a
+  short pause or immediately when the slider is released.
+
+To keep routine use simpler, the difference panel now defaults to compact
+**Center** and **+/-** controls with an **Auto** button. The auto mode estimates
+the center from the current mean difference and expands the range around that
+center. Each value is available both as a spin box and as a synchronized
+slider for faster interactive tuning. The visibility and blinking toggles now
+sit in one compact row, and the alignment / accept actions sit beside the
+range controls instead of below them. The full interactive histogram is hidden
+by default and can be opened on demand through **Advanced histogram**.
+
+This split update path keeps the overlay responsive on larger grids without
+changing the final accepted transform. The visual comparison window now favors
+interactive responsiveness over pixel-exact difference rendering; the final
+accepted transform is still applied to the original full-resolution moving
+surface when the user confirms the alignment.
 
 ---
 
