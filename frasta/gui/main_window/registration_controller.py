@@ -30,14 +30,6 @@ class RegistrationController:
         self.viewer = None
         self._profile_viewer = None
 
-    def _copy_display_settings(self, source_tab, target_tab):
-        """Copy current scan display settings to a derived registration tab."""
-        target_tab.hide_below_range = source_tab.hide_below_range
-        target_tab.hide_above_range = source_tab.hide_above_range
-        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
-        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
-        target_tab.set_colormap(source_tab.get_colormap_name())
-
     def _initialize_scan_pair_selectors(
         self,
         first_combo: QtWidgets.QComboBox,
@@ -190,8 +182,8 @@ class RegistrationController:
                 tab1 = self.main_window.create_surface_tab(scan1_aligned_data, ref_title)
                 tab2 = self.main_window.create_surface_tab(scan2_aligned_data, mov_title)
                 if idx1 is not None and idx2 is not None:
-                    self._copy_display_settings(tabs.widget(idx1), tab1)
-                    self._copy_display_settings(tabs.widget(idx2), tab2)
+                    self.main_window.copy_scan_display_settings(tabs.widget(idx1), tab1)
+                    self.main_window.copy_scan_display_settings(tabs.widget(idx2), tab2)
                 return
 
             if result_target == "overwrite":
@@ -494,7 +486,7 @@ class RegistrationController:
                     result_surface,
                     f"{tabs.tabText(mov_idx)} [registered]",
                 )
-                self._copy_display_settings(mov_tab, target_tab)
+                self.main_window.copy_scan_display_settings(mov_tab, target_tab)
             
             # Show results
             msg = f"Registration completed!\n\n"

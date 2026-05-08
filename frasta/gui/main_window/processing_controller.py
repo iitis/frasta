@@ -57,14 +57,6 @@ class ProcessingController:
             vmax=source_surface.vmax,
         )
 
-    def _copy_display_settings(self, source_tab, target_tab):
-        """Copy user-selected scan display settings to a derived tab."""
-        target_tab.hide_below_range = source_tab.hide_below_range
-        target_tab.hide_above_range = source_tab.hide_above_range
-        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
-        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
-        target_tab.set_colormap(source_tab.get_colormap_name())
-
     def _result_tab_title(self, source_tab, suffix: str) -> str:
         """Build a readable derived tab title for a processed result."""
         source_index = self.main_window.tabs.indexOf(source_tab)
@@ -98,7 +90,7 @@ class ProcessingController:
             surface,
             self._result_tab_title(source_tab, suffix),
         )
-        self._copy_display_settings(source_tab, target_tab)
+        self.main_window.copy_scan_display_settings(source_tab, target_tab)
         return True
 
     def _active_roi_mask(self, shape: tuple[int, int]) -> np.ndarray | None:

@@ -77,7 +77,8 @@ def load_csv_data(fname, units_xy='um', units_z='um', progress_callback=None):
         Surface: Surface object containing the gridded data.
     """
     chunk_size = 100_000
-    total = sum(1 for _ in open(fname, encoding="utf-8"))
+    with open(fname, encoding="utf-8") as handle:
+        total = sum(1 for _ in handle)
     chunks = []
     
     if progress_callback:

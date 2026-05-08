@@ -59,6 +59,7 @@ class MenuBuilder:
             "register": QtWidgets.QAction("Auto-Register Surfaces...", self.main_window),
             "roughness": QtWidgets.QAction("Surface roughness summary...", self.main_window),
             # ROI actions
+            "undo_roi_delete": QtWidgets.QAction("Undo ROI delete", self.main_window),
             "del_outside": QtWidgets.QAction("outside of the mask", self.main_window),
             "del_inside": QtWidgets.QAction("inside of the mask", self.main_window),
             "roi_settings": QtWidgets.QAction("ROI settings...", self.main_window),
@@ -98,6 +99,8 @@ class MenuBuilder:
         self.actions["roughness"].setToolTip("Show minimal Sa, Sq, and Sz summary for the current scan")
         self.actions["roi_settings"].setToolTip("Choose ROI mode, shape, position, and size")
         self.actions["scan_info"].setToolTip("Show geometry, statistics, and metadata for the active scan")
+        self.actions["undo_roi_delete"].setToolTip("Restore the most recent ROI delete on a scan")
+        self.actions["undo_roi_delete"].setEnabled(False)
     
     def connect_actions(self):
         """Connect all actions to their respective handlers."""
@@ -134,6 +137,7 @@ class MenuBuilder:
         self.actions["scan_info"].triggered.connect(self.main_window.show_scan_info_dialog)
         
         # ROI actions
+        self.actions["undo_roi_delete"].triggered.connect(roi_ctrl.undo_last_roi_delete)
         self.actions["del_outside"].triggered.connect(roi_ctrl.del_outside_mask)
         self.actions["del_inside"].triggered.connect(roi_ctrl.del_inside_mask)
         self.actions["roi_settings"].triggered.connect(roi_ctrl.open_roi_settings_dialog)
@@ -162,6 +166,7 @@ class MenuBuilder:
             ]),
             ("&Edit", [
                 "roi_settings",
+                "undo_roi_delete",
                 ("delete", [
                     "del_outside",
                     "del_inside"

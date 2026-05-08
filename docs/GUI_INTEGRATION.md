@@ -34,6 +34,11 @@ The **Edit** menu also contains **ROI settings...**, a dialog for:
 - selecting the ROI shape,
 - entering the ROI position and size numerically in physical units.
 
+The same menu now also exposes **Undo ROI delete**, which restores the most
+recent delete-inside or delete-outside operation performed through the active
+ROI. After a successful ROI delete, the status bar reports how many valid grid
+points were removed and reminds the user that the operation can be undone.
+
 The **Tools** menu also contains **Scan info...**, a read-only summary dialog for:
 - grid shape and physical spacing,
 - coordinate extents and origin,
@@ -115,6 +120,9 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 - In **independent** mode, the dialog updates only the ROI stored for the current tab.
 - The ROI remains interactive in the image view after being created from the dialog.
 - The ROI geometry is stored in physical coordinates rather than pixel indices, so the displayed shape remains correct even when `dx` and `dy` differ.
+- ROI delete operations report how many valid points were removed. If no active
+  ROI exists on the current tab, the delete is skipped and the status bar
+  explains why.
 
 ---
 

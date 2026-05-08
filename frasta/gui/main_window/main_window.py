@@ -170,17 +170,21 @@ class MainWindow(QtWidgets.QMainWindow):
     def view3d(self):
         """Show the default 3D viewer for the current tab."""
         if tab := self.current_tab():
-            # Przekaż rozmiary pikseli dla prawidłowych proporcji
             dx = getattr(tab, 'dx', 1.0)
             dy = getattr(tab, 'dy', 1.0)
             show_point_3d_viewer(tab.grid, pixel_size_x=dx, pixel_size_y=dy)
 
     def view3d_points(self):
-        """Show the experimental point-based 3D viewer for current tab."""
-        if tab := self.current_tab():
-            dx = getattr(tab, 'dx', 1.0)
-            dy = getattr(tab, 'dy', 1.0)
-            show_point_3d_viewer(tab.grid, pixel_size_x=dx, pixel_size_y=dy)
+        """Backward-compatible alias for the default 3D viewer."""
+        self.view3d()
+
+    def copy_scan_display_settings(self, source_tab, target_tab):
+        """Copy user-selected display settings between scan tabs."""
+        target_tab.hide_below_range = source_tab.hide_below_range
+        target_tab.hide_above_range = source_tab.hide_above_range
+        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
+        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
+        target_tab.set_colormap(source_tab.get_colormap_name())
 
     def export_2d_image(self):
         """Export the active 2D scan view as a PNG image."""

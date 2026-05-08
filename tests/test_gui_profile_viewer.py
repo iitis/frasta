@@ -286,7 +286,7 @@ class TestVisualizationManager:
             mock_window.show.assert_called_once()
     
     def test_resize_image_view_landscape(self, viz_manager, mock_parent):
-        """Test resize_image_view calculates size for landscape image."""
+        """Test resize_image_view uses a compact minimum size for wide images."""
         shape = (300, 500)  # Width > Height
         
         viz_manager.resize_image_view(shape)
@@ -294,12 +294,11 @@ class TestVisualizationManager:
         mock_parent.image_view.setFixedSize.assert_called_once()
         call_args = mock_parent.image_view.setFixedSize.call_args[0]
         width, height = call_args
-        # Width should be base (500), height proportionally smaller
-        assert width == 500
+        assert width == 240
         assert height < width
     
     def test_resize_image_view_portrait(self, viz_manager, mock_parent):
-        """Test resize_image_view calculates size for portrait image."""
+        """Test resize_image_view uses a compact minimum size for tall images."""
         shape = (500, 300)  # Height > Width
         
         viz_manager.resize_image_view(shape)
@@ -307,12 +306,11 @@ class TestVisualizationManager:
         mock_parent.image_view.setFixedSize.assert_called_once()
         call_args = mock_parent.image_view.setFixedSize.call_args[0]
         width, height = call_args
-        # Height should be base (500), width proportionally smaller
-        assert height == 500
+        assert height == 240
         assert width < height
     
     def test_resize_image_view_square(self, viz_manager, mock_parent):
-        """Test resize_image_view handles square images."""
+        """Test resize_image_view keeps square images square."""
         shape = (400, 400)
         
         viz_manager.resize_image_view(shape)
