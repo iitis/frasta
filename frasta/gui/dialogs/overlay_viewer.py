@@ -168,6 +168,7 @@ class OverlayViewer(QtWidgets.QWidget):
 
         # Main window and scene
         self.view = pg.GraphicsLayoutWidget()
+        self.view.setMinimumWidth(0)
         self.viewbox = self.view.addViewBox()
         self.viewbox.setAspectLocked(True)
         self.viewbox.invertY(True)
@@ -177,15 +178,17 @@ class OverlayViewer(QtWidgets.QWidget):
         self.diff_view.ui.histogram.hide()
         self.diff_view.ui.roiBtn.hide()
         self.diff_view.ui.menuBtn.hide()
-        self.diff_view.setMinimumWidth(500)
+        self.diff_view.setMinimumWidth(0)
         self.diff_view.setColorMap(self._diff_cmap)
         self.diff_view.getImageItem().setLookupTable(self._diff_lut)
 
         # Horizontal splitter: overlay view + difference view
         self.preview_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self)
-        self.preview_splitter.setChildrenCollapsible(False)
+        self.preview_splitter.setChildrenCollapsible(True)
         self.preview_splitter.addWidget(self.view)
         self.preview_splitter.addWidget(self.diff_view)
+        self.preview_splitter.setCollapsible(0, True)
+        self.preview_splitter.setCollapsible(1, True)
         self.preview_splitter.setStretchFactor(0, 1)
         self.preview_splitter.setStretchFactor(1, 1)
         layout.addWidget(self.preview_splitter, stretch=1)

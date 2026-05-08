@@ -38,6 +38,29 @@ class RegistrationController:
         target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
         target_tab.set_colormap(source_tab.get_colormap_name())
 
+    def _initialize_scan_pair_selectors(
+        self,
+        first_combo: QtWidgets.QComboBox,
+        second_combo: QtWidgets.QComboBox,
+        tab_count: int,
+    ) -> None:
+        """Set a consistent default pair of distinct scan selections.
+
+        The current tab becomes the first selection when possible, and the
+        second selector points to the next available tab so the dialog never
+        opens with two identical scans selected by default.
+        """
+        if tab_count < 2:
+            return
+
+        current_index = self.main_window.tabs.currentIndex()
+        if current_index < 0 or current_index >= tab_count:
+            current_index = 0
+        second_index = (current_index + 1) % tab_count
+
+        first_combo.setCurrentIndex(current_index)
+        second_combo.setCurrentIndex(second_index)
+
     def _crop_to_common_area_if_needed(self, ref_tab, mov_tab, method: str):
         """Optionally crop mismatched grids before automatic registration.
 
@@ -189,6 +212,7 @@ class RegistrationController:
         names = [tabs.tabText(i) for i in range(tabs.count())]
         cb1.addItems(names)
         cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
         ok_btn = QtWidgets.QPushButton("OK")
         cancel_btn = QtWidgets.QPushButton("Cancel")
         hl = QtWidgets.QHBoxLayout()
@@ -248,6 +272,7 @@ class RegistrationController:
         names = [tabs.tabText(i) for i in range(tabs.count())]
         cb1.addItems(names)
         cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
         layout.addWidget(QtWidgets.QLabel("Reference scan:"))
         layout.addWidget(cb1)
         layout.addWidget(QtWidgets.QLabel("Scan for comparison:"))

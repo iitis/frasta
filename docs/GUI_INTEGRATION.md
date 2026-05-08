@@ -295,7 +295,9 @@ This split update path keeps the overlay responsive on larger grids without
 changing the final accepted transform. The visual comparison window now favors
 interactive responsiveness over pixel-exact difference rendering; the final
 accepted transform is still applied to the original full-resolution moving
-surface when the user confirms the alignment.
+surface when the user confirms the alignment. The splitter between the overlay
+view and the difference map can be dragged freely, including collapsing either
+side almost completely when the user wants to focus on only one view.
 
 ---
 
