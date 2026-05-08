@@ -8,8 +8,6 @@ import pyqtgraph as pg
 from PyQt5.QtCore import QPointF
 
 from ...viewers import (
-    legacy_3d_viewer_enabled,
-    show_3d_viewer,
     show_point_3d_viewer,
 )
 
@@ -45,14 +43,6 @@ class VisualizationManager:
     def show_3d_point_view(self):
         """Open the default QOpenGLWidget-based 3D viewer for the current profile view."""
         self._show_3d_view_with_backend(show_point_3d_viewer)
-
-    def show_legacy_3d_view(self):
-        """Open the legacy pyqtgraph-based 3D viewer for the current profile view."""
-        self._show_3d_view_with_backend(show_3d_viewer)
-
-    def is_legacy_3d_viewer_enabled(self) -> bool:
-        """Return whether the legacy 3D backend should be exposed in the GUI."""
-        return legacy_3d_viewer_enabled()
 
     def _show_3d_view_with_backend(self, viewer_callable):
         """Open a 3D viewer backend showing both scans and the profile line.

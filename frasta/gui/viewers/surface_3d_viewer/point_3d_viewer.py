@@ -17,8 +17,8 @@ from .point_cloud_geometry import (
     compute_progressive_stride_schedule,
 )
 from .point_cloud_gl_widget import PointCloudGLWidget
-from .grid_3d_viewer.colormap_manager import ColormapManager
-from ..colorbar_common import (
+from .colormap_manager import ColormapManager
+from ...colorbar_common import (
     build_colorbar_tick_layout,
     build_reference_label_specs,
     build_tick_label_rect,
@@ -26,9 +26,9 @@ from ..colorbar_common import (
     get_colorbar_font_sizes,
     layout_reference_label_positions,
 )
-from ..colorbar_renderer import ColorbarRenderConfig, ExportColorbarRenderer
-from ..workers.mesh_geometry_worker import MeshGeometryWorker
-from ...utils import get_colormap
+from ...colorbar_renderer import ColorbarRenderConfig, ExportColorbarRenderer
+from ...workers.mesh_geometry_worker import MeshGeometryWorker
+from ....utils import get_colormap
 
 import logging
 
@@ -127,8 +127,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_point_size.setValue(2.0)
         self.button_background = QtWidgets.QPushButton("Background...")
         self.button_background_reset = QtWidgets.QPushButton("Reset Background")
-        self.button_screenshot = QtWidgets.QPushButton("Screenshot...")
-        self.button_colorbar = QtWidgets.QPushButton("Colorbar...")
+        self.button_screenshot = QtWidgets.QPushButton("Save view as PNG...")
+        self.button_colorbar = QtWidgets.QPushButton("Save colorbar as PNG...")
         self.checkbox_line = QtWidgets.QCheckBox("Show Profile Line")
         self.checkbox_line.setChecked(True)
         self.checkbox_plane = QtWidgets.QCheckBox("Show Section Plane")

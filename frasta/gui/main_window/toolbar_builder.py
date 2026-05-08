@@ -58,8 +58,6 @@ class ToolbarBuilder:
         
         # Tools
         toolbar.addAction(actions["view3d"])
-        if self.main_window.is_legacy_3d_viewer_enabled():
-            toolbar.addAction(actions["view3d_legacy"])
         toolbar.addAction(actions["compare"])
         toolbar.addAction(actions["profile"])
         toolbar.addSeparator()

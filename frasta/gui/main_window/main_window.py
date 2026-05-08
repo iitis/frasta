@@ -16,8 +16,6 @@ from PyQt5.QtGui import QIcon
 from ..dialogs import AboutDialog, ScanInfoDialog
 from ..scan_tab import ScanTab
 from ..viewers import (
-    legacy_3d_viewer_enabled,
-    show_3d_viewer,
     show_point_3d_viewer,
 )
 from ...core import Surface
@@ -183,17 +181,6 @@ class MainWindow(QtWidgets.QMainWindow):
             dx = getattr(tab, 'dx', 1.0)
             dy = getattr(tab, 'dy', 1.0)
             show_point_3d_viewer(tab.grid, pixel_size_x=dx, pixel_size_y=dy)
-
-    def view3d_legacy(self):
-        """Show the legacy pyqtgraph-based 3D viewer for the current tab."""
-        if tab := self.current_tab():
-            dx = getattr(tab, 'dx', 1.0)
-            dy = getattr(tab, 'dy', 1.0)
-            show_3d_viewer(tab.grid, show_controls=True, pixel_size_x=dx, pixel_size_y=dy)
-
-    def is_legacy_3d_viewer_enabled(self) -> bool:
-        """Return whether the legacy 3D backend should be exposed in the GUI."""
-        return legacy_3d_viewer_enabled()
 
     def export_2d_image(self):
         """Export the active 2D scan view as a PNG image."""

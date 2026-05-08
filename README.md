@@ -242,7 +242,7 @@ updates for its OpenGL widgets to reduce
 white borders, clipped viewports, and partially refreshed 3D frames.
 
 An experimental point-based 3D backend based on `QOpenGLWidget` is also
-available in `frasta.gui.viewers.point_3d_viewer`. It is intended for
+available in `frasta.gui.viewers.surface_3d_viewer.point_3d_viewer`. It is intended for
 performance experiments on large regular grids and currently focuses on point
 cloud rendering rather than shaded surface meshes. In the GUI it is exposed as
 the default `Tools -> View 3d...` action and from the profile viewer as the
@@ -283,9 +283,9 @@ The 2D scan tabs now support analogous export helpers: a PNG image of either
 the full grid or the current viewport, plus a standalone colorbar image with
 the active 2D colormap, current `lo/hi` labels, and an optional overlaid
 histogram of the exported data range.
-The older pyqtgraph-based 3D backend remains available only as a fallback path
-when the `FRASTA_ENABLE_LEGACY_3D_VIEWER=1` environment variable is set before
-launching the application.
+The GUI now exposes only the newer point/mesh-based 3D viewer path. Legacy
+pyqtgraph-based 3D code may still exist internally for compatibility work, but
+it is no longer presented as a supported user-facing option.
 
 ### Qt platform plugin errors
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...utils import get_colormap
+from ....utils import get_colormap
 
 
 def build_point_positions_from_grid(

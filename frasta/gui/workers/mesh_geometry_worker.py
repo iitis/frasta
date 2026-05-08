@@ -56,7 +56,9 @@ class MeshGeometryWorker(QThread):
     def run(self) -> None:
         """Build mesh geometry and emit the result or a formatted error."""
         try:
-            from ..viewers.point_cloud_geometry import build_mesh_geometry_from_grid
+            from ..viewers.surface_3d_viewer.point_cloud_geometry import (
+                build_mesh_geometry_from_grid,
+            )
 
             geometry = build_mesh_geometry_from_grid(
                 self.grid,

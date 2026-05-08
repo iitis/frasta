@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from frasta.gui.viewers.point_cloud_geometry import (
+from frasta.gui.viewers.surface_3d_viewer.point_cloud_geometry import (
     build_colormap_lut,
     build_mesh_geometry_from_grid,
     build_point_positions_from_grid,
