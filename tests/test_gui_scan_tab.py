@@ -17,6 +17,11 @@ from frasta.gui.scan_tab.interactive_handler import InteractiveHandler
 from frasta.gui.scan_tab.scan_tab import ScanTab
 from frasta.gui.scan_tab.transform_operations import TransformOperations
 from frasta.gui.widgets import HistogramViewBox
+from frasta.gui.colorbar_common import (
+    build_colorbar_tick_layout,
+    build_tick_label_rect,
+    get_colorbar_font_sizes,
+)
 
 
 # ============================================================================
@@ -695,6 +700,36 @@ class TestScanTabColormap:
         assert image.width() > 0
         assert image.height() > 0
 
+    def test_build_export_image_preserves_visible_orientation(self, scan_tab):
+        """Exported grayscale raster should keep the same orientation as the 2D view."""
+        scan_tab.grid = np.array(
+            [
+                [0.0, 1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0, 7.0],
+                [8.0, 9.0, 10.0, 11.0],
+            ],
+            dtype=float,
+        )
+        scan_tab.xi = np.arange(4, dtype=float)
+        scan_tab.yi = np.arange(3, dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.is_colormap = False
+        scan_tab.current_colormap = None
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 11.0))
+
+        image = scan_tab.build_export_image(source="full", transparent_background=False)
+
+        assert image.width() == 4
+        assert image.height() == 3
+        top_left = QtGui.QColor(image.pixel(0, 0)).red()
+        top_right = QtGui.QColor(image.pixel(image.width() - 1, 0)).red()
+        bottom_left = QtGui.QColor(image.pixel(0, image.height() - 1)).red()
+        bottom_right = QtGui.QColor(image.pixel(image.width() - 1, image.height() - 1)).red()
+        assert top_left < top_right
+        assert top_left < bottom_left
+        assert bottom_left < bottom_right
+
     def test_build_export_colorbar_returns_requested_size(self, scan_tab):
         """Colorbar builder should respect explicit output dimensions."""
         scan_tab.grid = np.linspace(0.0, 1.0, 12, dtype=float).reshape(3, 4)
@@ -717,3 +752,148 @@ class TestScanTabColormap:
         assert isinstance(image, QtGui.QImage)
         assert image.width() == 180
         assert image.height() == 640
+
+    def test_export_colorbar_expands_scale_for_visible_low_outliers(self, scan_tab):
+        """Visible low outliers should expand the colorbar scale but keep clipped image colors."""
+        scan_tab.grid = np.array(
+            [
+                [-5.0, 0.0, 2.0],
+                [3.0, 5.0, 9.0],
+            ],
+            dtype=float,
+        )
+        scan_tab.xi = np.arange(3, dtype=float)
+        scan_tab.yi = np.arange(2, dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.hide_below_range = False
+        scan_tab.hide_above_range = True
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 5.0))
+        scan_tab.histogram_manager.get_data_range = Mock(return_value=(-5.0, 9.0))
+
+        image_data, color_vmin, color_vmax, scale_vmin, scale_vmax = scan_tab._build_display_array("full")
+
+        assert color_vmin == pytest.approx(0.0)
+        assert color_vmax == pytest.approx(5.0)
+        assert scale_vmin == pytest.approx(-5.0)
+        assert scale_vmax == pytest.approx(5.0)
+        assert image_data[0, 0] == pytest.approx(0.0)
+
+    def test_export_colorbar_expands_scale_for_visible_high_outliers(self, scan_tab):
+        """Visible high outliers should expand the colorbar scale but keep clipped image colors."""
+        scan_tab.grid = np.array(
+            [
+                [-5.0, 0.0, 2.0],
+                [3.0, 5.0, 9.0],
+            ],
+            dtype=float,
+        )
+        scan_tab.xi = np.arange(3, dtype=float)
+        scan_tab.yi = np.arange(2, dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.hide_below_range = True
+        scan_tab.hide_above_range = False
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 5.0))
+        scan_tab.histogram_manager.get_data_range = Mock(return_value=(-5.0, 9.0))
+
+        image_data, color_vmin, color_vmax, scale_vmin, scale_vmax = scan_tab._build_display_array("full")
+
+        assert color_vmin == pytest.approx(0.0)
+        assert color_vmax == pytest.approx(5.0)
+        assert scale_vmin == pytest.approx(0.0)
+        assert scale_vmax == pytest.approx(9.0)
+        assert image_data[1, 2] == pytest.approx(5.0)
+
+    def test_colorbar_reference_labels_show_only_data_limits_when_ranges_match(self, scan_tab):
+        """Right-side labels should stay minimal when threshold and data limits are identical."""
+        specs = scan_tab._build_colorbar_reference_label_specs(
+            scale_vmin=0.0,
+            scale_vmax=5.0,
+            color_vmin=0.0,
+            color_vmax=5.0,
+        )
+
+        assert [spec["text"] for spec in specs] == ["0", "5"]
+
+    def test_colorbar_reference_labels_respect_fixed_decimals(self, scan_tab):
+        """Right-side labels should use the requested fixed decimal precision."""
+        specs = scan_tab._build_colorbar_reference_label_specs(
+            scale_vmin=0.0,
+            scale_vmax=5.0,
+            color_vmin=1.25,
+            color_vmax=3.5,
+            decimals=2,
+        )
+
+        assert [spec["text"] for spec in specs] == ["0.00", "1.25", "3.50", "5.00"]
+
+    def test_format_export_value_can_trim_trailing_zeroes(self, scan_tab):
+        """Left-side tick labels should be able to drop redundant fixed zeroes."""
+        assert scan_tab._format_export_value(2.0, decimals=2, trim_trailing_zeros=True) == "2"
+        assert scan_tab._format_export_value(2.5, decimals=2, trim_trailing_zeros=True) == "2.5"
+
+    def test_colorbar_reference_labels_include_threshold_limits_for_clipped_outliers(self, scan_tab):
+        """Right-side labels should include threshold limits when visible outliers extend the scale."""
+        specs = scan_tab._build_colorbar_reference_label_specs(
+            scale_vmin=-5.0,
+            scale_vmax=9.0,
+            color_vmin=0.0,
+            color_vmax=5.0,
+        )
+
+        assert [spec["text"] for spec in specs] == ["-5", "0", "5", "9"]
+
+    def test_colorbar_reference_label_layout_separates_y_positions(self, scan_tab):
+        """Right-side labels should keep distinct vertical positions."""
+        bar_rect = QtCore.QRect(40, 50, 30, 200)
+        specs = [
+            {"fraction": 1.0, "text": "Data max 9", "bold": False},
+            {"fraction": 0.75, "text": "Range max 5", "bold": True},
+            {"fraction": 0.25, "text": "Range min 0", "bold": True},
+            {"fraction": 0.0, "text": "Data min -5", "bold": False},
+        ]
+
+        positions = scan_tab._layout_colorbar_reference_label_positions(bar_rect, specs, min_gap=18.0)
+
+        assert len(positions) == 4
+        assert positions == sorted(positions)
+        for upper, lower in zip(positions, positions[1:]):
+            assert (lower - upper) >= 18.0 - 1e-6
+
+    def test_get_colorbar_font_sizes_honors_explicit_font_size(self, scan_tab):
+        """Explicit font size should override the automatic export scaling."""
+        title_size, label_size = scan_tab._get_colorbar_font_sizes(180, 640, font_size=14)
+
+        assert title_size == 15
+        assert label_size == 14
+
+    def test_shared_colorbar_font_sizes_honor_explicit_size(self):
+        """Shared colorbar helper should expose the same explicit font-size override."""
+        title_size, label_size = get_colorbar_font_sizes(180, 640, font_size=13)
+
+        assert title_size == 14
+        assert label_size == 13
+
+    def test_shared_colorbar_tick_layout_uses_quarter_divisions(self):
+        """Shared colorbar helper should place three minor ticks between major ticks."""
+        layout = build_colorbar_tick_layout(0.0, 8.0, target_count=4.0, minor_subdivisions=3)
+
+        major_fractions = [float(tick["fraction"]) for tick in layout["major"]]
+        minor_fractions = [float(tick["fraction"]) for tick in layout["minor"]]
+
+        assert major_fractions[:3] == [0.0, 0.25, 0.5]
+        assert 0.0625 in minor_fractions
+        assert 0.125 in minor_fractions
+        assert 0.1875 in minor_fractions
+
+    def test_shared_tick_label_rect_above_responds_to_font_metrics(self):
+        """Shared label-rect helper should move the top edge with the font height."""
+        font = QtGui.QFont()
+        font.setPointSize(12)
+        metrics = QtGui.QFontMetricsF(font)
+
+        rect = build_tick_label_rect(10.0, 80.0, 100.0, metrics, placement="above")
+
+        assert rect.top() < 100.0
+        assert rect.height() == pytest.approx(metrics.height())

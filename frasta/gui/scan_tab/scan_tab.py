@@ -22,6 +22,15 @@ import trimesh
 from ...core import Surface
 from ...utils import get_colormap, get_lookup_table
 from ...processing import fill_holes, remove_outliers, nan_aware_gaussian
+from ..colorbar_common import (
+    build_colorbar_tick_layout,
+    build_reference_label_specs,
+    build_tick_label_rect,
+    format_colorbar_value,
+    get_colorbar_font_sizes,
+    layout_reference_label_positions,
+)
+from ..colorbar_renderer import ColorbarRenderConfig, ExportColorbarRenderer
 from ..widgets import HistogramViewBox
 
 from .histogram_manager import HistogramManager
@@ -505,9 +514,21 @@ class ScanTab(QtWidgets.QWidget):
         chk_histogram = QtWidgets.QCheckBox("Include histogram", dialog)
         chk_histogram.setChecked(True)
 
+        combo_precision = QtWidgets.QComboBox(dialog)
+        combo_precision.addItem("Auto", userData=None)
+        for decimals in range(0, 7):
+            combo_precision.addItem(f"{decimals} decimals", userData=decimals)
+        combo_precision.setCurrentIndex(1)
+
+        spin_font_size = QtWidgets.QSpinBox(dialog)
+        spin_font_size.setRange(8, 24)
+        spin_font_size.setValue(12)
+
         form.addRow("Source:", combo_source)
         form.addRow("Width [px]:", spin_width)
         form.addRow("Height [px]:", spin_height)
+        form.addRow("Precision:", combo_precision)
+        form.addRow("Font size [pt]:", spin_font_size)
         form.addRow("", chk_transparent)
         form.addRow("", chk_histogram)
 
@@ -537,6 +558,8 @@ class ScanTab(QtWidgets.QWidget):
             height=spin_height.value(),
             transparent_background=chk_transparent.isChecked(),
             include_histogram=chk_histogram.isChecked(),
+            decimals=combo_precision.currentData(),
+            font_size=spin_font_size.value(),
         )
         self._save_png_image(image, output_path, "2D colorbar")
 
@@ -555,8 +578,8 @@ class ScanTab(QtWidgets.QWidget):
         Returns:
             RGBA image representing the current 2D view configuration.
         """
-        image_data, vmin, vmax = self._build_display_array(source)
-        return self._display_array_to_qimage(image_data, vmin, vmax, transparent_background)
+        image_data, color_vmin, color_vmax, _scale_vmin, _scale_vmax = self._build_display_array(source)
+        return self._display_array_to_qimage(image_data, color_vmin, color_vmax, transparent_background)
 
     def build_export_colorbar(
         self,
@@ -565,6 +588,8 @@ class ScanTab(QtWidgets.QWidget):
         height: int = 900,
         transparent_background: bool = True,
         include_histogram: bool = True,
+        decimals: int | None = 0,
+        font_size: int | None = None,
     ) -> QtGui.QImage:
         """Build a standalone colorbar image for the current 2D display.
 
@@ -574,95 +599,105 @@ class ScanTab(QtWidgets.QWidget):
             height: Output image height in pixels.
             transparent_background: If True, use an alpha-0 canvas.
             include_histogram: If True, draw the data histogram beside the bar.
+            decimals: Number of decimal places for exported labels. ``None``
+                keeps automatic compact formatting.
+            font_size: Optional explicit label font size in points.
 
         Returns:
             QImage containing the colorbar, labels, and optional histogram.
         """
         width = max(32, int(width))
         height = max(64, int(height))
-        image_data, vmin, vmax = self._build_display_array(source)
-        values = self._get_histogram_values(image_data)
-
-        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
-        background = QtGui.QColor(0, 0, 0, 0) if transparent_background else QtGui.QColor(255, 255, 255, 255)
-        image.fill(background)
-
-        painter = QtGui.QPainter(image)
-        try:
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-
-            text_color = QtGui.QColor(255, 255, 255) if transparent_background else QtGui.QColor(20, 20, 20)
-            border_color = QtGui.QColor(255, 255, 255, 180) if transparent_background else QtGui.QColor(40, 40, 40)
-            hist_color = QtGui.QColor(180, 180, 180, 170)
-            title_font_size, label_font_size = self._get_colorbar_font_sizes(width, height)
-
-            title_font = QtGui.QFont()
-            title_font.setBold(True)
-            title_font.setPointSize(title_font_size)
-            painter.setFont(title_font)
-            painter.setPen(text_color)
-            title_rect = QtCore.QRectF(12, 8, width - 24, 28)
-            painter.drawText(title_rect, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, self.unit)
-
-            bar_top = 48
-            bar_bottom = max(bar_top + 40, height - 24)
-            bar_height = bar_bottom - bar_top
-            bar_width = max(28, min(40, width // 5))
-            bar_left = 12
-            bar_rect = QtCore.QRect(bar_left, bar_top, bar_width, bar_height)
-
-            gradient = self._build_colorbar_gradient(bar_rect)
-            painter.fillRect(bar_rect, gradient)
-            painter.setPen(QtGui.QPen(border_color, 1.0))
-            painter.drawRect(bar_rect)
-
-            if include_histogram and values.size > 0:
-                hist_left = bar_rect.right() + 4
-                hist_width = max(20, min(60, width // 4))
-                hist_rect = QtCore.QRect(hist_left, bar_top, hist_width, bar_height)
-                self._draw_colorbar_histogram(painter, hist_rect, values, vmin, vmax, hist_color)
-
-            label_left = bar_rect.right() + (max(20, min(60, width // 4)) + 12 if include_histogram else 12)
-            self._draw_colorbar_ticks(
-                painter,
-                bar_rect,
-                label_left,
-                width,
-                vmin,
-                vmax,
-                text_color,
-                border_color,
-                label_font_size=label_font_size,
+        image_data, color_vmin, color_vmax, scale_vmin, scale_vmax = self._build_display_array(source)
+        values = self._get_histogram_values(source, scale_vmin, scale_vmax)
+        renderer = ExportColorbarRenderer(
+            ColorbarRenderConfig(
+                width=width,
+                height=height,
+                title_text=self.unit,
+                gradient_stops=self._build_colorbar_gradient_stops(),
+                color_vmin=color_vmin,
+                color_vmax=color_vmax,
+                scale_vmin=scale_vmin,
+                scale_vmax=scale_vmax,
+                hist_values=values,
+                transparent_background=transparent_background,
+                include_histogram=include_histogram,
+                decimals=decimals,
+                font_size=font_size,
+                title_alignment=QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter,
             )
-        finally:
-            painter.end()
+        )
+        return renderer.render()
 
-        return image
+    def _build_display_array(self, source: str) -> tuple[np.ndarray, float, float, float, float]:
+        """Return export-ready image data plus coloring and colorbar ranges.
 
-    def _build_display_array(self, source: str) -> tuple[np.ndarray, float, float]:
-        """Return the display array used for image and colorbar export."""
+        The interactive 2D view uses ``grid.T`` because ``pyqtgraph.ImageView``
+        expects the first axis to represent X. PNG export goes through
+        ``QImage``, which expects the standard raster order
+        ``image[row, column] == image[y, x]``. Export therefore keeps the raw
+        grid orientation so the saved image matches the visible scan instead of
+        being transposed.
+
+        The exported raster keeps the same color mapping as the 2D image view.
+        The exported colorbar can span a wider numeric range when visible
+        outliers are clipped to endpoint colors, so the scale reflects all
+        displayed values while the plateau colors still match the image.
+        """
         grid = self._extract_export_grid(source)
-        vmin, vmax = self.histogram_manager.get_threshold_range()
-        if vmin is None or vmax is None:
-            data_min, data_max = self.histogram_manager.get_data_range()
-            vmin = 0.0 if data_min is None else float(data_min)
-            vmax = 1.0 if data_max is None else float(data_max)
-        if vmax <= vmin:
-            vmax = vmin + 1e-9
+        color_vmin, color_vmax, scale_vmin, scale_vmax = self._resolve_export_ranges(grid)
 
-        image_data = grid.T.copy()
+        image_data = grid.copy()
         invalid_mask = np.isnan(image_data)
         if self.hide_below_range:
-            image_data[image_data < vmin] = np.nan
+            image_data[image_data < color_vmin] = np.nan
         else:
-            image_data[image_data < vmin] = vmin
+            image_data[image_data < color_vmin] = color_vmin
         if self.hide_above_range:
-            image_data[image_data > vmax] = np.nan
+            image_data[image_data > color_vmax] = np.nan
         else:
-            image_data[image_data > vmax] = vmax
+            image_data[image_data > color_vmax] = color_vmax
         image_data[invalid_mask] = np.nan
-        return image_data, float(vmin), float(vmax)
+        return image_data, color_vmin, color_vmax, scale_vmin, scale_vmax
+
+    def _resolve_export_ranges(self, grid: np.ndarray) -> tuple[float, float, float, float]:
+        """Resolve image-color and colorbar ranges for the current export settings.
+
+        The image itself always uses the interactive threshold range for color
+        sampling. The colorbar range expands to the full finite data extent
+        whenever low or high outliers stay visible, while values outside the
+        threshold range keep the endpoint colors exactly as they do in the
+        exported raster.
+        """
+        threshold_vmin, threshold_vmax = self.histogram_manager.get_threshold_range()
+        data_min, data_max = self.histogram_manager.get_data_range()
+        finite_values = grid[np.isfinite(grid)]
+        if finite_values.size > 0:
+            data_min = float(np.min(finite_values))
+            data_max = float(np.max(finite_values))
+        elif data_min is not None and data_max is not None:
+            data_min = float(data_min)
+            data_max = float(data_max)
+        else:
+            data_min = 0.0
+            data_max = 1.0
+
+        if threshold_vmin is None or threshold_vmax is None:
+            threshold_vmin = data_min
+            threshold_vmax = data_max
+
+        color_vmin = float(threshold_vmin)
+        color_vmax = float(threshold_vmax)
+        if color_vmax <= color_vmin:
+            color_vmax = color_vmin + 1e-9
+
+        scale_vmin = data_min if not self.hide_below_range else color_vmin
+        scale_vmax = data_max if not self.hide_above_range else color_vmax
+        if scale_vmax <= scale_vmin:
+            scale_vmax = scale_vmin + 1e-9
+
+        return color_vmin, color_vmax, float(scale_vmin), float(scale_vmax)
 
     def _display_array_to_qimage(
         self,
@@ -748,36 +783,119 @@ class ScanTab(QtWidgets.QWidget):
         y_stop = min(self.grid.shape[0] - 1, y_stop)
         return x_start, x_stop, y_start, y_stop
 
-    def _get_histogram_values(self, image_data: np.ndarray) -> np.ndarray:
-        """Return finite displayed values contributing to the colorbar histogram."""
-        return np.asarray(image_data[np.isfinite(image_data)], dtype=np.float32)
+    def _get_histogram_values(self, source: str, scale_vmin: float, scale_vmax: float) -> np.ndarray:
+        """Return finite source values contributing to the exported colorbar histogram.
 
-    def _build_colorbar_gradient(self, bar_rect: QtCore.QRect) -> QtGui.QLinearGradient:
-        """Return a vertical gradient matching the active 2D colormap."""
+        Histogram export follows the numeric colorbar scale rather than the
+        already-clamped image raster. This keeps visible outliers represented in
+        the histogram whenever they are still drawn in the exported image.
+        """
+        grid = self._extract_export_grid(source)
+        values = np.asarray(grid[np.isfinite(grid)], dtype=np.float32)
+        if values.size < 1:
+            return values
+        return values[(values >= scale_vmin) & (values <= scale_vmax)]
+
+    def _build_colorbar_gradient_stops(self) -> list[tuple[float, QtGui.QColor]]:
+        """Build gradient stops for the shared exported colorbar renderer."""
+        if not self.is_colormap or self.current_colormap is None:
+            return [
+                (0.0, QtGui.QColor(0, 0, 0)),
+                (1.0, QtGui.QColor(255, 255, 255)),
+            ]
+
+        cmap = get_colormap(self.get_colormap_name())
+        if cmap is None:
+            return [
+                (0.0, QtGui.QColor(0, 0, 0)),
+                (1.0, QtGui.QColor(255, 255, 255)),
+            ]
+
+        positions, colors = cmap.getStops(mode="byte")
+        return [
+            (
+                float(position),
+                QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
+            )
+            for position, rgba in zip(positions, colors)
+        ]
+
+    def _build_colorbar_gradient(
+        self,
+        bar_rect: QtCore.QRect,
+        color_vmin: float,
+        color_vmax: float,
+        scale_vmin: float,
+        scale_vmax: float,
+    ) -> QtGui.QLinearGradient:
+        """Return a vertical gradient matching the active 2D colormap.
+
+        When visible outliers extend beyond the threshold range, the colorbar
+        shows flat endpoint colors below ``color_vmin`` and above
+        ``color_vmax`` to mirror the clipped image rendering.
+        """
         gradient = QtGui.QLinearGradient(
             float(bar_rect.left()),
             float(bar_rect.bottom()),
             float(bar_rect.left()),
             float(bar_rect.top()),
         )
+        span = max(scale_vmax - scale_vmin, 1e-9)
+        lower_fraction = float(np.clip((color_vmin - scale_vmin) / span, 0.0, 1.0))
+        upper_fraction = float(np.clip((color_vmax - scale_vmin) / span, 0.0, 1.0))
+
         if not self.is_colormap or self.current_colormap is None:
-            gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0))
-            gradient.setColorAt(1.0, QtGui.QColor(255, 255, 255))
+            self._populate_grayscale_gradient(gradient, lower_fraction, upper_fraction)
             return gradient
 
         cmap = get_colormap(self.get_colormap_name())
         if cmap is None:
-            gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0))
-            gradient.setColorAt(1.0, QtGui.QColor(255, 255, 255))
+            self._populate_grayscale_gradient(gradient, lower_fraction, upper_fraction)
             return gradient
 
         positions, colors = cmap.getStops(mode="byte")
-        for position, rgba in zip(positions, colors):
+        gradient.setColorAt(
+            0.0,
+            QtGui.QColor(int(colors[0][0]), int(colors[0][1]), int(colors[0][2]), int(colors[0][3])),
+        )
+        if lower_fraction > 0.0:
             gradient.setColorAt(
-                float(position),
+                lower_fraction,
+                QtGui.QColor(int(colors[0][0]), int(colors[0][1]), int(colors[0][2]), int(colors[0][3])),
+            )
+
+        active_span = max(upper_fraction - lower_fraction, 1e-9)
+        for position, rgba in zip(positions, colors):
+            mapped_position = lower_fraction + float(position) * active_span
+            gradient.setColorAt(
+                float(np.clip(mapped_position, 0.0, 1.0)),
                 QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
             )
+        if upper_fraction < 1.0:
+            gradient.setColorAt(
+                upper_fraction,
+                QtGui.QColor(int(colors[-1][0]), int(colors[-1][1]), int(colors[-1][2]), int(colors[-1][3])),
+            )
+        gradient.setColorAt(
+            1.0,
+            QtGui.QColor(int(colors[-1][0]), int(colors[-1][1]), int(colors[-1][2]), int(colors[-1][3])),
+        )
         return gradient
+
+    @staticmethod
+    def _populate_grayscale_gradient(
+        gradient: QtGui.QLinearGradient,
+        lower_fraction: float,
+        upper_fraction: float,
+    ) -> None:
+        """Populate a grayscale gradient with flat endpoint plateaus."""
+        black = QtGui.QColor(0, 0, 0)
+        white = QtGui.QColor(255, 255, 255)
+        gradient.setColorAt(0.0, black)
+        if lower_fraction > 0.0:
+            gradient.setColorAt(lower_fraction, black)
+        gradient.setColorAt(upper_fraction, white)
+        gradient.setColorAt(1.0, white)
 
     def _draw_colorbar_histogram(
         self,
@@ -821,21 +939,27 @@ class ScanTab(QtWidgets.QWidget):
         self,
         painter: QtGui.QPainter,
         bar_rect: QtCore.QRect,
-        label_left: int,
+        left_label_left: int,
+        left_label_width: int,
+        right_label_left: int,
         image_width: int,
-        vmin: float,
-        vmax: float,
+        scale_vmin: float,
+        scale_vmax: float,
+        color_vmin: float,
+        color_vmax: float,
         text_color: QtGui.QColor,
         tick_color: QtGui.QColor,
         label_font_size: int = 12,
+        decimals: int | None = None,
     ) -> None:
-        """Draw major and minor tick marks with labels beside the colorbar."""
+        """Draw left-side regular ticks and right-side reference labels."""
         painter.setPen(text_color)
         label_font = QtGui.QFont()
         label_font.setPointSize(int(label_font_size))
         painter.setFont(label_font)
+        label_metrics = QtGui.QFontMetricsF(label_font)
 
-        tick_layout = self._build_export_colorbar_tick_layout(vmin, vmax)
+        tick_layout = build_colorbar_tick_layout(scale_vmin, scale_vmax, target_count=6.0, minor_subdivisions=3)
         major_ticks = tick_layout["major"]
         minor_ticks = tick_layout["minor"]
 
@@ -846,16 +970,22 @@ class ScanTab(QtWidgets.QWidget):
             y = bar_rect.bottom() - fraction * bar_rect.height()
             tick_length = 12 if is_zero else 10
             painter.setPen(QtGui.QPen(tick_color, 1.2))
-            painter.drawLine(bar_rect.right() + 1, int(y), bar_rect.right() + tick_length, int(y))
+            painter.drawLine(bar_rect.left() - 1, int(y), bar_rect.left() - tick_length, int(y))
             font = QtGui.QFont(label_font)
             font.setBold(is_zero)
             painter.setFont(font)
             painter.setPen(QtGui.QPen(text_color, 1.0))
-            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 8, 24)
+            text_rect = build_tick_label_rect(
+                left_label_left,
+                left_label_width - 6,
+                y,
+                label_metrics,
+                placement="above",
+            )
             painter.drawText(
                 text_rect,
-                QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-                self._format_export_value(value),
+                QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter,
+                format_colorbar_value(value, decimals=decimals, trim_trailing_zeros=True),
             )
         painter.setFont(label_font)
 
@@ -863,18 +993,21 @@ class ScanTab(QtWidgets.QWidget):
             fraction = float(tick["fraction"])
             minor_y = bar_rect.bottom() - fraction * bar_rect.height()
             painter.setPen(QtGui.QPen(tick_color, 1.0))
-            painter.drawLine(bar_rect.right() + 1, int(minor_y), bar_rect.right() + 6, int(minor_y))
+            painter.drawLine(bar_rect.left() - 1, int(minor_y), bar_rect.left() - 6, int(minor_y))
 
-        self._draw_colorbar_edge_labels(
+        self._draw_colorbar_reference_labels(
             painter,
             bar_rect,
-            label_left,
+            right_label_left,
             image_width,
-            vmin,
-            vmax,
-            major_ticks,
+            scale_vmin,
+            scale_vmax,
+            color_vmin,
+            color_vmax,
             text_color,
             label_font,
+            tick_color,
+            decimals=decimals,
         )
 
     def _build_export_colorbar_tick_layout(self, vmin: float, vmax: float) -> dict[str, list[dict[str, float | bool]]]:
@@ -887,15 +1020,7 @@ class ScanTab(QtWidgets.QWidget):
         Returns:
             Dictionary with ``major`` and ``minor`` tick definitions.
         """
-        if not np.isfinite(vmin) or not np.isfinite(vmax):
-            return {"major": [], "minor": []}
-        if vmax <= vmin:
-            vmax = vmin + 1e-9
-
-        major_step = self._select_export_tick_step(vmin, vmax, target_count=6.0)
-        major_ticks = self._build_ticks_for_step(vmin, vmax, major_step)
-        minor_ticks = self._build_minor_ticks(vmin, vmax, major_step, subdivisions=2)
-        return {"major": major_ticks, "minor": minor_ticks}
+        return build_colorbar_tick_layout(vmin, vmax, target_count=6.0, minor_subdivisions=3)
 
     @staticmethod
     def _select_export_tick_step(vmin: float, vmax: float, target_count: float = 6.0) -> float:
@@ -981,59 +1106,145 @@ class ScanTab(QtWidgets.QWidget):
         return minor_ticks
 
     @staticmethod
-    def _format_export_value(value: float) -> str:
-        """Format numeric labels compactly for export annotations."""
-        if not np.isfinite(value):
-            return "nan"
-        magnitude = abs(float(value))
-        if magnitude >= 1e4 or (0 < magnitude < 1e-3):
-            return f"{value:.3e}"
-        return f"{value:.6f}".rstrip("0").rstrip(".")
+    def _format_export_value(
+        value: float,
+        decimals: int | None = None,
+        trim_trailing_zeros: bool = False,
+    ) -> str:
+        """Format numeric labels for export annotations.
 
-    def _draw_colorbar_edge_labels(
+        Args:
+            value: Numeric value to format.
+            decimals: Fixed decimal count. ``None`` keeps automatic compact
+                formatting with scientific notation for very large or small
+                magnitudes.
+            trim_trailing_zeros: If True, remove trailing zeroes and a dangling
+                decimal separator from fixed-decimal formatting.
+        """
+        return format_colorbar_value(
+            value,
+            decimals=decimals,
+            trim_trailing_zeros=trim_trailing_zeros,
+        )
+
+    def _draw_colorbar_reference_labels(
         self,
         painter: QtGui.QPainter,
         bar_rect: QtCore.QRect,
         label_left: int,
         image_width: int,
-        vmin: float,
-        vmax: float,
-        major_ticks: list[dict[str, float | bool]],
+        scale_vmin: float,
+        scale_vmax: float,
+        color_vmin: float,
+        color_vmax: float,
         text_color: QtGui.QColor,
         label_font: QtGui.QFont,
+        tick_color: QtGui.QColor,
+        decimals: int | None = None,
     ) -> None:
-        """Draw endpoint labels when they do not collide with regular major ticks."""
-        if vmax <= vmin:
+        """Draw right-side labels for visible data limits and threshold limits."""
+        if scale_vmax <= scale_vmin:
             return
 
-        major_ys = [
-            float(bar_rect.bottom() - float(tick["fraction"]) * bar_rect.height())
-            for tick in major_ticks
+        label_specs = self._build_colorbar_reference_label_specs(
+            scale_vmin=scale_vmin,
+            scale_vmax=scale_vmax,
+            color_vmin=color_vmin,
+            color_vmax=color_vmax,
+            decimals=decimals,
+        )
+        if not label_specs:
+            return
+
+        sorted_specs = sorted(
+            label_specs,
+            key=lambda item: float(bar_rect.bottom()) - float(item["fraction"]) * bar_rect.height(),
+        )
+        target_y_positions = [
+            float(bar_rect.bottom()) - float(spec["fraction"]) * bar_rect.height()
+            for spec in sorted_specs
         ]
-        collision_threshold = 18.0
-        edge_specs = [
-            (float(vmax), float(bar_rect.top())),
-            (float(vmin), float(bar_rect.bottom())),
-        ]
-        painter.setPen(QtGui.QPen(text_color, 1.0))
+        placed_y_positions = self._layout_colorbar_reference_label_positions(
+            bar_rect,
+            sorted_specs,
+            min_gap=max(float(QtGui.QFontMetricsF(label_font).height()) * 0.9, 12.0),
+            font_height=float(QtGui.QFontMetricsF(label_font).height()),
+        )
+
         painter.setFont(label_font)
-        for value, y in edge_specs:
-            if any(abs(y - major_y) < collision_threshold for major_y in major_ys):
-                continue
-            text_rect = QtCore.QRectF(label_left, y - 12, image_width - label_left - 8, 24)
+        for spec, tick_y, text_y in zip(sorted_specs, target_y_positions, placed_y_positions):
+            tick_length = 10
+            painter.setPen(QtGui.QPen(tick_color, 1.2))
+            painter.drawLine(bar_rect.right() + 1, int(tick_y), bar_rect.right() + tick_length, int(tick_y))
+
+            text_rect = build_tick_label_rect(
+                label_left,
+                image_width - label_left - 8,
+                text_y,
+                QtGui.QFontMetricsF(label_font),
+                placement="center",
+            )
+            painter.setFont(label_font)
+            painter.setPen(QtGui.QPen(text_color, 1.0))
             painter.drawText(
                 text_rect,
                 QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-                self._format_export_value(value),
+                str(spec["text"]),
             )
+        painter.setFont(label_font)
+
+    def _build_colorbar_reference_label_specs(
+        self,
+        scale_vmin: float,
+        scale_vmax: float,
+        color_vmin: float,
+        color_vmax: float,
+        decimals: int | None = None,
+    ) -> list[dict[str, float | str | bool]]:
+        """Build right-side labels for data limits and threshold limits.
+
+        The exported colorbar always marks the visible data limits. Threshold
+        limits are added when they differ from the visible minimum or maximum,
+        which makes clipped outlier plateaus explicit without crowding the
+        regular left-side tick scale.
+        """
+        return build_reference_label_specs(
+            scale_vmin=scale_vmin,
+            scale_vmax=scale_vmax,
+            color_vmin=color_vmin,
+            color_vmax=color_vmax,
+            decimals=decimals,
+        )
 
     @staticmethod
-    def _get_colorbar_font_sizes(width: int, height: int) -> tuple[int, int]:
-        """Return title and label font sizes scaled to the export dimensions."""
-        scale_base = max(64, min(int(width), int(height)))
-        title_size = int(np.clip(round(scale_base * 0.055), 10, 18))
-        label_size = int(np.clip(round(scale_base * 0.05), 9, 16))
-        return title_size, label_size
+    def _layout_colorbar_reference_label_positions(
+        bar_rect: QtCore.QRect,
+        sorted_specs: list[dict[str, float | str | bool]],
+        min_gap: float = 18.0,
+        font_height: float = 24.0,
+    ) -> list[float]:
+        """Lay out right-side labels from top to bottom with a minimum gap."""
+        return layout_reference_label_positions(
+            bar_rect,
+            sorted_specs,
+            font_height=font_height,
+            min_gap=min_gap,
+        )
+
+    @staticmethod
+    def _get_colorbar_font_sizes(
+        width: int,
+        height: int,
+        font_size: int | None = None,
+    ) -> tuple[int, int]:
+        """Return title and label font sizes for the exported colorbar.
+
+        Args:
+            width: Export image width in pixels.
+            height: Export image height in pixels.
+            font_size: Optional explicit label font size in points.
+        """
+        return get_colorbar_font_sizes(width, height, font_size=font_size)
 
     def _save_png_image(self, image: QtGui.QImage, output_path: str, label: str) -> None:
         """Save an image as PNG and show a detailed error on failure."""

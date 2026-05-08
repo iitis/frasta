@@ -77,10 +77,12 @@ underlying ViewBox rather than by forcing a constant widget size. When free
 space appears around the fitted FRASTA map, a thin outline marks the true
 image boundary.
 
-Both the 2D and experimental 3D colorbar exporters now use a matching layout
-style with larger labels, regular rounded major ticks, an explicit zero tick
-when the display range crosses zero, and an optional histogram beside the
-color ramp.
+Both the 2D and experimental 3D colorbar exporters now use a shared layout
+and formatting engine with larger labels, regular rounded major ticks, an
+explicit zero tick when the display range crosses zero, and an optional
+histogram beside the color ramp. The export dialogs also expose label
+precision and font-size controls so screenshots can be tuned for different
+units and publication layouts.
 
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
