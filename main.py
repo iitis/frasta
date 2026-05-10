@@ -5,7 +5,7 @@ from frasta.gui import MainWindow
 def set_logger():
     import logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.ERROR,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     logging.getLogger("frasta").setLevel(logging.DEBUG)
