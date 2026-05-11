@@ -26,6 +26,7 @@ class ColormapManager:
         self.range_linked = False  # Link ref/adj ranges together
         self.range_ref_auto = True  # Auto-calculate ref range
         self.range_adj_auto = True  # Auto-calculate adj range
+        self.auto_range_mode = "full"  # 'full' or 'percentile'
         self.range_ref = (None, None)  # (lo, hi) when auto=False
         self.range_adj = (None, None)
         
@@ -74,7 +75,7 @@ class ColormapManager:
         self._adj_last = adj_last
     
     def compute_auto_lo_hi(self, Z):
-        """Compute automatic range from data using percentile method.
+        """Compute automatic range from data using the selected auto-range mode.
         
         Args:
             Z (np.ndarray): 2D height data (may contain NaN).
@@ -85,10 +86,15 @@ class ColormapManager:
         valid = Z[np.isfinite(Z)]
         if len(valid) == 0:
             return (0.0, 1.0)
-        
-        # Use percentile to exclude outliers
-        lo = np.percentile(valid, 1)
-        hi = np.percentile(valid, 99)
+
+        if self.auto_range_mode == "percentile":
+            # Exclude only the most extreme values to keep color contrast stable.
+            lo = np.percentile(valid, 1)
+            hi = np.percentile(valid, 99)
+        else:
+            # Match the 2D viewer by default and use the full finite data span.
+            lo = np.min(valid)
+            hi = np.max(valid)
         
         # Ensure non-zero range
         if abs(hi - lo) < 1e-9:
@@ -97,6 +103,21 @@ class ColormapManager:
             hi += span
         
         return (float(lo), float(hi))
+
+    def set_auto_range_mode(self, mode: str) -> bool:
+        """Set the automatic range-computation mode.
+
+        Args:
+            mode: ``"full"`` for finite min/max or ``"percentile"`` for 1/99%.
+
+        Returns:
+            bool: True when the mode actually changed.
+        """
+        normalized_mode = "percentile" if str(mode).lower() == "percentile" else "full"
+        if normalized_mode == self.auto_range_mode:
+            return False
+        self.auto_range_mode = normalized_mode
+        return True
     
     def get_lo_hi_for(self, which, Z):
         """Get range (lo, hi) for specified surface.

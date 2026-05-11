@@ -36,6 +36,25 @@ class ROIController:
         self.global_roi_state: dict | None = None
         self._tab_roi_states: dict[int, dict] = {}
         self._last_tab = None
+        self._last_delete_snapshot: dict | None = None
+
+    def _show_status_message(self, message: str, timeout_ms: int = 5000):
+        """Show a transient message in the main-window status bar when available."""
+        try:
+            self.main_window.statusBar().showMessage(message, timeout_ms)
+        except Exception:
+            logger.debug("Unable to show ROI status message: %s", message)
+
+    def _set_undo_delete_enabled(self, enabled: bool):
+        """Enable or disable the ROI-delete undo action when it exists."""
+        action = getattr(getattr(self.main_window, "menu_builder", None), "actions", {}).get("undo_roi_delete")
+        if action is not None:
+            action.setEnabled(enabled)
+
+    def _clear_last_delete_snapshot(self):
+        """Forget the currently stored ROI-delete undo snapshot."""
+        self._last_delete_snapshot = None
+        self._set_undo_delete_enabled(False)
 
     def _tab_physical_bounds(self, tab) -> tuple[float, float, float, float]:
         """Return physical bounds of a tab image in native units."""
@@ -273,6 +292,8 @@ class ROIController:
             self._tab_roi_states.pop(key, None)
         if self._last_tab is tab:
             self._last_tab = None
+        if self._last_delete_snapshot is not None and self._last_delete_snapshot.get("tab") is tab:
+            self._clear_last_delete_snapshot()
 
     def set_mode(self, mode: str):
         """Switch between shared and per-scan ROI behavior."""
@@ -386,22 +407,53 @@ class ROIController:
 
         self.apply_dialog_config(dialog.get_roi_config(), tab=tab)
 
-    def create_circle_mask(self, xi: np.ndarray, yi: np.ndarray, center: tuple[float, float], radius: float) -> np.ndarray:
-        """Create a boolean mask for a circular ROI."""
+    def create_circle_mask(self, *args) -> np.ndarray:
+        """Create a boolean mask for a circular ROI.
+
+        Supported signatures:
+        - ``(shape, center, radius)`` for legacy pixel coordinates
+        - ``(xi, yi, center, radius)`` for physical coordinates
+        """
+        if len(args) == 3:
+            shape, center, radius = args
+            rows, cols = shape
+            xi = np.arange(cols, dtype=float)
+            yi = np.arange(rows, dtype=float)
+        elif len(args) == 4:
+            xi, yi, center, radius = args
+            xi = np.asarray(xi, dtype=float)
+            yi = np.asarray(yi, dtype=float)
+        else:
+            raise TypeError(
+                "create_circle_mask expects (shape, center, radius) or (xi, yi, center, radius)"
+            )
+
         x_coords = xi[np.newaxis, :]
         y_coords = yi[:, np.newaxis]
         dist = np.sqrt((x_coords - center[0]) ** 2 + (y_coords - center[1]) ** 2)
         return dist <= radius
 
-    def create_rectangle_mask(
-        self,
-        xi: np.ndarray,
-        yi: np.ndarray,
-        center: tuple[float, float],
-        width: float,
-        height: float,
-    ) -> np.ndarray:
-        """Create a boolean mask for a rectangular ROI."""
+    def create_rectangle_mask(self, *args) -> np.ndarray:
+        """Create a boolean mask for a rectangular ROI.
+
+        Supported signatures:
+        - ``(shape, center, width, height)`` for legacy pixel coordinates
+        - ``(xi, yi, center, width, height)`` for physical coordinates
+        """
+        if len(args) == 4:
+            shape, center, width, height = args
+            rows, cols = shape
+            xi = np.arange(cols, dtype=float)
+            yi = np.arange(rows, dtype=float)
+        elif len(args) == 5:
+            xi, yi, center, width, height = args
+            xi = np.asarray(xi, dtype=float)
+            yi = np.asarray(yi, dtype=float)
+        else:
+            raise TypeError(
+                "create_rectangle_mask expects (shape, center, width, height) or (xi, yi, center, width, height)"
+            )
+
         x_coords = xi[np.newaxis, :]
         y_coords = yi[:, np.newaxis]
         x0 = center[0] - width / 2.0
@@ -412,7 +464,10 @@ class ROIController:
 
     def create_mask(self, h: int, w: int, tab=None) -> np.ndarray | None:
         """Create a boolean mask for the requested tab and grid shape."""
-        state = self._get_state_for_tab(tab if tab is not None else self.main_window.current_tab())
+        active_tab = tab if tab is not None else self.main_window.current_tab()
+        state = self._get_state_for_tab(active_tab)
+        if state is None and active_tab is None:
+            state = self._current_live_state()
         if state is None or not state.get("visible", True):
             return None
 
@@ -420,28 +475,53 @@ class ROIController:
         size_x, size_y = state["size"]
         center_x = pos_x + size_x / 2.0
         center_y = pos_y + size_y / 2.0
-        if tab is None or tab.xi is None or tab.yi is None:
-            return None
+        if active_tab is None or active_tab.xi is None or active_tab.yi is None:
+            if state["shape"] == "circle":
+                return self.create_circle_mask((h, w), (center_x, center_y), size_x / 2.0)
+            return self.create_rectangle_mask((h, w), (center_x, center_y), size_x, size_y)
 
         if state["shape"] == "circle":
-            return self.create_circle_mask(tab.xi[:w], tab.yi[:h], (center_x, center_y), size_x / 2.0)
-        return self.create_rectangle_mask(tab.xi[:w], tab.yi[:h], (center_x, center_y), size_x, size_y)
+            return self.create_circle_mask(active_tab.xi[:w], active_tab.yi[:h], (center_x, center_y), size_x / 2.0)
+        return self.create_rectangle_mask(active_tab.xi[:w], active_tab.yi[:h], (center_x, center_y), size_x, size_y)
 
     def apply_roi_mask(self, inside: bool):
         """Delete data inside or outside the active ROI on the current tab."""
         tab = self.main_window.current_tab()
         if tab is None or tab.grid is None:
+            self._show_status_message("ROI delete skipped: no active scan.")
             return
 
         h, w = tab.grid.shape
         mask = self.create_mask(h, w, tab=tab)
         if mask is None:
+            self._show_status_message("ROI delete skipped: no active ROI on the current tab.")
             return
 
+        delete_mask = mask if inside else ~mask
+        deleted_points = int(np.count_nonzero(np.isfinite(tab.grid) & delete_mask))
+        if deleted_points == 0:
+            self._clear_last_delete_snapshot()
+            location = "inside" if inside else "outside"
+            self._show_status_message(f"ROI delete skipped: no valid points found {location} the ROI.")
+            return
+
+        original_grid = np.array(tab.grid, copy=True)
         if inside:
             tab.delete_unmasked(~mask)
         else:
             tab.delete_unmasked(mask)
+
+        self._last_delete_snapshot = {
+            "tab": tab,
+            "grid": original_grid,
+            "deleted_points": deleted_points,
+            "inside": inside,
+        }
+        self._set_undo_delete_enabled(True)
+        location = "inside" if inside else "outside"
+        self._show_status_message(
+            f"Deleted {deleted_points} valid points {location} the ROI. Use Edit -> Undo ROI delete to restore."
+        )
 
     def del_inside_mask(self):
         """Delete data inside the active ROI mask."""
@@ -450,6 +530,26 @@ class ROIController:
     def del_outside_mask(self):
         """Delete data outside the active ROI mask."""
         self.apply_roi_mask(False)
+
+    def undo_last_roi_delete(self):
+        """Restore the grid modified by the most recent ROI-delete operation."""
+        snapshot = self._last_delete_snapshot
+        if snapshot is None:
+            self._show_status_message("Nothing to undo for ROI delete.")
+            return
+
+        tab = snapshot.get("tab")
+        if tab is None:
+            self._clear_last_delete_snapshot()
+            self._show_status_message("ROI delete undo is no longer available.")
+            return
+
+        tab.grid = np.array(snapshot["grid"], copy=True)
+        tab.update_image()
+        tab.update_histogram()
+        restored_points = int(snapshot.get("deleted_points", 0))
+        self._clear_last_delete_snapshot()
+        self._show_status_message(f"Restored {restored_points} points from the last ROI delete.")
 
     def move_roi_to_current_tab(self, idx: int):
         """Refresh the live ROI overlay after a tab change."""

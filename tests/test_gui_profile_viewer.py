@@ -233,12 +233,11 @@ class TestVisualizationManager:
         mock_viewbox.viewRange = Mock(return_value=([0, 50], [0, 50]))
         mock_parent.image_view.getView.return_value = mock_viewbox
         
-        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_3d_viewer'):
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
             viz_manager.show_3d_view()
             
-            # Should call show_3d_viewer with grids
-            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_3d_viewer
-            show_3d_viewer.assert_called_once()
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            show_point_3d_viewer.assert_called_once()
     
     def test_show_3d_view_with_profile_line(self, viz_manager, mock_parent):
         """Test show_3d_view includes profile line points."""
@@ -250,12 +249,24 @@ class TestVisualizationManager:
         mock_parent.rr_full = np.array([10, 20, 30])
         mock_parent.cc_full = np.array([10, 20, 30])
         
-        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_3d_viewer'):
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
             viz_manager.show_3d_view()
             
-            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_3d_viewer
-            call_kwargs = show_3d_viewer.call_args[1]
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            call_kwargs = show_point_3d_viewer.call_args[1]
             assert call_kwargs['line_points'] is not None
+
+    def test_show_3d_point_view_uses_point_backend(self, viz_manager, mock_parent):
+        """Test show_3d_point_view opens the experimental point backend."""
+        mock_viewbox = Mock()
+        mock_viewbox.viewRange = Mock(return_value=([0, 50], [0, 50]))
+        mock_parent.image_view.getView.return_value = mock_viewbox
+
+        with patch('frasta.gui.dialogs.profile_viewer.visualization_manager.show_point_3d_viewer'):
+            viz_manager.show_3d_point_view()
+
+            from frasta.gui.dialogs.profile_viewer.visualization_manager import show_point_3d_viewer
+            show_point_3d_viewer.assert_called_once()
     
     def test_show_preview_creates_window(self, viz_manager, mock_parent):
         """Test show_preview creates preview window."""
@@ -275,7 +286,7 @@ class TestVisualizationManager:
             mock_window.show.assert_called_once()
     
     def test_resize_image_view_landscape(self, viz_manager, mock_parent):
-        """Test resize_image_view calculates size for landscape image."""
+        """Test resize_image_view uses a compact minimum size for wide images."""
         shape = (300, 500)  # Width > Height
         
         viz_manager.resize_image_view(shape)
@@ -283,12 +294,11 @@ class TestVisualizationManager:
         mock_parent.image_view.setFixedSize.assert_called_once()
         call_args = mock_parent.image_view.setFixedSize.call_args[0]
         width, height = call_args
-        # Width should be base (500), height proportionally smaller
-        assert width == 500
+        assert width == 240
         assert height < width
     
     def test_resize_image_view_portrait(self, viz_manager, mock_parent):
-        """Test resize_image_view calculates size for portrait image."""
+        """Test resize_image_view uses a compact minimum size for tall images."""
         shape = (500, 300)  # Height > Width
         
         viz_manager.resize_image_view(shape)
@@ -296,12 +306,11 @@ class TestVisualizationManager:
         mock_parent.image_view.setFixedSize.assert_called_once()
         call_args = mock_parent.image_view.setFixedSize.call_args[0]
         width, height = call_args
-        # Height should be base (500), width proportionally smaller
-        assert height == 500
+        assert height == 240
         assert width < height
     
     def test_resize_image_view_square(self, viz_manager, mock_parent):
-        """Test resize_image_view handles square images."""
+        """Test resize_image_view keeps square images square."""
         shape = (400, 400)
         
         viz_manager.resize_image_view(shape)

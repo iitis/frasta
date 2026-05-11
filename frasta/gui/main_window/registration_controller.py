@@ -30,13 +30,28 @@ class RegistrationController:
         self.viewer = None
         self._profile_viewer = None
 
-    def _copy_display_settings(self, source_tab, target_tab):
-        """Copy current scan display settings to a derived registration tab."""
-        target_tab.hide_below_range = source_tab.hide_below_range
-        target_tab.hide_above_range = source_tab.hide_above_range
-        target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
-        target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
-        target_tab.set_colormap(source_tab.get_colormap_name())
+    def _initialize_scan_pair_selectors(
+        self,
+        first_combo: QtWidgets.QComboBox,
+        second_combo: QtWidgets.QComboBox,
+        tab_count: int,
+    ) -> None:
+        """Set a consistent default pair of distinct scan selections.
+
+        The current tab becomes the first selection when possible, and the
+        second selector points to the next available tab so the dialog never
+        opens with two identical scans selected by default.
+        """
+        if tab_count < 2:
+            return
+
+        current_index = self.main_window.tabs.currentIndex()
+        if current_index < 0 or current_index >= tab_count:
+            current_index = 0
+        second_index = (current_index + 1) % tab_count
+
+        first_combo.setCurrentIndex(current_index)
+        second_combo.setCurrentIndex(second_index)
 
     def _crop_to_common_area_if_needed(self, ref_tab, mov_tab, method: str):
         """Optionally crop mismatched grids before automatic registration.
@@ -167,8 +182,8 @@ class RegistrationController:
                 tab1 = self.main_window.create_surface_tab(scan1_aligned_data, ref_title)
                 tab2 = self.main_window.create_surface_tab(scan2_aligned_data, mov_title)
                 if idx1 is not None and idx2 is not None:
-                    self._copy_display_settings(tabs.widget(idx1), tab1)
-                    self._copy_display_settings(tabs.widget(idx2), tab2)
+                    self.main_window.copy_scan_display_settings(tabs.widget(idx1), tab1)
+                    self.main_window.copy_scan_display_settings(tabs.widget(idx2), tab2)
                 return
 
             if result_target == "overwrite":
@@ -189,6 +204,7 @@ class RegistrationController:
         names = [tabs.tabText(i) for i in range(tabs.count())]
         cb1.addItems(names)
         cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
         ok_btn = QtWidgets.QPushButton("OK")
         cancel_btn = QtWidgets.QPushButton("Cancel")
         hl = QtWidgets.QHBoxLayout()
@@ -248,6 +264,7 @@ class RegistrationController:
         names = [tabs.tabText(i) for i in range(tabs.count())]
         cb1.addItems(names)
         cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
         layout.addWidget(QtWidgets.QLabel("Reference scan:"))
         layout.addWidget(cb1)
         layout.addWidget(QtWidgets.QLabel("Scan for comparison:"))
@@ -469,7 +486,7 @@ class RegistrationController:
                     result_surface,
                     f"{tabs.tabText(mov_idx)} [registered]",
                 )
-                self._copy_display_settings(mov_tab, target_tab)
+                self.main_window.copy_scan_display_settings(mov_tab, target_tab)
             
             # Show results
             msg = f"Registration completed!\n\n"

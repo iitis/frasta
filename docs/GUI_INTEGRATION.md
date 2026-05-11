@@ -34,11 +34,60 @@ The **Edit** menu also contains **ROI settings...**, a dialog for:
 - selecting the ROI shape,
 - entering the ROI position and size numerically in physical units.
 
+The same menu now also exposes **Undo ROI delete**, which restores the most
+recent delete-inside or delete-outside operation performed through the active
+ROI. After a successful ROI delete, the status bar reports how many valid grid
+points were removed and reminds the user that the operation can be undone.
+
 The **Tools** menu also contains **Scan info...**, a read-only summary dialog for:
 - grid shape and physical spacing,
 - coordinate extents and origin,
 - valid-data coverage and basic height statistics,
 - stored scan metadata such as the imported scan name.
+
+### Experimental 3D Viewer Layout
+
+The experimental point/mesh-based 3D viewer now separates its controls into:
+- a **top action bar** for global view settings and export actions,
+- a **left sidebar** for grouped visibility and surface-style controls,
+- the **main OpenGL viewport** on the right.
+
+The top action bar contains:
+- render mode,
+- projection mode,
+- auto-range mode (`Full` or `Percentile`) for 3D color normalization,
+- point size,
+- background-color actions,
+- screenshot and colorbar export actions.
+
+The sidebar groups controls into:
+- **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,
+- **Reference** - colormap, range, and clipping controls for the reference surface,
+- **Adjusted** - matching controls for the adjusted surface, shown only when a second surface is available.
+
+To keep the sidebar narrow enough for the 3D viewport, the reference and
+adjusted range controls use a compact vertical `Min` / `Max` arrangement
+instead of two wide spin boxes in one row.
+
+When the experimental 3D viewer is opened from the profile-analysis window,
+dragging the profile ROI updates the 3D profile line and section plane live in
+the already-open viewer. This live sync keeps the current camera and surface
+geometry intact and refreshes only the profile overlay.
+
+The profile-analysis window now uses a horizontal splitter only for the two
+main views. Compact profile controls sit in one shared row above them, so the
+profile plot keeps most of the width while the FRASTA map stays in a narrower
+right-hand column. The FRASTA map preserves its aspect ratio through the
+underlying ViewBox rather than by forcing a constant widget size. When free
+space appears around the fitted FRASTA map, a thin outline marks the true
+image boundary.
+
+Both the 2D and experimental 3D colorbar exporters now use a shared layout
+and formatting engine with larger labels, regular rounded major ticks, an
+explicit zero tick when the display range crosses zero, and an optional
+histogram beside the color ramp. The export dialogs also expose label
+precision and font-size controls so screenshots can be tuned for different
+units and publication layouts.
 
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
@@ -71,6 +120,9 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 - In **independent** mode, the dialog updates only the ROI stored for the current tab.
 - The ROI remains interactive in the image view after being created from the dialog.
 - The ROI geometry is stored in physical coordinates rather than pixel indices, so the displayed shape remains correct even when `dx` and `dy` differ.
+- ROI delete operations report how many valid points were removed. If no active
+  ROI exists on the current tab, the delete is skipped and the status bar
+  explains why.
 
 ---
 
@@ -227,10 +279,33 @@ reference and moving scans each use their own stored ROI geometry.
 ### Overlay viewer assistance
 
 The manual scan-comparison window includes one helper action:
-- **Auto align (ICP)** - estimates translation and in-plane rotation with a fast ICP pass and writes both into the manual sliders
+- **Auto align (ICP, Experimental)** - estimates translation and in-plane rotation with a fast ICP pass and writes both into the manual sliders
 
 This action does not save anything on its own; it only provides a starting
 point for further manual refinement before accepting the alignment.
+
+The same window now refreshes the difference map automatically while the
+translation or rotation sliders are moving:
+- a throttled lower-resolution preview is rendered during dragging,
+- a reduced-resolution working difference map is rendered automatically after a
+  short pause or immediately when the slider is released.
+
+To keep routine use simpler, the difference panel now defaults to compact
+**Center** and **+/-** controls with an **Auto** button. The auto mode estimates
+the center from the current mean difference and expands the range around that
+center. Each value is available both as a spin box and as a synchronized
+slider for faster interactive tuning. The visibility and blinking toggles now
+sit in one compact row, and the alignment / accept actions sit beside the
+range controls instead of below them. The full interactive histogram is hidden
+by default and can be opened on demand through **Advanced histogram**.
+
+This split update path keeps the overlay responsive on larger grids without
+changing the final accepted transform. The visual comparison window now favors
+interactive responsiveness over pixel-exact difference rendering; the final
+accepted transform is still applied to the original full-resolution moving
+surface when the user confirms the alignment. The splitter between the overlay
+view and the difference map can be dragged freely, including collapsing either
+side almost completely when the user wants to focus on only one view.
 
 ---
 

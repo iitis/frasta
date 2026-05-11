@@ -200,6 +200,7 @@ class TestProcessingController:
         window.roi_controller = Mock()
         window.prompt_result_target = Mock(return_value="overwrite")
         window.create_surface_tab = Mock()
+        window.copy_scan_display_settings = Mock()
         window.tabs = Mock()
         window.tabs.indexOf = Mock(return_value=0)
         window.tabs.tabText = Mock(return_value="Scan 1")
@@ -335,7 +336,10 @@ class TestProcessingController:
 
         processing_controller.main_window.create_surface_tab.assert_called_once()
         mock_tab.set_surface.assert_not_called()
-        target_tab.set_colormap.assert_called_once_with("Metrology")
+        processing_controller.main_window.copy_scan_display_settings.assert_called_once_with(
+            mock_tab,
+            target_tab,
+        )
 
     def test_apply_morphology_overwrites_current_tab(self, processing_controller, mock_tab):
         """Morphology result can overwrite the current tab through shared flow."""
@@ -851,12 +855,59 @@ class TestOverlayViewer:
 
 class TestROIController:
     """Test suite for ROIController."""
+
+    class _DummyTabs:
+        """Minimal tab container used by ROI controller tests."""
+
+        def __init__(self, tabs, current_index=0):
+            """Store tabs and expose a QTabWidget-like API."""
+            self._tabs = list(tabs)
+            self._current_index = current_index
+
+        def count(self):
+            """Return the number of available tabs."""
+            return len(self._tabs)
+
+        def widget(self, index):
+            """Return the tab at the requested index."""
+            return self._tabs[index]
+
+        def currentIndex(self):
+            """Return the currently selected tab index."""
+            return self._current_index
+
+    class _DummyTab:
+        """Minimal scan-tab replacement with ROI-delete behavior."""
+
+        def __init__(self, grid):
+            """Create a test tab with predictable physical coordinates."""
+            self.grid = np.array(grid, dtype=float)
+            self.dx = 1.0
+            self.dy = 1.0
+            self.xi = np.arange(self.grid.shape[1], dtype=float)
+            self.yi = np.arange(self.grid.shape[0], dtype=float)
+
+        def delete_unmasked(self, mask):
+            """Mirror ScanTab.delete_unmasked for deterministic tests."""
+            self.grid = np.where(mask, self.grid, np.nan)
+
+        def update_image(self):
+            """Provide the refresh hook used by undo logic."""
+            return None
+
+        def update_histogram(self):
+            """Provide the histogram refresh hook used by undo logic."""
+            return None
     
     @pytest.fixture
     def mock_main_window(self):
         """Create mock MainWindow."""
         window = Mock()
         window.current_tab = Mock(return_value=None)
+        status_bar = Mock()
+        window.statusBar = Mock(return_value=status_bar)
+        window.menu_builder = Mock()
+        window.menu_builder.actions = {}
         return window
     
     @pytest.fixture
@@ -981,6 +1032,211 @@ class TestROIController:
         assert mask is not None
         assert mask.shape == (10, 10)
 
+    def test_del_outside_mask_keeps_only_roi_in_global_mode(self):
+        """Delete outside should preserve only the ROI in shared mode."""
+        tab1 = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+        tab2 = self._DummyTab(np.arange(100, 116, dtype=float).reshape(4, 4))
+        tabs = self._DummyTabs([tab1, tab2], current_index=1)
+
+        main_window = Mock()
+        main_window.tabs = tabs
+        main_window.current_tab = Mock(return_value=tab2)
+        controller = ROIController(main_window)
+        controller.global_roi_state = {
+            "shape": "rectangle",
+            "pos": (0.0, 0.0),
+            "size": (2.0, 4.0),
+            "visible": True,
+        }
+
+        controller.del_outside_mask()
+
+        expected = np.array(
+            [
+                [100.0, 101.0, np.nan, np.nan],
+                [104.0, 105.0, np.nan, np.nan],
+                [108.0, 109.0, np.nan, np.nan],
+                [112.0, 113.0, np.nan, np.nan],
+            ]
+        )
+        np.testing.assert_allclose(tab2.grid, expected, equal_nan=True)
+        np.testing.assert_allclose(
+            tab1.grid,
+            np.arange(16, dtype=float).reshape(4, 4),
+            equal_nan=True,
+        )
+        snapshot = controller._last_delete_snapshot
+        assert snapshot is not None
+        assert snapshot["deleted_points"] == 8
+        main_window.statusBar.return_value.showMessage.assert_called()
+
+    def test_del_inside_mask_removes_roi_in_global_mode(self):
+        """Delete inside should clear only the ROI in shared mode."""
+        tab = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+
+        main_window = Mock()
+        main_window.tabs = self._DummyTabs([tab])
+        main_window.current_tab = Mock(return_value=tab)
+        controller = ROIController(main_window)
+        controller.global_roi_state = {
+            "shape": "rectangle",
+            "pos": (0.0, 0.0),
+            "size": (2.0, 4.0),
+            "visible": True,
+        }
+
+        controller.del_inside_mask()
+
+        expected = np.array(
+            [
+                [np.nan, np.nan, 2.0, 3.0],
+                [np.nan, np.nan, 6.0, 7.0],
+                [np.nan, np.nan, 10.0, 11.0],
+                [np.nan, np.nan, 14.0, 15.0],
+            ]
+        )
+        np.testing.assert_allclose(tab.grid, expected, equal_nan=True)
+
+    def test_del_outside_mask_uses_active_tab_roi_in_per_scan_mode(self):
+        """Per-scan mode should apply the ROI stored for the active tab only."""
+        tab1 = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+        tab2 = self._DummyTab(np.arange(100, 116, dtype=float).reshape(4, 4))
+        tabs = self._DummyTabs([tab1, tab2], current_index=1)
+
+        main_window = Mock()
+        main_window.tabs = tabs
+        main_window.current_tab = Mock(return_value=tab2)
+        controller = ROIController(main_window)
+        controller.mode = "per_scan"
+        controller._tab_roi_states = {
+            controller._tab_key(tab1): {
+                "shape": "rectangle",
+                "pos": (0.0, 0.0),
+                "size": (2.0, 4.0),
+                "visible": True,
+            },
+            controller._tab_key(tab2): {
+                "shape": "rectangle",
+                "pos": (2.0, 0.0),
+                "size": (2.0, 4.0),
+                "visible": True,
+            },
+        }
+
+        controller.del_outside_mask()
+
+        expected_tab2 = np.array(
+            [
+                [np.nan, np.nan, 102.0, 103.0],
+                [np.nan, np.nan, 106.0, 107.0],
+                [np.nan, np.nan, 110.0, 111.0],
+                [np.nan, np.nan, 114.0, 115.0],
+            ]
+        )
+        np.testing.assert_allclose(tab2.grid, expected_tab2, equal_nan=True)
+        np.testing.assert_allclose(
+            tab1.grid,
+            np.arange(16, dtype=float).reshape(4, 4),
+            equal_nan=True,
+        )
+
+    def test_move_roi_to_current_tab_preserves_per_scan_geometry_before_delete(self):
+        """Switching tabs should save the previous live ROI before applying delete."""
+        tab1 = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+        tab2 = self._DummyTab(np.arange(100, 116, dtype=float).reshape(4, 4))
+        tabs = self._DummyTabs([tab1, tab2], current_index=1)
+
+        live_roi = Mock()
+        live_roi.isVisible = Mock(return_value=True)
+        live_roi.pos = Mock(return_value=Mock(x=lambda: 0.0, y=lambda: 0.0))
+        live_roi.size = Mock(return_value=[2.0, 4.0])
+        live_roi.hide = Mock()
+        live_roi.setPos = Mock()
+        live_roi.setSize = Mock()
+        live_roi.show = Mock()
+
+        tab1.image_view = Mock()
+        tab1.image_view.getView.return_value = Mock(removeItem=Mock(), addItem=Mock())
+        tab2.image_view = Mock()
+        tab2.image_view.getView.return_value = Mock(removeItem=Mock(), addItem=Mock())
+
+        main_window = Mock()
+        main_window.tabs = tabs
+        main_window.current_tab = Mock(return_value=tab2)
+        controller = ROIController(main_window)
+        controller.mode = "per_scan"
+        controller.shared_rectangle_roi = live_roi
+        controller._last_tab = tab1
+        controller._tab_roi_states = {
+            controller._tab_key(tab1): None,
+            controller._tab_key(tab2): {
+                "shape": "rectangle",
+                "pos": (2.0, 0.0),
+                "size": (2.0, 4.0),
+                "visible": True,
+            },
+        }
+        controller._ensure_rectangle_roi = Mock(return_value=live_roi)
+        controller._detach_live_rois = Mock()
+        controller._hide_live_rois = Mock()
+
+        controller.move_roi_to_current_tab(1)
+        controller.del_outside_mask()
+
+        assert controller._tab_roi_states[controller._tab_key(tab1)] == {
+            "shape": "rectangle",
+            "pos": (0.0, 0.0),
+            "size": (2.0, 4.0),
+            "visible": True,
+        }
+        expected_tab2 = np.array(
+            [
+                [np.nan, np.nan, 102.0, 103.0],
+                [np.nan, np.nan, 106.0, 107.0],
+                [np.nan, np.nan, 110.0, 111.0],
+                [np.nan, np.nan, 114.0, 115.0],
+            ]
+        )
+        np.testing.assert_allclose(tab2.grid, expected_tab2, equal_nan=True)
+
+    def test_apply_roi_mask_reports_missing_roi(self, roi_controller):
+        """Missing ROI should produce a non-destructive status message."""
+        tab = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+        roi_controller.main_window.current_tab = Mock(return_value=tab)
+
+        roi_controller.del_inside_mask()
+
+        roi_controller.main_window.statusBar.return_value.showMessage.assert_called()
+        np.testing.assert_allclose(tab.grid, np.arange(16, dtype=float).reshape(4, 4), equal_nan=True)
+        assert roi_controller._last_delete_snapshot is None
+
+    def test_undo_last_roi_delete_restores_previous_grid(self):
+        """Undo should restore the last grid changed by ROI delete."""
+        tab = self._DummyTab(np.arange(16, dtype=float).reshape(4, 4))
+
+        main_window = Mock()
+        main_window.tabs = self._DummyTabs([tab])
+        main_window.current_tab = Mock(return_value=tab)
+        main_window.statusBar = Mock(return_value=Mock())
+        undo_action = Mock()
+        main_window.menu_builder = Mock()
+        main_window.menu_builder.actions = {"undo_roi_delete": undo_action}
+        controller = ROIController(main_window)
+        controller.global_roi_state = {
+            "shape": "rectangle",
+            "pos": (0.0, 0.0),
+            "size": (2.0, 4.0),
+            "visible": True,
+        }
+
+        controller.del_inside_mask()
+        controller.undo_last_roi_delete()
+
+        np.testing.assert_allclose(tab.grid, np.arange(16, dtype=float).reshape(4, 4), equal_nan=True)
+        assert controller._last_delete_snapshot is None
+        undo_action.setEnabled.assert_any_call(True)
+        undo_action.setEnabled.assert_any_call(False)
+
 
 # ============================================================================
 # MenuBuilder Tests
@@ -1030,6 +1286,7 @@ class TestMenuBuilder:
         assert 'zero' in menu_builder.actions
         assert 'tilt' in menu_builder.actions
         assert 'exit' in menu_builder.actions
+        assert 'undo_roi_delete' in menu_builder.actions
     
     def test_create_actions_sets_icons(self, menu_builder):
         """Test create_actions sets icons for actions."""

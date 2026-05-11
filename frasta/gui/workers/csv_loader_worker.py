@@ -20,6 +20,7 @@ class GridWorker(QtCore.QObject):
     
     progress = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(object)
+    error = QtCore.pyqtSignal(str)
 
     def __init__(self, fname, units_xy='um', units_z='um'):
         """Initialize the CSV loader worker.
@@ -43,10 +44,15 @@ class GridWorker(QtCore.QObject):
         def progress_callback(value):
             self.progress.emit(value)
         
-        surface = load_csv_data(
-            self.fname,
-            units_xy=self.units_xy,
-            units_z=self.units_z,
-            progress_callback=progress_callback
-        )
+        try:
+            surface = load_csv_data(
+                self.fname,
+                units_xy=self.units_xy,
+                units_z=self.units_z,
+                progress_callback=progress_callback
+            )
+        except Exception as exc:
+            self.error.emit(str(exc))
+            return
+
         self.finished.emit(surface)

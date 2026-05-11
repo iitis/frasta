@@ -187,6 +187,7 @@ class DataManager:
             self.parent.adjusted_grid_corrected, 
             self.parent.valid_mask
         )
+        self.parent.update_separation_spinbox_range()
         
         # Update plot range
         size_x_mm = self.parent.reference_grid.shape[1] * self.parent.ref_pixel_um.x() / 1000.0
@@ -203,18 +204,7 @@ class DataManager:
         self.parent.roi_handler.redraw_roi()
         shape = self.parent.update_plot()
         self.parent.visualization_manager.resize_image_view(shape)
-        
-        vb = self.parent.image_view.getView()
-        vb.setAspectLocked(True)
-        vb.setLimits( 
-            yMin=0, yMax=shape[0]-1,
-            xMin=0, xMax=shape[1]-1 
-        )
-        vb.setRange(
-            xRange=(0, shape[1]-1),
-            yRange=(0, shape[0]-1),
-            padding=0
-        )
+        self.parent.visualization_manager.fit_contact_image_view_to_image()
         
         QtWidgets.QApplication.restoreOverrideCursor()
     
@@ -306,6 +296,7 @@ class DataManager:
         self.parent.reference_grid = self.parent.reference_grid_smooth.copy()
         self.parent.adjusted_grid = self.parent.adjusted_grid_corrected.copy() - self.parent.separation
         self.parent.valid_mask = ~np.isnan(self.parent.reference_grid_smooth) & ~np.isnan(self.parent.adjusted_grid_corrected)
+        self.parent.update_separation_spinbox_range()
         
         # Restore settings from JSON
         settings = json_data.get('settings', {})
@@ -406,19 +397,7 @@ class DataManager:
         
         # Set image view size
         self.parent.visualization_manager.resize_image_view(shape)
-        
-        # Set limits and range
-        vb = self.parent.image_view.getView()
-        vb.setAspectLocked(True)
-        vb.setLimits(
-            yMin=0, yMax=shape[0]-1,
-            xMin=0, xMax=shape[1]-1
-        )
-        vb.setRange(
-            xRange=(0, shape[1]-1),
-            yRange=(0, shape[0]-1),
-            padding=0
-        )
+        self.parent.visualization_manager.fit_contact_image_view_to_image()
         
         # Update statistics
         self.parent.visualization_manager.update_volume_info()

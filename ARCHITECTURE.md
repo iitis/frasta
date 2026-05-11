@@ -170,15 +170,11 @@ frasta/
 |   |   +-- overlay_viewer.py
 |   |   +-- about.py
 |   +-- viewers/
-|   |   +-- grid_3d_viewer/
-|   |   |   +-- grid_3d_viewer.py
-|   |   |   +-- lod_manager.py
+|   |   +-- surface_3d_viewer/
 |   |   |   +-- colormap_manager.py
-|   |   |   +-- surface_renderer.py
-|   |   |   +-- profile_manager.py
-|   |   |   +-- camera_controller.py
-|   |   +-- lod_surface.py
-|   |   +-- limited_gl_view.py
+|   |   |   +-- point_cloud_geometry.py
+|   |   |   +-- point_cloud_gl_widget.py
+|   |   |   +-- point_3d_viewer.py
 |   +-- widgets/
 |   |   +-- surface_control_panel.py
 |   |   +-- responsive_infinite_line.py
@@ -305,15 +301,11 @@ gui/
 |   +-- overlay_viewer.py      # Scan-to-scan comparison
 |   +-- about.py              # About dialog
 +-- viewers/                # 3D visualization
-|   +-- grid_3d_viewer/         # OpenGL-based 3D surface viewer (refactored)
-|   |   +-- grid_3d_viewer.py      # Main 3D viewer widget
-|   |   +-- lod_manager.py         # Level-of-detail management
+|   +-- surface_3d_viewer/      # Active 3D viewer package used by the GUI
 |   |   +-- colormap_manager.py    # Colormap and range controls
-|   |   +-- surface_renderer.py    # Surface geometry and rendering
-|   |   +-- profile_manager.py     # Profile lines and cross-sections
-|   |   +-- camera_controller.py   # Camera positioning
-|   +-- lod_surface.py        # Level-of-detail mesh for performance
-|   +-- limited_gl_view.py    # Custom view with limited controls
+|   |   +-- point_cloud_geometry.py # Grid-to-point-cloud conversion helpers
+|   |   +-- point_cloud_gl_widget.py # QOpenGLWidget backend used by the default GUI path
+|   |   +-- point_3d_viewer.py     # Default 3D viewer wrapper with points/mesh modes
 +-- widgets/                # Reusable UI components
 |   +-- surface_control_panel.py
 |   +-- responsive_infinite_line.py
@@ -742,10 +734,11 @@ Follow same pattern as filters, but use `TransformDialog` and `processing/transf
 
 ### Adding a New 3D Visualization Mode
 
-**1. Implement in `gui/viewers/grid_3d_viewer/` modules:**
-   - New rendering modes -> `surface_renderer.py`
-   - LOD adjustments -> `lod_manager.py`
-   - Colormap schemes -> `colormap_manager.py`
+**1. Implement in `gui/viewers/surface_3d_viewer/` modules:**
+   - point or mesh rendering changes -> `point_3d_viewer.py`
+   - geometry preparation -> `point_cloud_geometry.py`
+   - OpenGL widget behavior -> `point_cloud_gl_widget.py`
+   - colormap schemes or range logic -> `colormap_manager.py`
 
 **2. Add menu option in `main_window.py`**
 

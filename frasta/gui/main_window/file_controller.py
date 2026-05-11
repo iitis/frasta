@@ -147,7 +147,7 @@ class FileController:
         
         units_xy, units_z = units
         
-        dlg = QtWidgets.QProgressDialog("Wczytywanie i gridowanie...", None, 0, 100, self.main_window)
+        dlg = QtWidgets.QProgressDialog("Loading and gridding...", None, 0, 100, self.main_window)
         dlg.setWindowModality(QtCore.Qt.ApplicationModal)
         dlg.setAutoClose(True)
         dlg.setCancelButton(None)
@@ -155,9 +155,33 @@ class FileController:
         self.worker = GridWorker(fname, units_xy=units_xy, units_z=units_z)
         self.thread = QtCore.QThread()
         self.worker.moveToThread(self.thread)
+        target_tab = tab
+        target_tabs = self.main_window.tabs
+
+        def handle_success(surface):
+            """Apply loaded data and persist file history after success."""
+            target_tab.set_surface(surface)
+            self.add_to_recent_files(fname)
+
+        def handle_error(message: str):
+            """Close the failed placeholder tab and report the loading error."""
+            idx = target_tabs.indexOf(target_tab)
+            if idx >= 0:
+                target_tabs.removeTab(idx)
+            target_tab.deleteLater()
+            QtWidgets.QMessageBox.critical(
+                self.main_window,
+                "Error",
+                f"Error while loading CSV file:\n{message}",
+            )
+
         self.worker.progress.connect(dlg.setValue)
-        self.worker.finished.connect(tab.set_surface)
+        self.worker.finished.connect(handle_success)
         self.worker.finished.connect(self.thread.quit)
+        self.worker.error.connect(self.thread.quit)
+        self.worker.error.connect(dlg.cancel)
+        self.worker.error.connect(handle_error)
+        self.thread.finished.connect(dlg.close)
         self.thread.started.connect(self.worker.process)
         self.thread.start()
         dlg.exec_()
@@ -278,7 +302,6 @@ class FileController:
             tabs.addTab(tab, fname.split('/')[-1])
             tabs.setCurrentWidget(tab)
             self.load_csv(fname, tab)
-            self.add_to_recent_files(fname)
         elif fname.endswith('.npz'):
             self.load_npz(fname)
         elif fname.endswith('.h5'):

@@ -1,12 +1,15 @@
 """3D viewers and visualization widgets."""
 
-from .grid_3d_viewer import Grid3DViewer, show_3d_viewer
-from .limited_gl_view import LimitedGLView
-from .lod_surface import LODSurface
+from __future__ import annotations
+
+from .surface_3d_viewer import (
+    ColormapManager,
+    Point3DViewer,
+    show_point_3d_viewer,
+)
 
 __all__ = [
-    'Grid3DViewer',
-    'show_3d_viewer',
-    'LimitedGLView',
-    'LODSurface'
+    'Point3DViewer',
+    'show_point_3d_viewer',
+    'ColormapManager',
 ]

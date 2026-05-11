@@ -5,9 +5,12 @@ Handles 3D visualization, image view sizing, volume calculations, and statistics
 
 import numpy as np
 import pyqtgraph as pg
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import QPointF
 
-from ...viewers import show_3d_viewer
+from ...viewers import (
+    show_point_3d_viewer,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -27,59 +30,118 @@ class VisualizationManager:
             parent: ProfileViewer instance.
         """
         self.parent = parent
+        self._live_point_viewer = None
+        self._live_point_view_bounds = None
     
     # ==========================================================================
     # 3D Visualization
     # ==========================================================================
     
     def show_3d_view(self):
-        """Open 3D viewer showing both scans and profile line."""
+        """Open the default 3D viewer showing both scans and the profile line."""
+        self._show_3d_view_with_backend(show_point_3d_viewer)
+
+    def show_3d_point_view(self):
+        """Open the default QOpenGLWidget-based 3D viewer for the current profile view."""
+        self._show_3d_view_with_backend(show_point_3d_viewer)
+
+    def _show_3d_view_with_backend(self, viewer_callable):
+        """Open a 3D viewer backend showing both scans and the profile line.
+
+        Args:
+            viewer_callable: Function used to display the chosen 3D backend.
+        """
+        payload = self._build_current_3d_payload()
+        if payload is None:
+            return
+        ref, adj, line_points, bounds = payload
+
+        logger.debug(f"ref0: {self.parent.reference_grid_smooth.shape}, adj0: {self.parent.adjusted_grid_corrected.shape}")
+        logger.debug(
+            "3D crop bounds: x_min=%s, x_max=%s, y_min=%s, y_max=%s",
+            bounds[0],
+            bounds[1],
+            bounds[2],
+            bounds[3],
+        )
+        logger.debug(f"ref min: {np.nanmin(ref)}, ref max: {np.nanmax(ref)}, ref shape: {ref.shape}")
+        logger.debug(f"ref NaN count: {np.isnan(ref).sum()}")
+        logger.debug(f"adj min: {np.nanmin(adj)}, adj max: {np.nanmax(adj)}, adj shape: {adj.shape}")
+        logger.debug(f"adj NaN count: {np.isnan(adj).sum()}")
+
+        viewer = viewer_callable(
+            reference_grid=ref,
+            adjusted_grid=adj,
+            line_points=line_points,
+            separation=self.parent.separation,
+            pixel_size_x=self.parent.ref_pixel_um.x(),
+            pixel_size_y=self.parent.ref_pixel_um.y()
+        )
+        if viewer_callable is show_point_3d_viewer:
+            self._live_point_viewer = viewer
+            self._live_point_view_bounds = bounds
+            if viewer is not None:
+                viewer.destroyed.connect(self._clear_live_point_viewer)
+
+    def _build_current_3d_payload(self):
+        """Build the grid fragment and local ROI polyline for the current image view."""
         viewbox = self.parent.image_view.getView()
         x_range, y_range = viewbox.viewRange()
-        
-        # Convert ranges to image indices
+
+        # Convert the visible image fragment into integer pixel bounds.
         x_min, x_max = int(np.floor(x_range[0])), int(np.ceil(x_range[1]))
         y_min, y_max = int(np.floor(y_range[0])), int(np.ceil(y_range[1]))
-        
-        # Ensure within image bounds
+
         shape = self.parent.reference_grid_smooth.shape
         x_min = max(0, x_min)
         x_max = min(shape[1] - 1, x_max)
         y_min = max(0, y_min)
         y_max = min(shape[0] - 1, y_max)
-        
-        # Extract grid fragments
+        if x_min > x_max or y_min > y_max:
+            return None
+
         ref = self.parent.reference_grid_smooth[y_min:y_max + 1, x_min:x_max + 1]
         adj = self.parent.adjusted_grid_corrected[y_min:y_max + 1, x_min:x_max + 1]
-        
-        logger.debug(f"ref0: {self.parent.reference_grid_smooth.shape}, adj0: {self.parent.adjusted_grid_corrected.shape}")
-        logger.debug(f"x_min: {x_min}, x_max: {x_max}, y_min: {y_min}, y_max: {y_max}")
-        logger.debug(f"ref min: {np.nanmin(ref)}, ref max: {np.nanmax(ref)}, ref shape: {ref.shape}")
-        logger.debug(f"ref NaN count: {np.isnan(ref).sum()}")
-        logger.debug(f"adj min: {np.nanmin(adj)}, adj max: {np.nanmax(adj)}, adj shape: {adj.shape}")
-        logger.debug(f"adj NaN count: {np.isnan(adj).sum()}")
-        
-        # Prepare profile line (limited to fragment, with NaNs to break line)
-        if hasattr(self.parent, 'rr_full') and hasattr(self.parent, 'cc_full'):
-            line_points = [
-                (int(col - x_min), int(row - y_min))
-                for col, row in zip(self.parent.cc_full, self.parent.rr_full)
-                if x_min <= col <= x_max and y_min <= row <= y_max
-            ]
-            if len(line_points) < 2:
-                line_points = None
-        else:
-            line_points = None
-        
-        show_3d_viewer(
-            reference_grid=ref,
-            adjusted_grid=adj,
+        line_points = self._build_line_points_for_bounds((x_min, x_max, y_min, y_max))
+        return ref, adj, line_points, (x_min, x_max, y_min, y_max)
+
+    def _build_line_points_for_bounds(self, bounds):
+        """Convert the full ROI polyline into local coordinates for a crop."""
+        if not (hasattr(self.parent, 'rr_full') and hasattr(self.parent, 'cc_full')):
+            return None
+
+        x_min, x_max, y_min, y_max = bounds
+        line_points = [
+            (int(col - x_min), int(row - y_min))
+            for col, row in zip(self.parent.cc_full, self.parent.rr_full)
+            if x_min <= col <= x_max and y_min <= row <= y_max
+        ]
+        if len(line_points) < 2:
+            return None
+        return line_points
+
+    def sync_live_point_view_profile(self):
+        """Update the open experimental 3D viewer with the current ROI line.
+
+        The method reuses the crop bounds captured when the 3D view was opened,
+        so dragging the ROI updates only the profile line and section plane
+        without rebuilding meshes or resetting the camera.
+        """
+        if self._live_point_viewer is None or self._live_point_view_bounds is None:
+            return
+        if not self._live_point_viewer.isVisible():
+            return
+
+        line_points = self._build_line_points_for_bounds(self._live_point_view_bounds)
+        self._live_point_viewer.update_profile_overlay(
             line_points=line_points,
             separation=self.parent.separation,
-            show_controls=True,
-            pixel_size_x=self.parent.ref_pixel_um.x(),
-            pixel_size_y=self.parent.ref_pixel_um.y()
         )
+
+    def _clear_live_point_viewer(self, *_args):
+        """Forget the cached live experimental 3D-viewer connection."""
+        self._live_point_viewer = None
+        self._live_point_view_bounds = None
     
     def show_preview(self, fragment, title="Region preview"):
         """Show preview window with image fragment.
@@ -102,25 +164,130 @@ class VisualizationManager:
     # ==========================================================================
     
     def resize_image_view(self, shape):
-        """Resize image view widget based on aspect ratio.
-        
+        """Refresh image-view geometry without forcing a fixed widget size.
+
+        The profile viewer now relies on normal Qt layout negotiation instead
+        of clamping the FRASTA map to a constant pixel size. Keeping the image
+        view flexible prevents the right-hand panel from dominating the window
+        while still preserving the map aspect ratio through the ViewBox.
+
         Args:
             shape (tuple): Image shape (height, width).
         """
+        if not shape or len(shape) != 2:
+            return
+
         height, width = shape
-        aspect = width / height
-        base = 500
-        
+        if height <= 0 or width <= 0:
+            return
+
+        aspect = float(width) / float(height)
+        base_min = 240
         if aspect >= 1.0:
-            w = base
-            h = int(base / aspect)
+            min_width = base_min
+            min_height = max(180, int(round(base_min / aspect)))
         else:
-            h = base
-            w = int(base * aspect)
-        
-        self.parent.image_view.setFixedSize(w, h)
-        self.parent.image_view.update()
-        self.parent.updateGeometry()
+            min_height = base_min
+            min_width = max(180, int(round(base_min * aspect)))
+
+        if isinstance(self.parent.image_view, QtWidgets.QWidget):
+            self.parent.image_view.setMinimumSize(min_width, min_height)
+            self.parent.image_view.updateGeometry()
+            return
+
+        # Test compatibility fallback for non-widget mocks.
+        if hasattr(self.parent.image_view, "setFixedSize"):
+            self.parent.image_view.setFixedSize(min_width, min_height)
+
+    def fit_contact_image_view_to_image(self) -> None:
+        """Fit the FRASTA image to the visible view using the item's true bounds.
+
+        The binary FRASTA map is displayed through ``ImageView`` with a
+        transposed array, so deriving the visible extents from the source-array
+        shape is fragile. Using the actual ``ImageItem`` bounding rectangle keeps
+        the whole map visible after data reloads, updates, and widget resizes.
+        The view range is expanded to match the current viewport aspect ratio,
+        so the complete image is always fitted to the shorter viewport side
+        instead of clipping the long dimension.
+        """
+        image_item = self.parent.image_view.getImageItem()
+        if image_item is None:
+            return
+
+        bounds = image_item.boundingRect()
+        if bounds.isNull() or bounds.width() <= 0 or bounds.height() <= 0:
+            return
+
+        self._update_contact_image_boundary(bounds)
+
+        view_box = self.parent.image_view.getView()
+        viewport_rect = view_box.sceneBoundingRect()
+        if viewport_rect.isNull() or viewport_rect.width() <= 0 or viewport_rect.height() <= 0:
+            return
+
+        image_width = float(bounds.width())
+        image_height = float(bounds.height())
+        viewport_aspect = float(viewport_rect.width()) / float(viewport_rect.height())
+        image_aspect = image_width / image_height
+
+        x_center = float(bounds.left()) + 0.5 * image_width
+        y_center = float(bounds.top()) + 0.5 * image_height
+        target_width = image_width
+        target_height = image_height
+
+        # Expand the shorter data axis so the full image fits inside the
+        # current viewport while preserving the locked aspect ratio.
+        if viewport_aspect >= image_aspect:
+            target_width = image_height * viewport_aspect
+        else:
+            target_height = image_width / viewport_aspect
+
+        x_half = 0.5 * target_width
+        y_half = 0.5 * target_height
+        view_box.setAspectLocked(True)
+        view_box.setLimits(
+            xMin=float(bounds.left()) - image_width,
+            xMax=float(bounds.right()) + image_width,
+            yMin=float(bounds.top()) - image_height,
+            yMax=float(bounds.bottom()) + image_height,
+        )
+        view_box.setRange(
+            xRange=(x_center - x_half, x_center + x_half),
+            yRange=(y_center - y_half, y_center + y_half),
+            padding=0,
+        )
+
+    def _update_contact_image_boundary(self, bounds) -> None:
+        """Draw or refresh an outline showing the actual FRASTA image extent.
+
+        When the viewport aspect ratio leaves free space around the fitted
+        image, this outline makes the true image bounds visible instead of
+        letting the map fade into the surrounding background.
+
+        Args:
+            bounds: Bounding rectangle of the current ``ImageItem``.
+        """
+        x0 = float(bounds.left())
+        x1 = float(bounds.right())
+        y0 = float(bounds.top())
+        y1 = float(bounds.bottom())
+        xs = [x0, x1, x1, x0, x0]
+        ys = [y0, y0, y1, y1, y0]
+
+        if self.parent.image_boundary_item is None:
+            self.parent.image_boundary_item = pg.PlotCurveItem(
+                xs,
+                ys,
+                pen=pg.mkPen((180, 180, 180), width=1),
+            )
+            self.parent.image_view.getView().addItem(
+                self.parent.image_boundary_item,
+                ignoreBounds=True,
+            )
+            self.parent.image_boundary_item.setZValue(5)
+            return
+
+        self.parent.image_boundary_item.setData(xs, ys)
     
     def get_viewbox_ranges_int(self, shape=None, overflow=False):
         """Get current viewbox range as integer pixel coordinates.
