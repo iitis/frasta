@@ -49,6 +49,8 @@ class MenuBuilder:
             "view3d": QtWidgets.QAction("View 3d...", self.main_window),
             "compare": QtWidgets.QAction("Scan positioning...", self.main_window),
             "profile": QtWidgets.QAction("Profile analysis...", self.main_window),
+            "contact_map": QtWidgets.QAction("Contact map analysis...", self.main_window),
+            "frasta_docks": QtWidgets.QAction("FRASTA panels (binary + profile)...", self.main_window),
             "scan_info": QtWidgets.QAction("Scan info...", self.main_window),
             "about": QtWidgets.QAction("About...", self.main_window),
             "exit": QtWidgets.QAction("Exit", self.main_window),
@@ -97,6 +99,12 @@ class MenuBuilder:
         self.actions["transform"].setToolTip("Rotate, rescale, or crop grid")
         self.actions["register"].setToolTip("Automatically align two surfaces")
         self.actions["roughness"].setToolTip("Show minimal Sa, Sq, and Sz summary for the current scan")
+        self.actions["contact_map"].setToolTip(
+            "Interactive contact map: compute D = A - B and classify pixels by threshold"
+        )
+        self.actions["frasta_docks"].setToolTip(
+            "Open dockable FRASTA binary contact map and profile panels"
+        )
         self.actions["roi_settings"].setToolTip("Choose ROI mode, shape, position, and size")
         self.actions["scan_info"].setToolTip("Show geometry, statistics, and metadata for the active scan")
         self.actions["undo_roi_delete"].setToolTip("Restore the most recent ROI delete on a scan")
@@ -133,6 +141,8 @@ class MenuBuilder:
         # Registration actions
         self.actions["compare"].triggered.connect(reg_ctrl.compare_scans)
         self.actions["profile"].triggered.connect(reg_ctrl.start_profile_analysis)
+        self.actions["contact_map"].triggered.connect(reg_ctrl.open_contact_map_dialog)
+        self.actions["frasta_docks"].triggered.connect(reg_ctrl.open_frasta_docks)
         self.actions["register"].triggered.connect(reg_ctrl.auto_register_surfaces)
         self.actions["scan_info"].triggered.connect(self.main_window.show_scan_info_dialog)
         
@@ -180,7 +190,7 @@ class MenuBuilder:
             ]),
             ("&Tools", [
                 "view3d",
-                "compare", "profile", "scan_info"
+                "compare", "profile", "contact_map", "frasta_docks", "scan_info"
             ]),
             ("&Help", [
                 "about"

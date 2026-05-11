@@ -50,6 +50,9 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._show_profile_lines = True
         self._show_profile_plane = True
         self._show_reference_rectangle = True
+        # Cursor marker (GL_LINES cross drawn by the line shader)
+        self._cursor_marker_positions = np.empty((0, 3), dtype=np.float32)
+        self._cursor_marker_buffer = None
         self._projection_mode = "perspective"
         self._background_rgba = self.DEFAULT_BACKGROUND_RGBA
 
@@ -280,6 +283,20 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._show_profile_lines = bool(visible)
         self.update()
 
+    def set_cursor_marker(self, positions: np.ndarray | None) -> None:
+        """Upload a GL_LINES cross marker for the profile hover cursor.
+
+        Args:
+            positions: Array of shape (N*2, 3) with segment endpoint pairs,
+                or None to clear the marker.
+        """
+        if positions is None or len(positions) == 0:
+            self._cursor_marker_positions = np.empty((0, 3), dtype=np.float32)
+        else:
+            self._cursor_marker_positions = np.ascontiguousarray(positions, dtype=np.float32)
+        self._upload_cursor_marker_buffer()
+        self.update()
+
     def set_profile_plane_visible(self, visible: bool) -> None:
         """Toggle plane visibility."""
         self._show_profile_plane = bool(visible)
@@ -303,6 +320,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._upload_profile_buffers()
         self._upload_reference_rectangle_buffer()
         self._upload_plane_buffers()
+        self._upload_cursor_marker_buffer()
 
     def resizeGL(self, width: int, height: int) -> None:
         """Keep the viewport in sync with the widget size."""
@@ -396,6 +414,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
                 self._delete_buffer(self._reference_rect_buffer)
                 self._delete_buffer(self._plane_vbo)
                 self._delete_buffer(self._plane_ibo)
+                self._delete_buffer(self._cursor_marker_buffer)
             finally:
                 self.doneCurrent()
         else:
@@ -407,6 +426,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._reference_rect_annotations = None
         self._plane_vbo = None
         self._plane_ibo = None
+        self._cursor_marker_buffer = None
+        self._cursor_marker_positions = np.empty((0, 3), dtype=np.float32)
         self._ref_profile_positions = np.empty((0, 3), dtype=np.float32)
         self._adj_profile_positions = np.empty((0, 3), dtype=np.float32)
         self._reference_rect_positions = np.empty((0, 3), dtype=np.float32)
@@ -760,6 +781,29 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._plane_program.disableAttributeArray(pos_loc)
         self._plane_program.release()
 
+    def _draw_cursor_marker(self, mvp: QtGui.QMatrix4x4) -> None:
+        """Render the 3D cursor cross marker at the hovered profile point."""
+        if self._line_program is None:
+            return
+        if self._cursor_marker_buffer is None or len(self._cursor_marker_positions) < 2:
+            return
+
+        self._line_program.bind()
+        self._line_program.setUniformValue("u_mvp", mvp)
+        self._line_program.setUniformValue(
+            "u_color",
+            QtGui.QVector4D(1.0, 0.9, 0.0, 1.0),  # bright yellow
+        )
+        pos_loc = self._line_program.attributeLocation("a_position")
+        self._line_program.enableAttributeArray(pos_loc)
+        self._cursor_marker_buffer.bind()
+        self._line_program.setAttributeBuffer(pos_loc, GL.GL_FLOAT, 0, 3)
+        GL.glLineWidth(3.0)
+        GL.glDrawArrays(GL.GL_LINES, 0, len(self._cursor_marker_positions))
+        self._cursor_marker_buffer.release()
+        self._line_program.disableAttributeArray(pos_loc)
+        self._line_program.release()
+
     def _draw_meshes(self, mvp: QtGui.QMatrix4x4) -> None:
         """Render all visible surfaces as shaded triangle meshes."""
         if self._mesh_program is None:
@@ -1010,6 +1054,15 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._reference_rect_positions,
         )
 
+    def _upload_cursor_marker_buffer(self) -> None:
+        """Upload the cursor cross marker buffer."""
+        if not self.isValid():
+            return
+        self._cursor_marker_buffer = self._create_or_replace_buffer(
+            self._cursor_marker_buffer,
+            self._cursor_marker_positions,
+        )
+
     def _upload_plane_buffers(self) -> None:
         """Upload the optional plane buffers."""
         if not self.isValid():
@@ -1132,6 +1185,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._draw_reference_rectangle(mvp)
         self._draw_profile_plane(mvp)
         self._draw_profile_line(mvp)
+        self._draw_cursor_marker(mvp)
 
     def _render_resize_placeholder(
         self,

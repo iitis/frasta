@@ -1,6 +1,7 @@
 """Dialog windows for FRASTA-toolbox."""
 
 from .about import AboutDialog
+from .contact_map_dialog import ContactMapDialog
 from .overlay_viewer import OverlayViewer
 from .profile_viewer import ProfileViewer
 from .roi_dialog import ROIDialog
@@ -14,6 +15,7 @@ from .processing_dialog import (
 
 __all__ = [
     'AboutDialog',
+    'ContactMapDialog',
     'OverlayViewer',
     'ProfileViewer',
     'ROIDialog',

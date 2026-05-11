@@ -292,6 +292,34 @@ class Point3DViewer(QtWidgets.QWidget):
         self.gl_widget.fit_camera_to_scene(reset_orientation=True)
         self._schedule_next_refinement()
 
+    def update_separation(self, separation: float) -> None:
+        """Shift the adjusted surface along Z without rebuilding or resetting the camera.
+
+        Only the adjusted-grid geometry cache is invalidated and rebuilt;
+        the reference geometry and camera orientation are left untouched.
+        """
+        if self._adj_grid is None:
+            return
+        self._separation = float(separation)
+        # Invalidate only the adjusted-grid geometry cache
+        self._geometry_cache["points"]["adj"].clear()
+        self._geometry_cache["mesh"]["adj"].clear()
+        # Rebuild adj geometry only
+        stride = self._current_stride()
+        adj_range = self._get_value_range("adj", self._adj_grid)
+        self._apply_geometry("adj", stride)
+        self.gl_widget.set_cloud_style(
+            "adj",
+            self._build_lut(self.combo_cmap_adj),
+            adj_range,
+            visible=self.checkbox_adj.isChecked(),
+            hide_below_range=self.chk_hide_below_adj.isChecked(),
+            hide_above_range=self.chk_hide_above_adj.isChecked(),
+        )
+        self._sync_range_widgets("adj", self._adj_grid)
+        # Update profile line z-positions (cheap)
+        self._refresh_profile_line()
+
     def update_profile_overlay(
         self,
         line_points=None,
@@ -315,6 +343,57 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_line.setVisible(has_profile)
         self.checkbox_plane.setVisible(has_profile)
         self._refresh_profile_line()
+
+    def highlight_profile_point(self, idx: int) -> None:
+        """Draw a bright cross marker at profile index *idx* in 3D.
+
+        Builds a small 3-axis cross (6 GL_LINES vertices) centred at the
+        (ref, adj) positions along the profile line. Cross arm length is
+        5 % of the larger grid dimension in physical units.
+        """
+        if self._line_points is None or self._ref_grid is None:
+            self.gl_widget.set_cursor_marker(None)
+            return
+
+        pts = np.asarray(self._line_points, dtype=np.int32)
+        h, w = self._ref_grid.shape
+        in_bounds = (
+            (pts[:, 0] >= 0) & (pts[:, 0] < w) &
+            (pts[:, 1] >= 0) & (pts[:, 1] < h)
+        )
+        pts = pts[in_bounds]
+        if idx < 0 or idx >= len(pts):
+            self.gl_widget.set_cursor_marker(None)
+            return
+
+        col, row = pts[idx]
+        x = float(col) * self._pixel_size_x
+        y = float(row) * -self._pixel_size_y
+        z_ref = float(self._ref_grid[row, col]) if np.isfinite(self._ref_grid[row, col]) else 0.0
+        z_adj = (
+            float(self._adj_grid[row, col]) + self._separation
+            if self._adj_grid is not None and np.isfinite(self._adj_grid[row, col])
+            else z_ref
+        )
+
+        arm = max(
+            w * self._pixel_size_x,
+            h * self._pixel_size_y,
+        ) * 0.04  # 4 % of footprint diagonal
+
+        segs = []
+        for z in (z_ref, z_adj):
+            # X arm
+            segs.append([x - arm, y, z])
+            segs.append([x + arm, y, z])
+            # Y arm
+            segs.append([x, y - arm, z])
+            segs.append([x, y + arm, z])
+            # Z arm (short vertical spike)
+            segs.append([x, y, z - arm * 0.5])
+            segs.append([x, y, z + arm * 0.5])
+
+        self.gl_widget.set_cursor_marker(np.array(segs, dtype=np.float32))
 
     def _refresh_clouds(self) -> None:
         """Rebuild point clouds using the current stride and color settings."""

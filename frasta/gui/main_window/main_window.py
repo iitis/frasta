@@ -26,6 +26,7 @@ from .processing_controller import ProcessingController
 from .registration_controller import RegistrationController
 from .menu_builder import MenuBuilder
 from .toolbar_builder import ToolbarBuilder
+from ..docks import FrastaController
 
 import logging
 logger = logging.getLogger(__name__)
@@ -58,6 +59,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_controller = FileController(self)
         self.processing_controller = ProcessingController(self)
         self.registration_controller = RegistrationController(self)
+
+        # FRASTA dock controller (binary map + profile docks)
+        self.frasta_controller = FrastaController(self)
+        self.addDockWidget(
+            QtCore.Qt.BottomDockWidgetArea,
+            self.frasta_controller.binary_dock,
+        )
+        self.addDockWidget(
+            QtCore.Qt.BottomDockWidgetArea,
+            self.frasta_controller.profile_dock,
+        )
+        self.tabifyDockWidget(
+            self.frasta_controller.binary_dock,
+            self.frasta_controller.profile_dock,
+        )
+        self.frasta_controller.binary_dock.hide()
+        self.frasta_controller.profile_dock.hide()
         
         # Initialize menu and toolbar builders
         self.menu_builder = MenuBuilder(self)
@@ -72,6 +90,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Connect tab changes to ROI controller
         self.tabs.currentChanged.connect(self.roi_controller.move_roi_to_current_tab)
         self.tabs.currentChanged.connect(self.sync_colormap_selector)
+
+        # Restore window geometry and dock layout from previous session
+        _settings = self.file_controller.settings
+        _geom = _settings.value("mainWindow/geometry")
+        if _geom is not None:
+            self.restoreGeometry(_geom)
+        _state = _settings.value("mainWindow/state")
+        if _state is not None:
+            self.restoreState(_state)
 
     def close_tab(self, index: int):
         """Close a tab at given index.
@@ -272,5 +299,8 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             event: Close event
         """
-        self.file_controller.settings.setValue("recentFiles", self.file_controller.recent_files)
+        _settings = self.file_controller.settings
+        _settings.setValue("recentFiles", self.file_controller.recent_files)
+        _settings.setValue("mainWindow/geometry", self.saveGeometry())
+        _settings.setValue("mainWindow/state", self.saveState())
         event.accept()

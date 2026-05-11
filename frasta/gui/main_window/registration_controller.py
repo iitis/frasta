@@ -10,7 +10,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 from functools import partial
 
-from ..dialogs import ProfileViewer, OverlayViewer, RegistrationDialog
+from ..dialogs import ProfileViewer, OverlayViewer, RegistrationDialog, ContactMapDialog
 from ...core import Surface
 
 import logging
@@ -315,7 +315,156 @@ class RegistrationController:
         self._profile_viewer.show()
         self._profile_viewer.raise_()
         self._profile_viewer.activateWindow()
+
+    def open_contact_map_dialog(self):
+        """Open the interactive contact map analysis dialog for two scans."""
+        tabs = self.main_window.tabs
+        if tabs.count() < 2:
+            QtWidgets.QMessageBox.warning(
+                self.main_window, "Not enough scans",
+                "At least 2 scans are required for contact map analysis."
+            )
+            return
+
+        dialog = QtWidgets.QDialog(self.main_window)
+        dialog.setWindowTitle("Select scans for contact map analysis")
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        label1 = QtWidgets.QLabel("Surface A (reference):")
+        label2 = QtWidgets.QLabel("Surface B (conjugate):")
+        cb1 = QtWidgets.QComboBox()
+        cb2 = QtWidgets.QComboBox()
+        names = [tabs.tabText(i) for i in range(tabs.count())]
+        cb1.addItems(names)
+        cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
+
+        ok_btn = QtWidgets.QPushButton("OK")
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        hl = QtWidgets.QHBoxLayout()
+        hl.addWidget(ok_btn)
+        hl.addWidget(cancel_btn)
+
+        layout.addWidget(label1)
+        layout.addWidget(cb1)
+        layout.addWidget(label2)
+        layout.addWidget(cb2)
+        layout.addLayout(hl)
+
+        def accept():
+            if cb1.currentIndex() == cb2.currentIndex():
+                QtWidgets.QMessageBox.warning(
+                    dialog, "Error", "Please select two different scans."
+                )
+                return
+            dialog.accept()
+
+        ok_btn.clicked.connect(accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        idx1 = cb1.currentIndex()
+        idx2 = cb2.currentIndex()
+        tab1 = tabs.widget(idx1)
+        tab2 = tabs.widget(idx2)
+
+        surf_a = tab1.get_surface()
+        surf_b = tab2.get_surface()
+
+        if surf_a.height.shape != surf_b.height.shape:
+            QtWidgets.QMessageBox.warning(
+                self.main_window, "Shape mismatch",
+                f"The two scans have different grid shapes:\n"
+                f"{surf_a.height.shape} vs {surf_b.height.shape}\n\n"
+                "Please align and crop them to the same size before running "
+                "contact map analysis."
+            )
+            return
+
+        self._contact_map_dialog = ContactMapDialog(
+            surf_a,
+            surf_b,
+            parent=self.main_window,
+            title_a=names[idx1],
+            title_b=names[idx2],
+        )
+        self._contact_map_dialog.setWindowTitle(
+            f"Contact map: {names[idx1]} vs {names[idx2]}"
+        )
+        self._contact_map_dialog.show()
     
+    def open_frasta_docks(self):
+        """Load a scan pair into the dockable FRASTA binary + profile panels."""
+        tabs = self.main_window.tabs
+        if tabs.count() < 2:
+            QtWidgets.QMessageBox.warning(
+                self.main_window, "Not enough scans",
+                "At least 2 scans are required for FRASTA panel analysis."
+            )
+            return
+
+        names = [tabs.tabText(i) for i in range(tabs.count())]
+        dialog = QtWidgets.QDialog(self.main_window)
+        dialog.setWindowTitle("Select scans for FRASTA panels")
+        layout = QtWidgets.QVBoxLayout(dialog)
+        cb1 = QtWidgets.QComboBox()
+        cb2 = QtWidgets.QComboBox()
+        cb1.addItems(names)
+        cb2.addItems(names)
+        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
+        layout.addWidget(QtWidgets.QLabel("Surface A (reference):"))
+        layout.addWidget(cb1)
+        layout.addWidget(QtWidgets.QLabel("Surface B (conjugate):"))
+        layout.addWidget(cb2)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        idx1 = cb1.currentIndex()
+        idx2 = cb2.currentIndex()
+        if idx1 == idx2:
+            QtWidgets.QMessageBox.warning(
+                self.main_window, "Error", "Please select two different scans."
+            )
+            return
+
+        tab1 = tabs.widget(idx1)
+        tab2 = tabs.widget(idx2)
+        surf_a = tab1.get_surface()
+        surf_b = tab2.get_surface()
+
+        grid_a = surf_a.height
+        grid_b = surf_b.height
+
+        if grid_a.shape != grid_b.shape:
+            h = min(grid_a.shape[0], grid_b.shape[0])
+            w = min(grid_a.shape[1], grid_b.shape[1])
+            reply = QtWidgets.QMessageBox.question(
+                self.main_window, "Different sizes",
+                f"The scans vary in size:\n"
+                f"{grid_a.shape} vs {grid_b.shape}\n"
+                f"Crop both to a common area {h}×{w} and continue?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+            grid_a = grid_a[:h, :w]
+            grid_b = grid_b[:h, :w]
+
+        ctrl = self.main_window.frasta_controller
+        ctrl.set_data(grid_a, grid_b, dx=float(surf_a.dx), dy=float(surf_a.dy))
+        ctrl.binary_dock.show()
+        ctrl.binary_dock.raise_()
+        ctrl.profile_dock.show()
+
     def auto_register_surfaces(self):
         """Automatically register two surfaces."""
         tabs = self.main_window.tabs
