@@ -19,6 +19,7 @@ quickMessage : pyqtSignal(str)
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore, QtGui
@@ -506,14 +507,30 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
             self._apply_diff_levels()
 
     def _init_diff_state(self) -> None:
-        """Set diff display range from data min/max and rebuild histogram."""
+        """Set diff display range from data percentiles and rebuild histogram."""
         if self._diff_map is None:
             return
         valid = self._diff_map[np.isfinite(self._diff_map)]
         if valid.size == 0:
             return
-        self._diff_lo = float(np.min(valid))
-        self._diff_hi = float(np.max(valid))
+        # Find center and range from the dense part of the histogram:
+        # keep only bins with count >= median bin count (upper 50% by density),
+        # then take their value range as the display window.
+        n_bins = min(256, max(64, int(valid.size ** 0.4)))
+        counts, edges = np.histogram(valid, bins=n_bins)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        threshold = np.median(counts)
+        dense = centers[counts >= threshold]
+        if dense.size >= 2:
+            lo = float(dense[0])
+            hi = float(dense[-1])
+            margin = max((hi - lo) * 0.05, 1.0)
+            lo -= margin
+            hi += margin
+        else:
+            lo, hi = float(np.min(valid)), float(np.max(valid))
+        self._diff_lo = lo
+        self._diff_hi = hi
         self._sync_spinboxes_from_lo_hi()
         self._update_diff_histogram()
 
@@ -563,8 +580,8 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         self.binary_contact = binary
 
         if self._map_mode == 'diff':
-            arr = self._diff_map.T[:, ::-1].copy()
-            arr[~valid.T[:, ::-1]] = np.nan
+            arr = self._diff_map.T.copy()
+            arr[~valid.T] = np.nan
             self._image_view.setImage(arr, autoRange=False, autoLevels=False)
             self._apply_diff_levels()
             cmap_name = self._combo_cmap.currentText()
@@ -580,7 +597,7 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
                 cmap = pg.colormap.get('inferno')
             self._image_view.setColorMap(cmap)
         else:
-            arr = binary.astype(np.uint8).T[:, ::-1]
+            arr = binary.astype(np.uint8).T
             self._image_view.setImage(arr, autoRange=False, autoLevels=False)
             self._image_view.setLevels(0, 1)
             bcmap_key = self._combo_binary_cmap.currentData()
@@ -738,14 +755,18 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
             return
         if not fname.endswith(".npz"):
             fname += ".npz"
-        np.savez_compressed(
-            fname,
+        arrays = dict(
             binary_contact=self.binary_contact,
             diff_map=self._diff_map,
             separation=np.float64(self.separation),
             dx=np.float64(self._dx),
             dy=np.float64(self._dy),
         )
+        if self._grid1 is not None:
+            arrays["ref_grid"] = self._grid1
+        if self._grid2 is not None:
+            arrays["adj_grid"] = self._grid2
+        np.savez_compressed(fname, **arrays)
         QtWidgets.QMessageBox.information(self, "Exported", f"Saved to:\n{fname}")
 
     def _export_stats_csv(self) -> None:
@@ -767,7 +788,12 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         area_um2 = pixel_area * n_contact
         diff_masked = np.where(self.binary_contact, self._diff_map - self.separation, 0.0)
         vol_um3 = float(np.abs(np.sum(diff_masked)) * pixel_area)
+        h, w = self._diff_map.shape
         lines = [
+            f"# frasta_version,1.0",
+            f"# export_date,{datetime.now().isoformat()}",
+            f"# scan_shape_rows,{h}",
+            f"# scan_shape_cols,{w}",
             "parameter,value,unit",
             f"separation,{self.separation:.6f},\u00b5m",
             f"contact_pixels,{n_contact},px",
@@ -806,7 +832,13 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         open_mask = valid & ~self.binary_contact.astype(bool)
         mean_cod = float(np.mean(self._diff_map[open_mask])) if np.any(open_mask) else None
         finite_diff = self._diff_map[valid]
+        h, w = self._diff_map.shape
         data = {
+            "metadata": {
+                "frasta_version": "1.0",
+                "export_date": datetime.now().isoformat(),
+                "scan_shape": [h, w],
+            },
             "separation_um": round(self.separation, 6),
             "n_valid_pixels": n_total,
             "n_contact_pixels": n_contact,
@@ -824,4 +856,61 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         with open(fname, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
         QtWidgets.QMessageBox.information(self, "Exported", f"Saved to:\n{fname}")
+
+    # ------------------------------------------------------------------
+    # Session restore helpers  (used by frasta_session.load_session)
+    # ------------------------------------------------------------------
+
+    def restore_roi(self, x1: float, y1: float, x2: float, y2: float) -> None:
+        """Move the profile-line ROI to the given view coordinates and redraw."""
+        self._x1, self._y1 = x1, y1
+        self._x2, self._y2 = x2, y2
+        self._redraw_roi()
+
+    def restore_display_settings(
+        self,
+        map_mode: str = "binary",
+        binary_cmap: str = "gray",
+        diff_cmap: str = "CET-R4",
+        diff_center: float = 0.0,
+        diff_range: float = 1.0,
+    ) -> None:
+        """Restore colourmap / display settings without triggering side-effects."""
+        # Map mode
+        idx = self._combo_map_mode.findData(map_mode)
+        if idx >= 0:
+            self._combo_map_mode.blockSignals(True)
+            self._combo_map_mode.setCurrentIndex(idx)
+            self._combo_map_mode.blockSignals(False)
+            self._map_mode = map_mode
+            self._diff_panel.setVisible(map_mode == "diff")
+            self._combo_binary_cmap.setVisible(map_mode == "binary")
+
+        # Binary colormap
+        idx_b = self._combo_binary_cmap.findData(binary_cmap)
+        if idx_b >= 0:
+            self._combo_binary_cmap.blockSignals(True)
+            self._combo_binary_cmap.setCurrentIndex(idx_b)
+            self._combo_binary_cmap.blockSignals(False)
+
+        # Diff colormap
+        idx_d = self._combo_cmap.findText(diff_cmap)
+        if idx_d >= 0:
+            self._combo_cmap.blockSignals(True)
+            self._combo_cmap.setCurrentIndex(idx_d)
+            self._combo_cmap.blockSignals(False)
+
+        # Diff levels
+        self._diff_ctrl_updating = True
+        self._spinbox_diff_center.blockSignals(True)
+        self._spinbox_diff_center.setValue(diff_center)
+        self._spinbox_diff_center.blockSignals(False)
+        self._spinbox_diff_range.blockSignals(True)
+        self._spinbox_diff_range.setValue(diff_range)
+        self._spinbox_diff_range.blockSignals(False)
+        self._diff_lo = diff_center - diff_range / 2.0
+        self._diff_hi = diff_center + diff_range / 2.0
+        if self._hist_min_line is not None:
+            self._sync_hist_lines()
+        self._diff_ctrl_updating = False
 

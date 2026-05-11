@@ -10,7 +10,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 from functools import partial
 
-from ..dialogs import ProfileViewer, OverlayViewer, RegistrationDialog, ContactMapDialog
+from ..dialogs import OverlayViewer, RegistrationDialog, ContactMapDialog
 from ...core import Surface
 
 import logging
@@ -28,7 +28,6 @@ class RegistrationController:
         """
         self.main_window = main_window
         self.viewer = None
-        self._profile_viewer = None
 
     def _initialize_scan_pair_selectors(
         self,
@@ -243,78 +242,6 @@ class RegistrationController:
 
         self.viewer.setWindowTitle(f"Comparison: {names[idx1]} vs {names[idx2]}")
         self.viewer.show()
-    
-    def start_profile_analysis(self):
-        """Start profile analysis between two scans."""
-        tabs = self.main_window.tabs
-        if tabs.count() < 2:
-            QtWidgets.QMessageBox.warning(
-                self.main_window, "Not enough scans", 
-                "You need at least two scans!"
-            )
-            return
-
-        # Dialog wyboru dwóch zakładek
-        dialog = QtWidgets.QDialog(self.main_window)
-        dialog.setWindowTitle("Select scans for profile analysis")
-        layout = QtWidgets.QVBoxLayout(dialog)
-        layout.addWidget(QtWidgets.QLabel("Select two scans:"))
-        cb1 = QtWidgets.QComboBox()
-        cb2 = QtWidgets.QComboBox()
-        names = [tabs.tabText(i) for i in range(tabs.count())]
-        cb1.addItems(names)
-        cb2.addItems(names)
-        self._initialize_scan_pair_selectors(cb1, cb2, tabs.count())
-        layout.addWidget(QtWidgets.QLabel("Reference scan:"))
-        layout.addWidget(cb1)
-        layout.addWidget(QtWidgets.QLabel("Scan for comparison:"))
-        layout.addWidget(cb2)
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        layout.addWidget(buttons)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-
-        if dialog.exec_() != QtWidgets.QDialog.Accepted:
-            return
-
-        idx1 = cb1.currentIndex()
-        idx2 = cb2.currentIndex()
-        if idx1 == idx2:
-            QtWidgets.QMessageBox.warning(self.main_window, "Error", "Select two different scans!")
-            return
-
-        tab1 = tabs.widget(idx1)
-        tab2 = tabs.widget(idx2)
-        grid1 = tab1.grid  # Use grid, not masked (masked is transposed and thresholded)
-        grid2 = tab2.grid
-
-        if grid1.shape != grid2.shape:
-            h = min(grid1.shape[0], grid2.shape[0])
-            w = min(grid1.shape[1], grid2.shape[1])
-            reply = QtWidgets.QMessageBox.question(
-                self.main_window, "Different sizes",
-                f"The scans vary in size:\n"
-                f"{grid1.shape} vs {grid2.shape}\n"
-                f"Crop both to a common area {h}x{w} and continue?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
-            )
-            if reply != QtWidgets.QMessageBox.Yes:
-                return
-            grid1 = grid1[:h, :w]
-            grid2 = grid2[:h, :w]
-
-        # -- TYLKO JEDNO OKNO --
-        if getattr(self, "_profile_viewer", None) is None:
-            self._profile_viewer = ProfileViewer(parent=self.main_window)
-
-        self._profile_viewer.set_data(
-            grid1, grid2,
-            tab1.dx, tab1.dy,
-            tab2.dx, tab2.dy
-        )
-        self._profile_viewer.show()
-        self._profile_viewer.raise_()
-        self._profile_viewer.activateWindow()
 
     def open_contact_map_dialog(self):
         """Open the interactive contact map analysis dialog for two scans."""

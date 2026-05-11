@@ -295,23 +295,19 @@ class Point3DViewer(QtWidgets.QWidget):
     def update_separation(self, separation: float) -> None:
         """Shift the adjusted surface along Z without rebuilding or resetting the camera.
 
-        Only the adjusted-grid geometry cache is invalidated and rebuilt;
-        the reference geometry and camera orientation are left untouched.
+        Separation is applied as a GPU uniform (``u_z_offset``) so no geometry
+        rebuild or buffer upload is required.
         """
         if self._adj_grid is None:
             return
         self._separation = float(separation)
-        # Invalidate only the adjusted-grid geometry cache
-        self._geometry_cache["points"]["adj"].clear()
-        self._geometry_cache["mesh"]["adj"].clear()
-        # Rebuild adj geometry only
-        stride = self._current_stride()
+        # Update the shader uniform only — geometry buffer stays intact
         adj_range = self._get_value_range("adj", self._adj_grid)
-        self._apply_geometry("adj", stride)
         self.gl_widget.set_cloud_style(
             "adj",
             self._build_lut(self.combo_cmap_adj),
             adj_range,
+            z_offset=self._separation,
             visible=self.checkbox_adj.isChecked(),
             hide_below_range=self.chk_hide_below_adj.isChecked(),
             hide_above_range=self.chk_hide_above_adj.isChecked(),
@@ -741,10 +737,9 @@ class Point3DViewer(QtWidgets.QWidget):
 
         if which == "ref":
             grid = self._ref_grid
-            z_offset = 0.0
         else:
             grid = self._adj_grid
-            z_offset = self._separation
+        z_offset = 0.0  # separation is applied as GPU uniform u_z_offset
 
         if grid is None:
             return np.empty((0, 3), dtype=np.float32)
@@ -863,7 +858,7 @@ class Point3DViewer(QtWidgets.QWidget):
             grid=grid,
             dx=self._pixel_size_x,
             dy=self._pixel_size_y,
-            z_offset=z_offset,
+            z_offset=0.0,  # separation is applied as GPU uniform u_z_offset
         )
         worker.finished_geometry.connect(self._on_mesh_geometry_ready)
         worker.failed_geometry.connect(self._on_mesh_geometry_failed)

@@ -476,8 +476,7 @@ class TestRegistrationController:
         """Test RegistrationController initializes correctly."""
         assert registration_controller.main_window == mock_main_window
         assert registration_controller.viewer is None
-        assert registration_controller._profile_viewer is None
-    
+
     def test_compare_scans_warns_with_few_tabs(self, registration_controller):
         """Test compare_scans shows warning with less than 2 tabs."""
         registration_controller.main_window.tabs.count = Mock(return_value=1)
@@ -486,14 +485,6 @@ class TestRegistrationController:
             registration_controller.compare_scans()
             QtWidgets.QMessageBox.warning.assert_called_once()
     
-    def test_start_profile_analysis_warns_with_few_tabs(self, registration_controller):
-        """Test start_profile_analysis shows warning with less than 2 tabs."""
-        registration_controller.main_window.tabs.count = Mock(return_value=1)
-        
-        with patch.object(QtWidgets.QMessageBox, 'warning'):
-            registration_controller.start_profile_analysis()
-            QtWidgets.QMessageBox.warning.assert_called_once()
-
     def test_auto_register_surfaces_can_create_new_tab(self, registration_controller):
         """Auto-registration can store the moving surface in a new tab."""
         ref_tab = Mock()

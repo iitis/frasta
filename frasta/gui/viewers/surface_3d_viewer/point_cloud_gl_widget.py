@@ -142,6 +142,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         visible: bool = True,
         hide_below_range: bool = False,
         hide_above_range: bool = False,
+        z_offset: float = 0.0,
     ) -> None:
         """Update the GPU colormap texture and range for a named point cloud.
 
@@ -152,6 +153,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             visible: Visibility toggle for the cloud.
             hide_below_range: If True, discard fragments below ``lo``.
             hide_above_range: If True, discard fragments above ``hi``.
+            z_offset: Uniform Z shift applied in the vertex shader (µm).
         """
         entry = self._clouds.get(name)
         if entry is None:
@@ -164,6 +166,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         entry["hide_below_range"] = bool(hide_below_range)
         entry["hide_above_range"] = bool(hide_above_range)
         entry["value_range"] = (float(lo), float(hi))
+        entry["z_offset"] = float(z_offset)
         entry["texture_id"] = self._upload_or_replace_texture(
             entry.get("texture_id"),
             colormap_lut,
@@ -493,6 +496,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             if vbo_positions is None or texture_id is None:
                 continue
             lo, hi = entry.get("value_range", (0.0, 1.0))
+            self._program.setUniformValue("u_z_offset", float(entry.get("z_offset", 0.0)))
             self._program.setUniformValue("u_lo", float(lo))
             self._program.setUniformValue("u_hi", float(hi))
             self._program.setUniformValue(
@@ -826,6 +830,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             if any(value is None for value in (vbo_positions, vbo_normals, ibo_indices, texture_id)):
                 continue
             lo, hi = entry.get("value_range", (0.0, 1.0))
+            self._mesh_program.setUniformValue("u_z_offset", float(entry.get("z_offset", 0.0)))
             self._mesh_program.setUniformValue("u_lo", float(lo))
             self._mesh_program.setUniformValue("u_hi", float(hi))
             self._mesh_program.setUniformValue(
@@ -1244,14 +1249,16 @@ uniform mat4 u_mvp;
 uniform float u_point_size;
 uniform float u_lo;
 uniform float u_hi;
+uniform float u_z_offset;
 varying float v_t;
 varying float v_z;
 
 void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
+    float z_actual = a_position.z + u_z_offset;
+    gl_Position = u_mvp * vec4(a_position.xy, z_actual, 1.0);
     gl_PointSize = u_point_size;
-    v_t = clamp((a_position.z - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
-    v_z = a_position.z;
+    v_t = clamp((z_actual - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
+    v_z = z_actual;
 }
 """
 
@@ -1327,15 +1334,17 @@ attribute vec3 a_normal;
 uniform mat4 u_mvp;
 uniform float u_lo;
 uniform float u_hi;
+uniform float u_z_offset;
 varying float v_t;
 varying vec3 v_normal;
 varying float v_z;
 
 void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
-    v_t = clamp((a_position.z - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
+    float z_actual = a_position.z + u_z_offset;
+    gl_Position = u_mvp * vec4(a_position.xy, z_actual, 1.0);
+    v_t = clamp((z_actual - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
     v_normal = normalize(a_normal);
-    v_z = a_position.z;
+    v_z = z_actual;
 }
 """
 

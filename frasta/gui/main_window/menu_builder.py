@@ -48,9 +48,10 @@ class MenuBuilder:
             "colormap": QtWidgets.QAction("Toggle colormap", self.main_window),
             "view3d": QtWidgets.QAction("View 3d...", self.main_window),
             "compare": QtWidgets.QAction("Scan positioning...", self.main_window),
-            "profile": QtWidgets.QAction("Profile analysis...", self.main_window),
             "contact_map": QtWidgets.QAction("Contact map analysis...", self.main_window),
             "frasta_docks": QtWidgets.QAction("FRASTA panels (binary + profile)...", self.main_window),
+            "frasta_save_session": QtWidgets.QAction("Save FRASTA session...", self.main_window),
+            "frasta_load_session": QtWidgets.QAction("Load FRASTA session...", self.main_window),
             "scan_info": QtWidgets.QAction("Scan info...", self.main_window),
             "about": QtWidgets.QAction("About...", self.main_window),
             "exit": QtWidgets.QAction("Exit", self.main_window),
@@ -83,7 +84,6 @@ class MenuBuilder:
         self.actions["colormap"].setIcon(QIcon(resource_path("icons/icons8-color-palette-50.png")))
         self.actions["view3d"].setIcon(QIcon(resource_path("icons/icons8-3d-80.png")))
         self.actions["compare"].setIcon(QIcon(resource_path("icons/icons8-compare-50.png")))
-        self.actions["profile"].setIcon(QIcon(resource_path("icons/icons8-graph-50.png")))
         self.actions["about"].setIcon(QIcon(resource_path("icons/icons8-about-50.png")))
         self.actions["exit"].setIcon(QIcon(resource_path("icons/icons8-exit-50.png")))
         self.actions["filter"].setIcon(QIcon(resource_path("icons/icons8-filter-50.png")))
@@ -140,9 +140,11 @@ class MenuBuilder:
         
         # Registration actions
         self.actions["compare"].triggered.connect(reg_ctrl.compare_scans)
-        self.actions["profile"].triggered.connect(reg_ctrl.start_profile_analysis)
         self.actions["contact_map"].triggered.connect(reg_ctrl.open_contact_map_dialog)
         self.actions["frasta_docks"].triggered.connect(reg_ctrl.open_frasta_docks)
+        frasta_ctrl = self.main_window.frasta_controller
+        self.actions["frasta_save_session"].triggered.connect(frasta_ctrl.save_session_dialog)
+        self.actions["frasta_load_session"].triggered.connect(frasta_ctrl.load_session_dialog)
         self.actions["register"].triggered.connect(reg_ctrl.auto_register_surfaces)
         self.actions["scan_info"].triggered.connect(self.main_window.show_scan_info_dialog)
         
@@ -172,6 +174,9 @@ class MenuBuilder:
                 "export_2d_colorbar",
                 ("recent_menu", []),
                 "separator",
+                "frasta_save_session",
+                "frasta_load_session",
+                "separator",
                 "exit"
             ]),
             ("&Edit", [
@@ -190,7 +195,7 @@ class MenuBuilder:
             ]),
             ("&Tools", [
                 "view3d",
-                "compare", "profile", "contact_map", "frasta_docks", "scan_info"
+                "compare", "contact_map", "frasta_docks", "scan_info"
             ]),
             ("&Help", [
                 "about"

@@ -46,6 +46,7 @@ class FrastaController(QtCore.QObject):
         # Internal profile state
         self._current_rr: np.ndarray | None = None
         self._current_cc: np.ndarray | None = None
+        self._current_endpoints: tuple | None = None  # (c0, r0, c1, r1) pixel coords
         self._3d_viewer = None  # reference to open Point3DViewer, if any
 
         # Wire docks together
@@ -96,6 +97,45 @@ class FrastaController(QtCore.QObject):
         self.set_data(surface_a.height, surface_b.height, dx=dx, dy=dy)
 
     # ------------------------------------------------------------------
+    # Session save / load
+    # ------------------------------------------------------------------
+
+    def save_session_dialog(self) -> None:
+        """Open a Save dialog and write a ``.frasta`` session file."""
+        from pyqtgraph.Qt import QtWidgets
+        from .frasta_session import save_session
+
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            None, "Save FRASTA session", "", "FRASTA session (*.frasta)"
+        )
+        if not path:
+            return
+        if not path.endswith(".frasta"):
+            path += ".frasta"
+        try:
+            save_session(path, self)
+            QtWidgets.QMessageBox.information(None, "Saved", f"Session saved to:\n{path}")
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(None, "Error", f"Failed to save session:\n{exc}")
+
+    def load_session_dialog(self) -> None:
+        """Open an Open dialog and restore a ``.frasta`` session file."""
+        from pyqtgraph.Qt import QtWidgets
+        from .frasta_session import load_session
+
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            None, "Load FRASTA session", "", "FRASTA session (*.frasta)"
+        )
+        if not path:
+            return
+        try:
+            load_session(path, self)
+            self.binary_dock.show()
+            self.profile_dock.show()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(None, "Error", f"Failed to load session:\n{exc}")
+
+    # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
 
@@ -106,6 +146,7 @@ class FrastaController(QtCore.QObject):
         rr, cc = skimage_line(int(r0), int(c0), int(r1), int(c1))
         self._current_rr = rr
         self._current_cc = cc
+        self._current_endpoints = (c0, r0, c1, r1)
         self._refresh_profile()
         if self._3d_viewer is not None:
             self._3d_viewer.update_profile_overlay(
@@ -191,6 +232,12 @@ class FrastaController(QtCore.QObject):
             profiles,
             prof_dist_v,
             separation=sep,
+        )
+        self.profile_dock.set_profile_metadata(
+            dx=dx,
+            dy=dy,
+            separation=sep,
+            endpoints=self._current_endpoints,
         )
 
     # ------------------------------------------------------------------

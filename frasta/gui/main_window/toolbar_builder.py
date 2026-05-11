@@ -59,7 +59,6 @@ class ToolbarBuilder:
         # Tools
         toolbar.addAction(actions["view3d"])
         toolbar.addAction(actions["compare"])
-        toolbar.addAction(actions["profile"])
         toolbar.addSeparator()
         
         # Help and exit

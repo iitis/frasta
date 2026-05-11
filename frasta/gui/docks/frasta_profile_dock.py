@@ -12,6 +12,8 @@ profilePointSelected : pyqtSignal(int)
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 import numpy as np
 import pyqtgraph as pg
 from math import atan, degrees
@@ -87,6 +89,12 @@ class FrastaProfileDock(QtWidgets.QDockWidget):
         # name → (plot item, hex color string)
         self._curve_items: dict[str, tuple] = {}
         self._mouse_updating: bool = False  # re-entrancy guard
+
+        # Metadata for export (set by FrastaController via set_profile_metadata)
+        self._export_dx: float = 1.0
+        self._export_dy: float = 1.0
+        self._export_separation: float = 0.0
+        self._export_endpoints: tuple | None = None  # (c0, r0, c1, r1) pixel coords
 
         self.visibilityChanged.connect(self._on_visibility_changed)
 
@@ -358,6 +366,29 @@ class FrastaProfileDock(QtWidgets.QDockWidget):
     # Profile export
     # ------------------------------------------------------------------
 
+    def set_profile_metadata(
+        self,
+        dx: float,
+        dy: float,
+        separation: float,
+        endpoints: tuple,
+    ) -> None:
+        """Store spatial metadata used when exporting profile data.
+
+        Parameters
+        ----------
+        dx, dy:
+            Pixel size in µm (x and y).
+        separation:
+            Current separation value (µm).
+        endpoints:
+            (c0, r0, c1, r1) pixel coordinates of the profile line endpoints.
+        """
+        self._export_dx = float(dx)
+        self._export_dy = float(dy)
+        self._export_separation = float(separation)
+        self._export_endpoints = endpoints
+
     def _export_profile_npz(self) -> None:
         if self._positions is None:
             QtWidgets.QMessageBox.warning(self, "No data", "No profile data available.")
@@ -377,5 +408,63 @@ class FrastaProfileDock(QtWidgets.QDockWidget):
         if self._dist_profile is not None:
             arrays["diff_profile_um"] = self._dist_profile
         np.savez_compressed(fname, **arrays)
-        QtWidgets.QMessageBox.information(self, "Exported", f"Saved to:\n{fname}")
+
+        # JSON sidecar with metadata
+        meta = {
+            "metadata": {
+                "frasta_version": "1.0",
+                "export_date": datetime.now().isoformat(),
+                "description": "Cross-sectional profile export",
+            },
+            "spatial": {
+                "pixel_dx_um": self._export_dx,
+                "pixel_dy_um": self._export_dy,
+            },
+            "settings": {
+                "separation_um": self._export_separation,
+            },
+            "profile_line": {
+                "n_points": int(len(self._positions)),
+                "length_um": float(self._positions[-1] - self._positions[0]) if len(self._positions) > 1 else 0.0,
+            },
+        }
+        if self._export_endpoints is not None:
+            c0, r0, c1, r1 = self._export_endpoints
+            meta["profile_line"]["endpoints_px"] = {
+                "start": {"col": int(c0), "row": int(r0)},
+                "end": {"col": int(c1), "row": int(r1)},
+            }
+        json_fname = fname[:-4] + "_meta.json" if fname.endswith(".npz") else fname + "_meta.json"
+        with open(json_fname, "w", encoding="utf-8") as jf:
+            json.dump(meta, jf, indent=2)
+
+        QtWidgets.QMessageBox.information(self, "Exported", f"Saved to:\n{fname}\n{json_fname}")
+
+    # ------------------------------------------------------------------
+    # Session restore helper  (used by frasta_session.load_session)
+    # ------------------------------------------------------------------
+
+    def restore_settings(
+        self,
+        window_size_um: float = 500.0,
+        snap_to_plot: bool = True,
+        curve_visibility: dict | None = None,
+    ) -> None:
+        """Restore profile-dock UI settings after a session load."""
+        self._spinbox_window.setValue(window_size_um)
+        self._checkbox_snap.setChecked(snap_to_plot)
+
+        if curve_visibility:
+            # Apply to plot items
+            for name, (item, _color) in self._curve_items.items():
+                if name in curve_visibility:
+                    item.setVisible(curve_visibility[name])
+            # Sync checkboxes
+            for i in range(self._cb_layout.count()):
+                w = self._cb_layout.itemAt(i).widget()
+                if isinstance(w, QtWidgets.QCheckBox) and w.text() in curve_visibility:
+                    w.blockSignals(True)
+                    w.setChecked(curve_visibility[w.text()])
+                    w.blockSignals(False)
+
 
