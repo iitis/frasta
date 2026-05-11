@@ -242,51 +242,25 @@ surface format with stable depth/stencil buffers, and requests full-buffer
 updates for its OpenGL widgets to reduce
 white borders, clipped viewports, and partially refreshed 3D frames.
 
-An experimental point-based 3D backend based on `QOpenGLWidget` is also
-available in `frasta.gui.viewers.surface_3d_viewer.point_3d_viewer`. It is intended for
-performance experiments on large regular grids and currently focuses on point
-cloud rendering rather than shaded surface meshes. In the GUI it is exposed as
-the default `Tools -> View 3d...` action and from the profile viewer as the
-default 3D backend. To reduce startup latency, the point viewer opens first
-with a coarser stride and then refines the point density progressively.
-Point colors are mapped on the GPU from height values and the active display
-range using a compact lookup texture instead of a per-point CPU color buffer.
-Inside that experimental window, the user can now switch between `Points` and
-`Shaded mesh`; the mesh mode uses the same GPU colormap pipeline and a more
-aggressive progressive stride schedule during startup. To avoid UI stalls on
-large comparison views, automatic mesh refinement currently stops at a coarser
-stride than the point mode, especially when two surfaces are rendered at once.
-During startup and refinement, the experimental mesh viewer now stays in a
-point-preview state until mesh geometry is ready for all currently visible
-surfaces at the active stride, avoiding partially mixed point/mesh frames.
-Both surfaces can also discard fragments outside the active `lo/hi` display
-range directly in the shader, so hiding out-of-range regions does not require
-rebuilding point or mesh geometry. The 3D viewer now exposes separate
-`hide below` and `hide above` toggles per surface, mirroring the independent
-low/high masking controls already available in the 2D tabs.
-The same window now supports PNG screenshot export with optional transparent
-background and an explicit output size in pixels, rendered from an off-screen
-OpenGL framebuffer rather than from the current desktop capture. Screenshot
-export can also add an optional X/Y frame with tick labels, anchored near
-`Z = 0` inside the 3D scene so the frame follows depth relationships with the
-surface instead of always appearing on top.
-It can also export a standalone PNG colorbar for the current reference or
-adjusted surface, using the active colormap and the current numeric `lo/hi`
-range labels.
-When the experimental 3D window is closed, it now explicitly releases its
-OpenGL buffers, textures, overlay geometry, and background mesh workers instead
-of keeping the previous viewer instance alive for reuse across later opens.
-During aggressive live-resize on some Windows GPU drivers, repeated full-scene
-redraws could also leave the 3D widget in a corrupted visual state. The
-experimental viewer now debounces resize interactions and temporarily renders
-only a clean background until the window size settles.
-The 2D scan tabs now support analogous export helpers: a PNG image of either
-the full grid or the current viewport, plus a standalone colorbar image with
-the active 2D colormap, current `lo/hi` labels, and an optional overlaid
-histogram of the exported data range.
-The GUI now exposes only the newer point/mesh-based 3D viewer path. Legacy
-pyqtgraph-based 3D code may still exist internally for compatibility work, but
-it is no longer presented as a supported user-facing option.
+The default 3D view in the GUI is the newer OpenGL-based viewer implemented
+with `QOpenGLWidget`. It is exposed through `Tools -> View 3d...` and in the
+profile viewer. This viewer opens quickly with a coarse preview and then
+refines the displayed geometry progressively, which helps keep large regular
+grids responsive during startup.
+
+The 3D window supports both `Points` and `Shaded mesh` display modes. Color
+mapping, display-range clipping, and the `hide below` / `hide above` controls
+follow the same active `lo/hi` range used in the 2D views, so the visual
+interpretation stays consistent across the application.
+
+The viewer also provides PNG export for screenshots and standalone colorbars.
+Screenshots are rendered from an off-screen OpenGL framebuffer, which allows
+explicit output sizes and optional transparent backgrounds.
+
+If the 3D view still fails to open or renders incorrectly, verify the GPU
+driver, OpenGL support, and desktop-session configuration first. Internal
+legacy 3D code may still exist for compatibility work, but it is not exposed
+as a supported user-facing option.
 
 ### Qt platform plugin errors
 
