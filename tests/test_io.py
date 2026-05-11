@@ -7,6 +7,7 @@ from frasta.io import (
     load_csv_data, load_npz_data, load_h5_data,
     save_npz, save_h5, suggest_units
 )
+from frasta.core import Surface
 
 
 class TestLoaders:
@@ -27,29 +28,31 @@ class TestLoaders:
         """Test loading NPZ file."""
         result = load_npz_data(temp_npz_file)
         
-        # Returns list of tuples: [(name, grid, xi, yi, px_x, px_y), ...]
+        # Returns list of Surface objects
         assert isinstance(result, list)
         assert len(result) == 1
         
-        name, grid, xi, yi, px_x, px_y = result[0]
-        assert name == 'test_scan'
-        assert grid.shape == (10, 10)
-        assert len(xi) == 10
-        assert len(yi) == 10
+        surface = result[0]
+        assert isinstance(surface, Surface)
+        assert surface.metadata.get('name') == 'test_scan'
+        assert surface.height.shape == (10, 10)
+        assert len(surface.xi) == 10
+        assert len(surface.yi) == 10
     
     def test_load_h5_data(self, temp_h5_file):
         """Test loading HDF5 file."""
         result = load_h5_data(temp_h5_file)
         
-        # Returns list of tuples: [(name, grid, xi, yi, px_x, px_y), ...]
+        # Returns list of Surface objects
         assert isinstance(result, list)
         assert len(result) == 1
         
-        name, grid, xi, yi, px_x, px_y = result[0]
-        assert name == 'test_scan'
-        assert grid.shape == (10, 10)
-        assert len(xi) == 10
-        assert len(yi) == 10
+        surface = result[0]
+        assert isinstance(surface, Surface)
+        assert surface.metadata.get('name') == 'test_scan'
+        assert surface.height.shape == (10, 10)
+        assert len(surface.xi) == 10
+        assert len(surface.yi) == 10
     
     def test_suggest_units_detects_units(self, temp_csv_file):
         """Test unit detection from file analysis."""
@@ -79,9 +82,18 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
-        # Save data - list of tuples: (name, grid, xi, yi, px_x, px_y)
+        # Create Surface object
+        surface = Surface(
+            height=sample_grid,
+            dx=1.5,
+            dy=1.5,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
+        # Save data - list of tuples: (name, Surface)
         scans_data = [
-            ('test_scan', sample_grid, xi, yi, 1.5, 1.5)
+            ('test_scan', surface)
         ]
         save_npz(filepath, scans_data)
         
@@ -89,11 +101,12 @@ class TestExporters:
         result = load_npz_data(filepath)
         assert len(result) == 1
         
-        name, grid, xi_loaded, yi_loaded, px_x, px_y = result[0]
-        assert name == 'test_scan'
-        assert np.array_equal(grid, sample_grid, equal_nan=True)
-        assert px_x == 1.5
-        assert px_y == 1.5
+        surface_loaded = result[0]
+        assert isinstance(surface_loaded, Surface)
+        assert surface_loaded.metadata.get('name') == 'test_scan'
+        assert np.array_equal(surface_loaded.height, sample_grid, equal_nan=True)
+        assert surface_loaded.dx == 1.5
+        assert surface_loaded.dy == 1.5
     
     def test_save_and_load_h5_roundtrip(self, tmp_path, sample_grid):
         """Test that data can be saved and loaded from HDF5."""
@@ -101,9 +114,18 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
-        # Save data - list of tuples: (name, grid, xi, yi, px_x, px_y)
+        # Create Surface object
+        surface = Surface(
+            height=sample_grid,
+            dx=2.0,
+            dy=2.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
+        # Save data - list of tuples: (name, Surface)
         scans_data = [
-            ('test_scan', sample_grid, xi, yi, 2.0, 2.0)
+            ('test_scan', surface)
         ]
         save_h5(filepath, scans_data)
         
@@ -111,11 +133,12 @@ class TestExporters:
         result = load_h5_data(filepath)
         assert len(result) == 1
         
-        name, grid, xi_loaded, yi_loaded, px_x, px_y = result[0]
-        assert name == 'test_scan'
-        assert np.array_equal(grid, sample_grid, equal_nan=True)
-        assert px_x == 2.0
-        assert px_y == 2.0
+        surface_loaded = result[0]
+        assert isinstance(surface_loaded, Surface)
+        assert surface_loaded.metadata.get('name') == 'test_scan'
+        assert np.array_equal(surface_loaded.height, sample_grid, equal_nan=True)
+        assert surface_loaded.dx == 2.0
+        assert surface_loaded.dy == 2.0
     
     def test_save_npz_multiple_tabs(self, tmp_path, sample_grid):
         """Test saving multiple tabs to NPZ."""
@@ -123,13 +146,28 @@ class TestExporters:
         xi = np.linspace(0, 9, 10)
         yi = np.linspace(0, 9, 10)
         
+        surface1 = Surface(
+            height=sample_grid,
+            dx=1.0,
+            dy=1.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        surface2 = Surface(
+            height=sample_grid * 2,
+            dx=1.0,
+            dy=1.0,
+            x0=xi[0],
+            y0=yi[0]
+        )
+        
         scans_data = [
-            ('scan1', sample_grid, xi, yi, 1.0, 1.0),
-            ('scan2', sample_grid * 2, xi, yi, 1.0, 1.0),
+            ('scan1', surface1),
+            ('scan2', surface2),
         ]
         save_npz(filepath, scans_data)
         
         result = load_npz_data(filepath)
         assert len(result) == 2
-        assert result[0][0] == 'scan1'
-        assert result[1][0] == 'scan2'
+        assert result[0].metadata.get('name') == 'scan1'
+        assert result[1].metadata.get('name') == 'scan2'

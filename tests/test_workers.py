@@ -5,6 +5,7 @@ import numpy as np
 from unittest.mock import Mock, patch, MagicMock
 from PyQt5.QtCore import QObject
 from frasta.gui.workers import GridWorker, ProfileWorker
+from frasta.core import Surface
 
 
 class TestGridWorker:
@@ -26,11 +27,16 @@ class TestGridWorker:
     @patch('frasta.gui.workers.csv_loader_worker.load_csv_data')
     def test_grid_worker_process_calls_loader(self, mock_load, temp_csv_file):
         """Test that process method calls load_csv_data."""
-        # Setup mock return value
+        # Setup mock return value - Surface object
         mock_grid = np.array([[1, 2], [3, 4]])
-        mock_xi = np.array([0, 1])
-        mock_yi = np.array([0, 1])
-        mock_load.return_value = (mock_grid, mock_xi, mock_yi, 1.0, 1.0)
+        mock_surface = Surface(
+            height=mock_grid,
+            dx=1.0,
+            dy=1.0,
+            x0=0.0,
+            y0=0.0
+        )
+        mock_load.return_value = mock_surface
         
         worker = GridWorker(temp_csv_file, units_xy='um', units_z='um')
         
@@ -49,12 +55,17 @@ class TestGridWorker:
     
     @patch('frasta.gui.workers.csv_loader_worker.load_csv_data')
     def test_grid_worker_emits_finished_signal(self, mock_load, temp_csv_file):
-        """Test that worker emits finished signal with results."""
-        # Setup mock return value
+        """Test that worker emits finished signal with Surface object."""
+        # Setup mock return value - Surface object
         mock_grid = np.array([[1, 2], [3, 4]])
-        mock_xi = np.array([0, 1])
-        mock_yi = np.array([0, 1])
-        mock_load.return_value = (mock_grid, mock_xi, mock_yi, 1.5, 2.0)
+        mock_surface = Surface(
+            height=mock_grid,
+            dx=1.5,
+            dy=2.0,
+            x0=0.0,
+            y0=0.0
+        )
+        mock_load.return_value = mock_surface
         
         worker = GridWorker(temp_csv_file)
         
@@ -65,12 +76,13 @@ class TestGridWorker:
         # Execute
         worker.process()
         
-        # Verify finished signal was emitted
+        # Verify finished signal was emitted with Surface object
         finished_spy.assert_called_once()
         args = finished_spy.call_args[0]
-        assert len(args) == 5
-        assert args[3] == 1.5  # px_x
-        assert args[4] == 2.0  # px_y
+        assert len(args) == 1
+        assert isinstance(args[0], Surface)
+        assert args[0].dx == 1.5
+        assert args[0].dy == 2.0
     
     @patch('frasta.gui.workers.csv_loader_worker.load_csv_data')
     def test_grid_worker_progress_callback(self, mock_load, temp_csv_file):
@@ -82,7 +94,14 @@ class TestGridWorker:
                 callback(25)
                 callback(50)
                 callback(100)
-            return (np.array([[1]]), np.array([0]), np.array([0]), 1.0, 1.0)
+            # Return Surface object
+            return Surface(
+                height=np.array([[1]]),
+                dx=1.0,
+                dy=1.0,
+                x0=0.0,
+                y0=0.0
+            )
         
         mock_load.side_effect = mock_load_with_progress
         

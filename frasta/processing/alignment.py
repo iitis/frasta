@@ -84,9 +84,16 @@ def remove_relative_offset(reference, target, mask):
         
     Returns:
         np.ndarray: Target grid with offset removed.
+        
+    Raises:
+        ValueError: If no valid data exists for offset computation.
     """
-    offset = compute_offset_global(reference, target)
-    return target + offset
+    try:
+        offset = compute_offset_global(reference, target)
+        return target + offset
+    except ValueError as e:
+        logger.warning(f"Could not compute offset: {e}. Returning target unchanged.")
+        return target
 
 
 def remove_relative_tilt(reference, target, mask):
@@ -113,8 +120,14 @@ def remove_relative_tilt(reference, target, mask):
     ZZ = difference[mask].flatten()
     valid_mask = ~np.isnan(ZZ)
     XX, YY, ZZ = XX[valid_mask], YY[valid_mask], ZZ[valid_mask]
+    
     if len(ZZ) == 0:
         raise ValueError("No valid data for regression - all points contained NaN")
+    
+    # Warn if very few points for regression
+    if len(ZZ) < 10:
+        logger.warning(f"Only {len(ZZ)} valid points for tilt regression - results may be unreliable")
+    
     features = np.vstack((XX, YY)).T
     model = LinearRegression().fit(features, ZZ)
     tilt_plane = model.predict(np.vstack((X.flatten(), Y.flatten())).T).reshape(difference.shape)

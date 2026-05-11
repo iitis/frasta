@@ -1,0 +1,9 @@
+# Ignore all generated output files
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# But track this .gitignore itself
+!.gitignore

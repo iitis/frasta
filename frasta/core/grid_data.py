@@ -9,6 +9,11 @@ class GridData:
     
     Stores a 2D array of scan data along with coordinate arrays, pixel sizes,
     and optional value ranges for display purposes.
+
+    Notes:
+        ``Surface`` is the primary data container used by the current
+        application code. ``GridData`` is kept only for backward compatibility
+        with older helper code and should not be used for new features.
     
     Attributes:
         grid (np.ndarray): 2D array containing scan height/depth values.

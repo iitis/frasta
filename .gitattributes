@@ -1,0 +1,17 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.npz binary
+*.h5 binary
+*.hdf5 binary
+*.stl binary
+*.pyc binary
+*.pyd binary
+*.dll binary
+*.exe binary

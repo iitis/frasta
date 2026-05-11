@@ -1,5 +1,6 @@
 """Core data structures for FRASTA-toolbox."""
 
+from .surface import Surface
 from .grid_data import GridData
 
-__all__ = ['GridData']
+__all__ = ['Surface', 'GridData']

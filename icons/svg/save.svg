@@ -1,0 +1,17 @@
+<svg viewBox="0 0 24 24"
+     fill="none"
+     stroke="currentColor"
+     stroke-width="2"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+
+  <!-- obrys dyskietki -->
+  <path d="M4 2h14l4 4v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+
+  <!-- górny prostokąt -->
+  <rect x="6" y="2" width="10" height="6"/>
+
+  <!-- dolne okienko -->
+  <rect x="7" y="14" width="10" height="6"/>
+
+</svg>
