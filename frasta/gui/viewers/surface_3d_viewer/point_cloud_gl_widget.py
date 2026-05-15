@@ -49,6 +49,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._plane_ibo = None
         self._show_profile_lines = True
         self._show_profile_plane = True
+        self._plane_color = QtGui.QColor.fromRgbF(0.5, 0.5, 0.7, 0.5)
         self._show_reference_rectangle = True
         # Cursor marker (GL_LINES cross drawn by the line shader)
         self._cursor_marker_positions = np.empty((0, 3), dtype=np.float32)
@@ -304,6 +305,17 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         """Toggle plane visibility."""
         self._show_profile_plane = bool(visible)
         self.update()
+
+    def set_profile_plane_color(self, color: QtGui.QColor) -> None:
+        """Update the cross-section plane color including alpha."""
+        if not color.isValid():
+            return
+        self._plane_color = QtGui.QColor(color)
+        self.update()
+
+    def get_profile_plane_color(self) -> QtGui.QColor:
+        """Return the current cross-section plane color including alpha."""
+        return QtGui.QColor(self._plane_color)
 
     def initializeGL(self) -> None:
         """Create shader programs and configure OpenGL state."""
@@ -773,7 +785,16 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 
         self._plane_program.bind()
         self._plane_program.setUniformValue("u_mvp", mvp)
-        self._plane_program.setUniformValue("u_color", QtGui.QVector4D(0.5, 0.5, 0.7, 0.5)) # RGBA with alpha for translucency
+        plane_color = self._plane_color
+        self._plane_program.setUniformValue(
+            "u_color",
+            QtGui.QVector4D(
+                float(plane_color.redF()),
+                float(plane_color.greenF()),
+                float(plane_color.blueF()),
+                float(plane_color.alphaF()),
+            ),
+        )
         pos_loc = self._plane_program.attributeLocation("a_position")
         self._plane_vbo.bind()
         self._plane_program.enableAttributeArray(pos_loc)

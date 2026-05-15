@@ -126,6 +126,7 @@ class FrastaProfileDock(QtWidgets.QDockWidget):
             Current separation value; drawn as a horizontal dashed line.
         """
         self._plot.clear()
+        self._plot.setTitle("")
         self._curve_items.clear()
 
         for name, prof, pen in profiles:
@@ -466,5 +467,4 @@ class FrastaProfileDock(QtWidgets.QDockWidget):
                     w.blockSignals(True)
                     w.setChecked(curve_visibility[w.text()])
                     w.blockSignals(False)
-
 

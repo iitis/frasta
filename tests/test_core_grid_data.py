@@ -2,7 +2,7 @@
 
 import pytest
 import numpy as np
-from frasta.core import Surface
+from frasta.core import Surface, SurfaceOrientation
 
 
 class TestGridData:
@@ -118,3 +118,25 @@ class TestGridData:
         assert cropped.y0 == 20.0
         assert cropped.xi[0] == 10.0
         assert cropped.yi[0] == 20.0
+
+    def test_default_orientation_uses_enum(self, sample_grid):
+        """Surface should expose the default orientation as an enum value."""
+        gd = Surface(height=sample_grid, dx=1.0, dy=1.0)
+
+        assert gd.orientation is SurfaceOrientation.DEFAULT
+
+    def test_string_orientation_is_normalized_to_enum(self, sample_grid):
+        """Legacy string inputs should still normalize to enum values."""
+        gd = Surface(height=sample_grid, dx=1.0, dy=1.0, orientation="default")
+
+        assert gd.orientation is SurfaceOrientation.DEFAULT
+
+    def test_copy_and_crop_preserve_orientation_enum(self, sample_grid):
+        """Derived surfaces should keep the same orientation enum."""
+        gd = Surface(height=sample_grid, dx=1.0, dy=1.0, orientation=SurfaceOrientation.DEFAULT)
+
+        copied = gd.copy()
+        cropped = gd.crop(5, 5)
+
+        assert copied.orientation is SurfaceOrientation.DEFAULT
+        assert cropped.orientation is SurfaceOrientation.DEFAULT

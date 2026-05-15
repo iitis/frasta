@@ -17,6 +17,7 @@ from frasta.gui.scan_tab.interactive_handler import InteractiveHandler
 from frasta.gui.scan_tab.scan_tab import ScanTab
 from frasta.gui.scan_tab.transform_operations import TransformOperations
 from frasta.gui.widgets import HistogramViewBox
+from frasta.core import SurfaceOrientation
 from frasta.gui.colorbar_common import (
     build_colorbar_tick_layout,
     build_tick_label_rect,
@@ -658,6 +659,20 @@ class TestScanTabColormap:
 
         assert scan_tab.range_min_spin.value() == pytest.approx(2.0)
         assert scan_tab.range_max_spin.value() == pytest.approx(6.0)
+
+    def test_get_surface_preserves_orientation_metadata(self, scan_tab):
+        """Round-tripping through ScanTab should keep the scan orientation."""
+        scan_tab.grid = np.arange(9, dtype=float).reshape(3, 3)
+        scan_tab.xi = np.array([0.0, 1.0, 2.0], dtype=float)
+        scan_tab.yi = np.array([0.0, 1.0, 2.0], dtype=float)
+        scan_tab.dx = 1.0
+        scan_tab.dy = 1.0
+        scan_tab.orientation = SurfaceOrientation.DEFAULT
+        scan_tab.histogram_manager.get_threshold_range = Mock(return_value=(0.0, 8.0))
+
+        surface = scan_tab.get_surface()
+
+        assert surface.orientation is SurfaceOrientation.DEFAULT
 
     def test_manual_threshold_edit_updates_histogram_manager(self, scan_tab):
         """Changing manual threshold controls should push values to the manager."""

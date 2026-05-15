@@ -476,6 +476,21 @@ class TestRegistrationController:
         """Test RegistrationController initializes correctly."""
         assert registration_controller.main_window == mock_main_window
         assert registration_controller.viewer is None
+        assert registration_controller._contact_map_dialog is None
+
+    def test_close_auxiliary_windows_closes_known_dialogs(self, registration_controller):
+        """Main-window shutdown helper should close registration child windows."""
+        viewer = Mock()
+        contact_dialog = Mock()
+        registration_controller.viewer = viewer
+        registration_controller._contact_map_dialog = contact_dialog
+
+        registration_controller.close_auxiliary_windows()
+
+        viewer.close.assert_called_once()
+        contact_dialog.close.assert_called_once()
+        assert registration_controller.viewer is None
+        assert registration_controller._contact_map_dialog is None
 
     def test_compare_scans_warns_with_few_tabs(self, registration_controller):
         """Test compare_scans shows warning with less than 2 tabs."""

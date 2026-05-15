@@ -12,7 +12,17 @@ from PyQt5.QtCore import QSize, Qt
 
 from ..scan_tab import ScanTab
 from ...core import Surface
-from ...io import load_csv_data, load_npz_data, load_h5_data, load_stl_data, save_npz, save_h5, save_stl, suggest_units
+from ...io import (
+    load_alicona_al3d,
+    load_csv_data,
+    load_h5_data,
+    load_npz_data,
+    load_stl_data,
+    save_h5,
+    save_npz,
+    save_stl,
+    suggest_units,
+)
 from ..workers import GridWorker
 
 import logging
@@ -288,6 +298,35 @@ class FileController:
             idx = tabs.indexOf(tab)
             if idx >= 0:
                 tabs.removeTab(idx)
+
+    def load_al3d(self, fname: str, tab: ScanTab) -> None:
+        """Load an Alicona AL3D surface file into a tab.
+
+        Args:
+            fname (str): Path to the AL3D file.
+            tab (ScanTab): Tab widget to receive the loaded surface.
+        """
+
+        dlg = QtWidgets.QProgressDialog("Loading Alicona AL3D file...", None, 0, 100, self.main_window)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+
+        try:
+            surface = load_alicona_al3d(fname, progress_callback=dlg.setValue)
+            tab.set_surface(surface)
+            dlg.setValue(100)
+            self.add_to_recent_files(fname)
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load AL3D file:\n{e}")
+            tabs = self.main_window.tabs
+            idx = tabs.indexOf(tab)
+            if idx >= 0:
+                tabs.removeTab(idx)
+            tab.deleteLater()
     
     def create_tab_and_load(self, fname: str):
         """Create a new tab and load file into it.
@@ -312,6 +351,11 @@ class FileController:
             tabs.setCurrentWidget(tab)
             self.load_stl(fname, tab)
             self.add_to_recent_files(fname)
+        elif fname.endswith('.al3d'):
+            tab = ScanTab()
+            tabs.addTab(tab, fname.split('/')[-1])
+            tabs.setCurrentWidget(tab)
+            self.load_al3d(fname, tab)
         else:
             QtWidgets.QMessageBox.warning(self.main_window, "Unknown format", "Unsupported file type.")
             return
@@ -322,7 +366,7 @@ class FileController:
             self.main_window, 
             "Open file", 
             "", 
-            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl)"
+            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d)"
         )
         if not fname:
             return

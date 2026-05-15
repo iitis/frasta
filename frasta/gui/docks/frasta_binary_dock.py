@@ -24,6 +24,8 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore, QtGui
 
+from ..orientation import grid_to_image_data
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,7 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         self._image_view = _create_image_view()
         self._image_view.setMinimumWidth(300)
         self._image_view.getView().sigRangeChanged.connect(self._on_range_changed)
+        self._image_view.getView().invertY(True)
         layout.addWidget(self._image_view, 1)
 
         # Map mode toggle
@@ -359,15 +362,14 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         """Map pyqtgraph view coords to numpy (row, col)."""
         h, w = self._shape()
         col = int(round(x_view))
-        row = h - 1 - int(round(y_view))
+        row = int(round(y_view))
         if clip:
             row = int(np.clip(row, 0, h - 1))
             col = int(np.clip(col, 0, w - 1))
         return row, col
 
     def _numpy_to_view(self, row: int, col: int):
-        h, _w = self._shape()
-        return float(col), float(h - 1 - row)
+        return float(col), float(row)
 
     # ------------------------------------------------------------------
     # ROI line
@@ -580,7 +582,7 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         self.binary_contact = binary
 
         if self._map_mode == 'diff':
-            arr = self._diff_map.T.copy()
+            arr = grid_to_image_data(self._diff_map, copy=True)
             arr[~valid.T] = np.nan
             self._image_view.setImage(arr, autoRange=False, autoLevels=False)
             self._apply_diff_levels()
@@ -597,7 +599,7 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
                 cmap = pg.colormap.get('inferno')
             self._image_view.setColorMap(cmap)
         else:
-            arr = binary.astype(np.uint8).T
+            arr = grid_to_image_data(binary.astype(np.uint8), copy=True)
             self._image_view.setImage(arr, autoRange=False, autoLevels=False)
             self._image_view.setLevels(0, 1)
             bcmap_key = self._combo_binary_cmap.currentData()
@@ -913,4 +915,3 @@ class FrastaBinaryDock(QtWidgets.QDockWidget):
         if self._hist_min_line is not None:
             self._sync_hist_lines()
         self._diff_ctrl_updating = False
-

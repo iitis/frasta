@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ...orientation import index_to_3d_world, points_to_3d_world
 from .point_cloud_geometry import (
     build_colormap_lut,
     build_mesh_geometry_from_grid,
@@ -53,6 +54,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self._pixel_size_x = 1.0
         self._pixel_size_y = 1.0
         self._separation = 0.0
+        self._profile_plane_height_mode = "dynamic"
         self._render_mode = "mesh"
         self._geometry_cache: dict[str, dict[str, dict[int, object]]] = {
             "points": {"ref": {}, "adj": {}},
@@ -133,6 +135,23 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_line.setChecked(True)
         self.checkbox_plane = QtWidgets.QCheckBox("Show Section Plane")
         self.checkbox_plane.setChecked(True)
+        self.combo_plane_height_mode = QtWidgets.QComboBox()
+        self.combo_plane_height_mode.addItem("Dynamic", userData="dynamic")
+        self.combo_plane_height_mode.addItem("Maximum", userData="maximum")
+        self.combo_plane_height_mode.addItem("Manual", userData="manual")
+        self.slider_plane_height = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_plane_height.setRange(0, 100)
+        self.slider_plane_height.setSingleStep(5)
+        self.slider_plane_height.setPageStep(10)
+        self.slider_plane_height.setValue(100)
+        self.label_plane_height_value = QtWidgets.QLabel("100%")
+        self.spin_plane_opacity = QtWidgets.QDoubleSpinBox()
+        self.spin_plane_opacity.setDecimals(0)
+        self.spin_plane_opacity.setRange(0.0, 100.0)
+        self.spin_plane_opacity.setSingleStep(5.0)
+        self.spin_plane_opacity.setSuffix(" %")
+        self.spin_plane_opacity.setValue(50.0)
+        self.button_plane_color = QtWidgets.QPushButton("Plane color...")
         self.checkbox_reference_rect = QtWidgets.QCheckBox("Show Z=0 Rectangle")
         self.checkbox_reference_rect.setChecked(True)
 
@@ -181,6 +200,13 @@ class Point3DViewer(QtWidgets.QWidget):
         view_layout.addWidget(self.checkbox_adj)
         view_layout.addWidget(self.checkbox_line)
         view_layout.addWidget(self.checkbox_plane)
+        view_layout.addWidget(QtWidgets.QLabel("Plane height:"))
+        view_layout.addWidget(self.combo_plane_height_mode)
+        view_layout.addWidget(self.slider_plane_height)
+        view_layout.addWidget(self.label_plane_height_value)
+        view_layout.addWidget(QtWidgets.QLabel("Plane opacity:"))
+        view_layout.addWidget(self.spin_plane_opacity)
+        view_layout.addWidget(self.button_plane_color)
         view_layout.addWidget(self.checkbox_reference_rect)
         sidebar_layout.addWidget(view_group)
 
@@ -230,6 +256,10 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_adj.toggled.connect(lambda on: self.gl_widget.set_cloud_visible("adj", on))
         self.checkbox_line.toggled.connect(self.gl_widget.set_profile_line_visible)
         self.checkbox_plane.toggled.connect(self.gl_widget.set_profile_plane_visible)
+        self.combo_plane_height_mode.currentIndexChanged.connect(self._plane_height_mode_changed)
+        self.slider_plane_height.valueChanged.connect(self._manual_plane_height_changed)
+        self.spin_plane_opacity.valueChanged.connect(self._plane_opacity_changed)
+        self.button_plane_color.clicked.connect(self._choose_plane_color)
         self.checkbox_reference_rect.toggled.connect(self.gl_widget.set_reference_rectangle_visible)
         self.combo_render_mode.currentIndexChanged.connect(self._render_mode_changed)
         self.combo_projection_mode.currentIndexChanged.connect(self._projection_mode_changed)
@@ -252,6 +282,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_point_size.valueChanged.connect(self.gl_widget.set_point_size)
         self.button_screenshot.clicked.connect(self._export_screenshot)
         self.button_colorbar.clicked.connect(self._export_colorbar)
+        self._apply_plane_style()
+        self._sync_plane_height_controls()
         return panel
 
     def update_data(
@@ -284,6 +316,11 @@ class Point3DViewer(QtWidgets.QWidget):
         has_profile = line_points is not None and len(line_points) >= 2
         self.checkbox_line.setVisible(has_profile)
         self.checkbox_plane.setVisible(has_profile)
+        self.combo_plane_height_mode.setVisible(has_profile)
+        self.slider_plane_height.setVisible(has_profile and self._profile_plane_height_mode == "manual")
+        self.label_plane_height_value.setVisible(has_profile and self._profile_plane_height_mode == "manual")
+        self.spin_plane_opacity.setVisible(has_profile)
+        self.button_plane_color.setVisible(has_profile)
 
         self._refresh_reference_rectangle()
         self._apply_render_mode_to_ui()
@@ -338,6 +375,11 @@ class Point3DViewer(QtWidgets.QWidget):
         has_profile = line_points is not None and len(line_points) >= 2
         self.checkbox_line.setVisible(has_profile)
         self.checkbox_plane.setVisible(has_profile)
+        self.combo_plane_height_mode.setVisible(has_profile)
+        self.slider_plane_height.setVisible(has_profile and self._profile_plane_height_mode == "manual")
+        self.label_plane_height_value.setVisible(has_profile and self._profile_plane_height_mode == "manual")
+        self.spin_plane_opacity.setVisible(has_profile)
+        self.button_plane_color.setVisible(has_profile)
         self._refresh_profile_line()
 
     def highlight_profile_point(self, idx: int) -> None:
@@ -363,8 +405,13 @@ class Point3DViewer(QtWidgets.QWidget):
             return
 
         col, row = pts[idx]
-        x = float(col) * self._pixel_size_x
-        y = float(row) * -self._pixel_size_y
+        x, y, _unused_z = index_to_3d_world(
+            col,
+            row,
+            0.0,
+            dx=self._pixel_size_x,
+            dy=self._pixel_size_y,
+        )
         z_ref = float(self._ref_grid[row, col]) if np.isfinite(self._ref_grid[row, col]) else 0.0
         z_adj = (
             float(self._adj_grid[row, col]) + self._separation
@@ -455,12 +502,13 @@ class Point3DViewer(QtWidgets.QWidget):
             else None
         )
 
-        pts_physical = np.column_stack(
-            (
-                pts[:, 0].astype(np.float32) * self._pixel_size_x,
-                pts[:, 1].astype(np.float32) * -self._pixel_size_y,
-            )
-        )
+        pts_physical = points_to_3d_world(
+            pts[:, 0].astype(np.float32),
+            pts[:, 1].astype(np.float32),
+            np.zeros(len(pts), dtype=np.float32),
+            dx=self._pixel_size_x,
+            dy=self._pixel_size_y,
+        )[:, :2]
         ref_line_positions = self._build_profile_line_positions(pts_physical, ref_profile)
         adj_line_positions = self._build_profile_line_positions(pts_physical, adj_profile)
         self.gl_widget.set_profile_lines(ref_line_positions, adj_line_positions)
@@ -473,20 +521,8 @@ class Point3DViewer(QtWidgets.QWidget):
             self.gl_widget.set_profile_plane(None)
             return
 
-        z_min = float(np.min(z_all))
-        z_max = float(np.max(z_all))
-        margin = max(0.2 * (z_max - z_min), 1.0)
-        z_min -= margin
-        z_max += margin
-        plane_vertices = np.array(
-            [
-                [pts_physical[0, 0], pts_physical[0, 1], z_min],
-                [pts_physical[-1, 0], pts_physical[-1, 1], z_min],
-                [pts_physical[-1, 0], pts_physical[-1, 1], z_max],
-                [pts_physical[0, 0], pts_physical[0, 1], z_max],
-            ],
-            dtype=np.float32,
-        )
+        z_min, z_max = self._compute_profile_plane_z_limits(z_all)
+        plane_vertices = self._build_profile_plane_vertices(pts_physical, z_min, z_max)
         self.gl_widget.set_profile_plane(plane_vertices)
 
     def _refresh_reference_rectangle(self) -> None:
@@ -640,6 +676,123 @@ class Point3DViewer(QtWidgets.QWidget):
                 z_values[valid].astype(np.float32),
             )
         ).astype(np.float32, copy=False)
+
+    def _compute_profile_plane_z_limits(self, z_values: np.ndarray) -> tuple[float, float]:
+        """Compute Z limits for the profile plane according to the active mode."""
+        finite_values = np.asarray(z_values, dtype=np.float32)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size < 1:
+            return -0.5, 0.5
+
+        dynamic_min, dynamic_max = self._compute_dynamic_profile_plane_z_limits(finite_values)
+        full_scene_min, full_scene_max = self._compute_full_scene_plane_z_limits()
+        mode = self._profile_plane_height_mode
+        if mode == "maximum":
+            return full_scene_min, full_scene_max
+        if mode == "manual":
+            return self._compute_manual_profile_plane_z_limits(
+                finite_values=finite_values,
+                dynamic_min=dynamic_min,
+                dynamic_max=dynamic_max,
+                full_scene_min=full_scene_min,
+                full_scene_max=full_scene_max,
+            )
+        return dynamic_min, dynamic_max
+
+    def _compute_dynamic_profile_plane_z_limits(
+        self,
+        finite_values: np.ndarray,
+    ) -> tuple[float, float]:
+        """Compute dynamic local plane limits with a minimum visible height."""
+        z_min = float(np.min(finite_values))
+        z_max = float(np.max(finite_values))
+        z_span = max(0.0, z_max - z_min)
+        margin = max(0.2 * z_span, 1.0)
+        plane_min = z_min - margin
+        plane_max = z_max + margin
+        min_visual_height = self._minimum_profile_plane_height()
+        current_height = plane_max - plane_min
+        if current_height < min_visual_height:
+            center = 0.5 * (plane_min + plane_max)
+            half_height = 0.5 * min_visual_height
+            plane_min = center - half_height
+            plane_max = center + half_height
+        return float(plane_min), float(plane_max)
+
+    def _compute_full_scene_plane_z_limits(self) -> tuple[float, float]:
+        """Compute plane limits spanning the full loaded scene height range."""
+        z_sources = []
+        if self._ref_grid is not None:
+            z_sources.append(np.asarray(self._ref_grid, dtype=np.float32))
+        if self._adj_grid is not None:
+            z_sources.append(np.asarray(self._adj_grid, dtype=np.float32) + float(self._separation))
+
+        finite_chunks = [values[np.isfinite(values)] for values in z_sources if values is not None]
+        finite_chunks = [values for values in finite_chunks if values.size > 0]
+        if not finite_chunks:
+            half = 0.5 * self._minimum_profile_plane_height()
+            return -half, half
+
+        finite_values = np.concatenate(finite_chunks)
+        z_min = float(np.min(finite_values))
+        z_max = float(np.max(finite_values))
+        z_span = max(0.0, z_max - z_min)
+        margin = max(0.05 * z_span, 1.0)
+        plane_min = z_min - margin
+        plane_max = z_max + margin
+
+        min_visual_height = self._minimum_profile_plane_height()
+        current_height = plane_max - plane_min
+        if current_height < min_visual_height:
+            center = 0.5 * (plane_min + plane_max)
+            half_height = 0.5 * min_visual_height
+            plane_min = center - half_height
+            plane_max = center + half_height
+        return float(plane_min), float(plane_max)
+
+    def _compute_manual_profile_plane_z_limits(
+        self,
+        finite_values: np.ndarray,
+        dynamic_min: float,
+        dynamic_max: float,
+        full_scene_min: float,
+        full_scene_max: float,
+    ) -> tuple[float, float]:
+        """Compute manual plane limits interpolated between minimum and full height."""
+        local_center = 0.5 * (float(np.min(finite_values)) + float(np.max(finite_values)))
+        dynamic_height = max(float(dynamic_max - dynamic_min), self._minimum_profile_plane_height())
+        full_scene_height = max(float(full_scene_max - full_scene_min), dynamic_height)
+        fraction = float(self.slider_plane_height.value()) / 100.0
+        target_height = dynamic_height + fraction * (full_scene_height - dynamic_height)
+        half_height = 0.5 * target_height
+        return float(local_center - half_height), float(local_center + half_height)
+
+    def _minimum_profile_plane_height(self) -> float:
+        """Return a footprint-aware minimum plane height in scene units."""
+        if self._ref_grid is None or self._ref_grid.ndim != 2:
+            return 2.0
+        rows, cols = self._ref_grid.shape
+        width_um = max(0.0, (cols - 1) * self._pixel_size_x)
+        height_um = max(0.0, (rows - 1) * self._pixel_size_y)
+        footprint_um = max(width_um, height_um)
+        return max(2.0, 0.005 * footprint_um)
+
+    @staticmethod
+    def _build_profile_plane_vertices(
+        pts_physical: np.ndarray,
+        z_min: float,
+        z_max: float,
+    ) -> np.ndarray:
+        """Build plane vertices spanning the first and last profile points."""
+        return np.array(
+            [
+                [pts_physical[0, 0], pts_physical[0, 1], z_min],
+                [pts_physical[-1, 0], pts_physical[-1, 1], z_min],
+                [pts_physical[-1, 0], pts_physical[-1, 1], z_max],
+                [pts_physical[0, 0], pts_physical[0, 1], z_max],
+            ],
+            dtype=np.float32,
+        )
 
     def _selected_colormap(self, combo: QtWidgets.QComboBox) -> str | None:
         """Normalize combo-box text to the renderer colormap API."""
@@ -810,6 +963,53 @@ class Point3DViewer(QtWidgets.QWidget):
         )
         if color.isValid():
             self.gl_widget.set_background_color(color)
+
+    def _plane_height_mode_changed(self, _index: int) -> None:
+        """Switch profile-plane height behavior between dynamic, maximum, and manual."""
+        self._profile_plane_height_mode = self.combo_plane_height_mode.currentData() or "dynamic"
+        self._sync_plane_height_controls()
+        self._refresh_profile_line()
+
+    def _manual_plane_height_changed(self, value: int) -> None:
+        """Update manual profile-plane height and refresh the overlay if needed."""
+        self.label_plane_height_value.setText(f"{int(value)}%")
+        if self._profile_plane_height_mode == "manual":
+            self._refresh_profile_line()
+
+    def _plane_opacity_changed(self, value: float) -> None:
+        """Update plane translucency from a percentage control."""
+        self._apply_plane_style(alpha_fraction=float(value) / 100.0)
+
+    def _choose_plane_color(self) -> None:
+        """Open a color dialog and keep the current plane opacity."""
+        color = QtWidgets.QColorDialog.getColor(
+            self.gl_widget.get_profile_plane_color(),
+            self,
+            "Choose section plane color",
+            QtWidgets.QColorDialog.ShowAlphaChannel,
+        )
+        if color.isValid():
+            self._apply_plane_style(base_color=color)
+
+    def _apply_plane_style(
+        self,
+        base_color: QtGui.QColor | None = None,
+        alpha_fraction: float | None = None,
+    ) -> None:
+        """Synchronize the section-plane color and opacity with the GL widget."""
+        color = QtGui.QColor(base_color) if base_color is not None else self.gl_widget.get_profile_plane_color()
+        if alpha_fraction is None:
+            alpha_fraction = float(self.spin_plane_opacity.value()) / 100.0
+        alpha_fraction = min(max(float(alpha_fraction), 0.0), 1.0)
+        color.setAlphaF(alpha_fraction)
+        self.gl_widget.set_profile_plane_color(color)
+
+    def _sync_plane_height_controls(self) -> None:
+        """Show manual-height controls only when the manual mode is active."""
+        is_manual = self._profile_plane_height_mode == "manual"
+        self.slider_plane_height.setVisible(is_manual)
+        self.label_plane_height_value.setVisible(is_manual)
+        self.label_plane_height_value.setText(f"{int(self.slider_plane_height.value())}%")
 
     def _apply_render_mode_to_ui(self) -> None:
         """Synchronize UI controls with the active render mode."""
@@ -1817,6 +2017,16 @@ def _reset_global_point_viewer(*_args) -> None:
     """Forget the cached experimental 3D viewer after it is destroyed."""
     global _global_point_viewer
     _global_point_viewer = None
+
+
+def close_point_3d_viewer() -> None:
+    """Close the shared experimental 3D viewer if it is currently open."""
+    global _global_point_viewer
+    if _global_point_viewer is None:
+        return
+    viewer = _global_point_viewer
+    _global_point_viewer = None
+    viewer.close()
 
 
 def show_point_3d_viewer(

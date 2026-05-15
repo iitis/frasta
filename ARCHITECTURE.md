@@ -131,6 +131,24 @@ Conversions happen **only at I/O boundaries**:
 - `save_stl()` converts from um -> mm
 - All internal processing stays in um
 
+### 5. **One Orientation Source of Truth**
+
+Regular grids are stored internally as `grid[row, col]`, where:
+- `col` advances along physical `+X`,
+- `row` advances along physical `+Y` in scan space.
+
+GUI layers must not introduce local ad-hoc flips or transpositions. Shared
+presentation helpers in `frasta/gui/orientation.py` define how this canonical
+grid orientation is mapped into:
+- 2D `pyqtgraph` image views,
+- interactive coordinate picking,
+- 3D world coordinates.
+
+`Surface.orientation` stores the intended presentation orientation for a scan
+as a dedicated enum. At present the application uses only the default enum
+value everywhere, but future import-time or per-scan orientation correction
+should update this single property instead of patching individual viewers.
+
 ---
 
 ## Module Structure
@@ -142,6 +160,7 @@ frasta/
 +-- io/             # File I/O (loaders & exporters)
 |   +-- loaders.py
 |   +-- exporters.py
+|   +-- parsers/    # Reusable single-surface instrument parsers
 +-- processing/     # Analysis algorithms (pure functions)
 |   +-- filtering.py
 |   +-- advanced_filtering.py
@@ -205,13 +224,20 @@ frasta/
 **Key Files:**
 - `loaders.py` - functions for reading CSV, NPZ, HDF5, STL formats
 - `exporters.py` - functions for writing NPZ, HDF5, STL formats
+- `parsers/` - reusable parser registry for instrument-native formats that
+  normalize directly to one `Surface`
 
 **Contract:**
 - **Loaders return:** `Surface` object or list of `Surface` objects
 - **Exporters take:** list of tuples `[(name, Surface), ...]`
+- **Parsers return:** one normalized `Surface` object without GUI dependencies
 - Handle unit conversions at file boundary (mm <-> um)
 - **Never** perform data processing (filtering, leveling, etc.)
 - Preserve spatial positioning (`x0`, `y0`) when loading data
+
+Instrument-native import logic should prefer `frasta/io/parsers/` when a file
+describes a single measured surface. This keeps binary format knowledge
+isolated from the GUI and makes the same parser callable from other programs.
 
 **When to add new function:**
 - New file format support

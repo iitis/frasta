@@ -22,6 +22,12 @@ import trimesh
 from ...core import Surface
 from ...utils import get_colormap, get_lookup_table
 from ...processing import fill_holes, remove_outliers, nan_aware_gaussian
+from ..orientation import (
+    build_image_rect,
+    grid_to_image_data,
+    indices_to_physical as orientation_indices_to_physical,
+    physical_to_indices as orientation_physical_to_indices,
+)
 from ..colorbar_common import (
     build_colorbar_tick_layout,
     build_reference_label_specs,
@@ -100,6 +106,7 @@ class ScanTab(QtWidgets.QWidget):
         self.dx = None
         self.dy = None
         self.unit = "µm"
+        self.orientation = "default"
 
         # Display settings
         self.is_colormap = False
@@ -183,7 +190,8 @@ class ScanTab(QtWidgets.QWidget):
             y0=y0,
             unit=self.unit,
             vmin=grid_min,
-            vmax=grid_max
+            vmax=grid_max,
+            orientation=getattr(self, "orientation", "default"),
         )
         
         # Get current threshold values if available
@@ -205,6 +213,7 @@ class ScanTab(QtWidgets.QWidget):
         self.yi = data.yi
         self.dx = data.dx
         self.dy = data.dy
+        self.orientation = getattr(data, "orientation", "default")
         self.unit = getattr(data, "unit", "µm")
         logger.debug(f"grid: {self.grid.shape}, xmin: {self.xi[0]}, ymin: {self.yi[0]}, px_x: {self.dx}, px_y: {self.dy}")
         
@@ -328,7 +337,11 @@ class ScanTab(QtWidgets.QWidget):
         
         # IMPORTANT: grid.T creates a VIEW, not a copy!
         # Make a copy immediately to avoid accidentally modifying self.grid.
-        image_data = self.grid.T.copy()
+        image_data = grid_to_image_data(
+            self.grid,
+            orientation=getattr(self, "orientation", "default"),
+            copy=True,
+        )
         invalid_mask = np.isnan(image_data)
         if self.hide_below_range:
             image_data[image_data < vmin] = np.nan
@@ -382,9 +395,16 @@ class ScanTab(QtWidgets.QWidget):
         dy = self.dy if self.dy not in (None, 0) else 1.0
         x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
         y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
-        width = self.grid.shape[1] * dx
-        height = self.grid.shape[0] * dy
-        image_item.setRect(QtCore.QRectF(x0 - dx / 2.0, y0 - dy / 2.0, width, height))
+        image_item.setRect(
+            build_image_rect(
+                self.grid.shape,
+                dx=dx,
+                dy=dy,
+                x0=x0,
+                y0=y0,
+                orientation=getattr(self, "orientation", "default"),
+            )
+        )
 
     def physical_to_indices(self, x_phys: float, y_phys: float) -> tuple[int, int]:
         """Convert physical coordinates to nearest grid indices."""
@@ -392,9 +412,15 @@ class ScanTab(QtWidgets.QWidget):
         dy = self.dy if self.dy not in (None, 0) else 1.0
         x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
         y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
-        x_idx = int(round((x_phys - x0) / dx))
-        y_idx = int(round((y_phys - y0) / dy))
-        return x_idx, y_idx
+        return orientation_physical_to_indices(
+            x_phys,
+            y_phys,
+            dx=dx,
+            dy=dy,
+            x0=x0,
+            y0=y0,
+            orientation=getattr(self, "orientation", "default"),
+        )
 
     def indices_to_physical(self, x_idx: int, y_idx: int) -> tuple[float, float]:
         """Convert grid indices to physical coordinates at pixel centers."""
@@ -402,7 +428,15 @@ class ScanTab(QtWidgets.QWidget):
         dy = self.dy if self.dy not in (None, 0) else 1.0
         x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
         y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
-        return x0 + x_idx * dx, y0 + y_idx * dy
+        return orientation_indices_to_physical(
+            x_idx,
+            y_idx,
+            dx=dx,
+            dy=dy,
+            x0=x0,
+            y0=y0,
+            orientation=getattr(self, "orientation", "default"),
+        )
     
     def toggle_colormap(self):
         """Toggle between grayscale and color display."""

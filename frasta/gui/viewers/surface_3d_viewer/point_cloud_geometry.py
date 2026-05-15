@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ...orientation import points_to_3d_world
 from ....utils import get_colormap
 
 
@@ -48,14 +49,21 @@ def build_point_positions_from_grid(
         return np.empty((0, 3), dtype=np.float32)
 
     rows, cols = sampled.shape
-    xs = x0 + dx * np.arange(0, cols * stride, stride, dtype=np.float32)
-    ys = -(y0 + dy * np.arange(0, rows * stride, stride, dtype=np.float32))
-    x_grid, y_grid = np.meshgrid(xs, ys, indexing="xy")
-
+    col_grid, row_grid = np.meshgrid(
+        np.arange(0, cols * stride, stride, dtype=np.float32),
+        np.arange(0, rows * stride, stride, dtype=np.float32),
+        indexing="xy",
+    )
     z_values = sampled[valid_mask] + np.float32(z_offset)
-    return np.column_stack(
-        (x_grid[valid_mask], y_grid[valid_mask], z_values)
-    ).astype(np.float32, copy=False)
+    return points_to_3d_world(
+        col_grid[valid_mask],
+        row_grid[valid_mask],
+        z_values,
+        dx=dx,
+        dy=dy,
+        x0=x0,
+        y0=y0,
+    )
 
 
 def build_mesh_geometry_from_grid(
@@ -99,21 +107,25 @@ def build_mesh_geometry_from_grid(
         )
 
     rows, cols = sampled.shape
-    xs = x0 + dx * np.arange(0, cols * stride, stride, dtype=np.float32)
-    ys = -(y0 + dy * np.arange(0, rows * stride, stride, dtype=np.float32))
-    x_grid, y_grid = np.meshgrid(xs, ys, indexing="xy")
+    col_grid, row_grid = np.meshgrid(
+        np.arange(0, cols * stride, stride, dtype=np.float32),
+        np.arange(0, rows * stride, stride, dtype=np.float32),
+        indexing="xy",
+    )
     z_grid = sampled + np.float32(z_offset)
 
     vertex_ids = np.full(sampled.shape, -1, dtype=np.int32)
     valid_coords = np.argwhere(valid_mask)
     vertex_ids[valid_mask] = np.arange(len(valid_coords), dtype=np.int32)
-    positions = np.column_stack(
-        (
-            x_grid[valid_mask],
-            y_grid[valid_mask],
-            z_grid[valid_mask],
-        )
-    ).astype(np.float32, copy=False)
+    positions = points_to_3d_world(
+        col_grid[valid_mask],
+        row_grid[valid_mask],
+        z_grid[valid_mask],
+        dx=dx,
+        dy=dy,
+        x0=x0,
+        y0=y0,
+    )
 
     face_list: list[list[int]] = []
     for row in range(rows - 1):

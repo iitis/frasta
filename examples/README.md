@@ -39,6 +39,16 @@ python examples/visualization.py
 
 ---
 
+### [`data/synthetic_alicona_demo.al3d`](data/synthetic_alicona_demo.al3d)
+Small synthetic Alicona AL3D file for parser and GUI smoke tests.
+
+You can regenerate it with:
+```bash
+python examples/data/generate_synthetic_al3d.py
+```
+
+---
+
 ## Quick Start
 
 ```bash

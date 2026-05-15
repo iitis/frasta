@@ -62,6 +62,7 @@ The top action bar contains:
 
 The sidebar groups controls into:
 - **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,
+  plus section-plane opacity and color controls,
 - **Reference** - colormap, range, and clipping controls for the reference surface,
 - **Adjusted** - matching controls for the adjusted surface, shown only when a second surface is available.
 
@@ -73,6 +74,18 @@ When the experimental 3D viewer is opened from the profile-analysis window,
 dragging the profile ROI updates the 3D profile line and section plane live in
 the already-open viewer. This live sync keeps the current camera and surface
 geometry intact and refreshes only the profile overlay.
+
+The section plane in the experimental 3D viewer can now be restyled directly
+from the sidebar. Its visibility remains independent, while opacity and color
+can be adjusted without rebuilding the surface geometry.
+
+Its height can now be controlled in three modes:
+- **Dynamic** - follows the current profile while keeping a minimum visible vertical extent derived from the scene footprint,
+- **Maximum** - spans the full loaded scene height range,
+- **Manual** - uses a slider to interpolate from the dynamic local height up to the maximum scene-wide height.
+
+This keeps the plane readable on nearly flat surfaces while also making it
+easier to prepare clearer screenshots for publications and presentations.
 
 The profile-analysis window now uses a horizontal splitter only for the two
 main views. Compact profile controls sit in one shared row above them, so the
@@ -92,6 +105,20 @@ units and publication layouts.
 The dialog supports two behavior modes:
 - **Shared across scans** - one ROI geometry reused for every scan
 - **Independent per scan** - each tab keeps its own ROI position and size
+
+The FRASTA binary and profile docks still remember their saved positions, but
+they no longer auto-open empty after application startup. They stay hidden
+until a scan pair or a saved FRASTA session is loaded into them.
+
+The FRASTA binary map now follows the same 2D Y-axis orientation as the main
+scan views and the manual overlay view. This keeps profile lines, point picks,
+and the linked 3D section plane in one consistent coordinate convention.
+
+Internally, this orientation contract is now centralized in a shared GUI
+adapter rather than being reimplemented separately in each viewer. The scan
+data model also carries a dedicated `orientation` enum property so future
+import-time or per-scan orientation correction can be introduced from one
+source of truth without changing each individual view path.
 
 ### Toolbar
 

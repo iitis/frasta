@@ -13,6 +13,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from ...core import Surface
 from ...utils import get_colormap, get_brushes_for_values
+from ..orientation import grid_to_image_data
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.
@@ -59,8 +60,16 @@ class OverlayViewer(QtWidgets.QWidget):
 
         self.scan1_raw = scan1_data.height
         self.scan2_raw = scan2_data.height
-        self.scan1 = self.scan1_raw.T.copy()
-        self.scan2 = self.scan2_raw.T.copy()
+        self.scan1 = grid_to_image_data(
+            self.scan1_raw,
+            orientation=getattr(scan1_data, "orientation", "default"),
+            copy=True,
+        )
+        self.scan2 = grid_to_image_data(
+            self.scan2_raw,
+            orientation=getattr(scan2_data, "orientation", "default"),
+            copy=True,
+        )
 
         self._orig_scan1 = self.scan1.copy()
         self._orig_scan2 = self.scan2.copy()

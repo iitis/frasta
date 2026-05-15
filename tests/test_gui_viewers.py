@@ -1,11 +1,73 @@
-"""Tests for the active 3D-viewer colormap manager."""
+"""Tests for the active 3D-viewer components."""
 
 from unittest.mock import Mock
 
 import numpy as np
+import pyqtgraph as pg
 import pytest
+from PyQt5 import QtGui
 
-from frasta.gui.viewers.surface_3d_viewer import ColormapManager
+from frasta.gui.docks.frasta_profile_dock import FrastaProfileDock
+from frasta.gui.docks.frasta_binary_dock import FrastaBinaryDock
+from frasta.core import SurfaceOrientation
+from frasta.gui.orientation import (
+    build_image_rect,
+    grid_to_image_data,
+    index_to_3d_world,
+    indices_to_physical,
+    physical_to_indices,
+    points_to_3d_world,
+)
+from frasta.gui.main_window.main_window import MainWindow
+from frasta.gui.viewers.surface_3d_viewer import ColormapManager, Point3DViewer
+from frasta.gui.viewers.surface_3d_viewer.point_cloud_gl_widget import PointCloudGLWidget
+
+
+class TestOrientationHelpers:
+    """Test the shared GUI orientation adapter."""
+
+    def test_grid_to_image_data_uses_shared_transpose(self):
+        """2D image export and viewers should receive one consistent orientation."""
+        grid = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=float)
+
+        image = grid_to_image_data(grid, orientation=SurfaceOrientation.DEFAULT)
+
+        np.testing.assert_array_equal(image, np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float))
+
+    def test_physical_and_index_conversions_roundtrip(self):
+        """Physical coordinates should round-trip through the shared adapter."""
+        x_phys, y_phys = indices_to_physical(
+            3, 4, dx=2.0, dy=5.0, x0=10.0, y0=20.0, orientation=SurfaceOrientation.DEFAULT
+        )
+        col, row = physical_to_indices(
+            x_phys, y_phys, dx=2.0, dy=5.0, x0=10.0, y0=20.0, orientation=SurfaceOrientation.DEFAULT
+        )
+
+        assert (x_phys, y_phys) == (16.0, 40.0)
+        assert (col, row) == (3, 4)
+
+    def test_3d_world_conversion_matches_current_visual_convention(self):
+        """3D world coordinates should share one axis convention everywhere."""
+        assert index_to_3d_world(2, 3, 7.5, dx=4.0, dy=6.0, orientation=SurfaceOrientation.DEFAULT) == (8.0, -18.0, 7.5)
+
+        points = points_to_3d_world(
+            np.array([0.0, 2.0], dtype=np.float32),
+            np.array([0.0, 3.0], dtype=np.float32),
+            np.array([1.0, 7.5], dtype=np.float32),
+            dx=4.0,
+            dy=6.0,
+            orientation=SurfaceOrientation.DEFAULT,
+        )
+        np.testing.assert_allclose(points, np.array([[0.0, 0.0, 1.0], [8.0, -18.0, 7.5]], dtype=np.float32))
+
+    def test_build_image_rect_uses_shared_pixel_center_convention(self):
+        """Physical image rect should stay centered on pixel centers."""
+        rect = build_image_rect((3, 4), dx=2.0, dy=5.0, x0=10.0, y0=20.0, orientation=SurfaceOrientation.DEFAULT)
+
+        assert rect.x() == pytest.approx(9.0)
+        assert rect.y() == pytest.approx(17.5)
+        assert rect.width() == pytest.approx(8.0)
+        assert rect.height() == pytest.approx(15.0)
 
 
 class TestColormapManager:
@@ -118,3 +180,135 @@ class TestColormapManager:
 
         assert lo == 20.0
         assert hi == 80.0
+
+
+class TestPointCloudGLWidget:
+    """Test lightweight state changes on the OpenGL widget wrapper."""
+
+    def test_profile_plane_color_roundtrip(self, qapp):
+        """Plane color setter should preserve RGBA values."""
+        widget = PointCloudGLWidget()
+
+        color = QtGui.QColor.fromRgbF(0.1, 0.2, 0.3, 0.4)
+        widget.set_profile_plane_color(color)
+        stored = widget.get_profile_plane_color()
+
+        assert stored.isValid()
+        assert stored.redF() == pytest.approx(0.1, abs=1e-3)
+        assert stored.greenF() == pytest.approx(0.2, abs=1e-3)
+        assert stored.blueF() == pytest.approx(0.3, abs=1e-3)
+        assert stored.alphaF() == pytest.approx(0.4, abs=1e-3)
+        widget.deleteLater()
+
+
+class TestPoint3DViewer:
+    """Test non-OpenGL helper logic on the 3D viewer widget."""
+
+    def test_profile_plane_z_limits_keep_minimum_visual_height(self, qapp):
+        """Flat profiles should still produce a visibly tall section plane."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.full((10, 1001), 5.0, dtype=np.float32)
+        viewer._pixel_size_x = 1.0
+        viewer._pixel_size_y = 1.0
+
+        z_min, z_max = viewer._compute_profile_plane_z_limits(np.array([5.0, 5.0], dtype=np.float32))
+
+        assert (z_max - z_min) == pytest.approx(5.0, abs=1e-6)
+        viewer.deleteLater()
+
+    def test_profile_plane_maximum_mode_uses_full_scene_height(self, qapp):
+        """Maximum mode should span the global Z range of loaded surfaces."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.array([[0.0, 10.0]], dtype=np.float32)
+        viewer._adj_grid = np.array([[20.0, 30.0]], dtype=np.float32)
+        viewer._separation = 5.0
+        viewer._profile_plane_height_mode = "maximum"
+
+        z_min, z_max = viewer._compute_profile_plane_z_limits(np.array([9.0, 9.0], dtype=np.float32))
+
+        assert z_min == pytest.approx(-1.75, abs=1e-6)
+        assert z_max == pytest.approx(36.75, abs=1e-6)
+        viewer.deleteLater()
+
+    def test_profile_plane_manual_mode_interpolates_to_full_scene_height(self, qapp):
+        """Manual mode should interpolate between dynamic and full-scene heights."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.full((10, 1001), 5.0, dtype=np.float32)
+        viewer._adj_grid = np.array([[0.0, 20.0]], dtype=np.float32)
+        viewer._profile_plane_height_mode = "manual"
+        viewer.slider_plane_height.setValue(100)
+
+        z_min, z_max = viewer._compute_profile_plane_z_limits(np.array([5.0, 5.0], dtype=np.float32))
+
+        assert (z_max - z_min) == pytest.approx(22.0, abs=1e-6)
+        assert 5.0 == pytest.approx(0.5 * (z_min + z_max), abs=1e-6)
+        viewer.deleteLater()
+
+
+class TestFrastaProfileDock:
+    """Test FRASTA profile-dock view state updates."""
+
+    def test_set_profiles_clears_no_data_title(self, qapp):
+        """Loading profiles should remove the placeholder no-data title."""
+        dock = FrastaProfileDock()
+        dock._plot.setTitle("No data")
+
+        positions = np.array([0.0, 1.0, 2.0], dtype=float)
+        profiles = [
+            ("Ref", np.array([1.0, 2.0, 3.0], dtype=float), pg.mkPen("g", width=2)),
+            ("Adj", np.array([1.5, 2.5, 3.5], dtype=float), pg.mkPen("b", width=2)),
+        ]
+
+        dock.set_profiles(positions, profiles, np.array([0.5, 0.5, 0.5], dtype=float))
+
+        assert dock._plot.plotItem.titleLabel.text == ""
+        dock.deleteLater()
+
+
+class TestFrastaBinaryDock:
+    """Test FRASTA binary-dock coordinate conventions."""
+
+    def test_binary_dock_uses_same_y_orientation_as_other_2d_views(self, qapp):
+        """Binary dock should keep direct row-to-view mapping on the Y axis."""
+        dock = FrastaBinaryDock()
+        dock.set_data(np.arange(12, dtype=float).reshape(3, 4))
+
+        assert dock._image_view.getView().state["yInverted"] is True
+        assert dock._numpy_to_view(0, 0) == (0.0, 0.0)
+        assert dock._numpy_to_view(2, 3) == (3.0, 2.0)
+        assert dock._view_to_numpy(0.0, 0.0) == (0, 0)
+        assert dock._view_to_numpy(3.0, 2.0) == (2, 3)
+        dock.deleteLater()
+
+
+class TestMainWindowHelpers:
+    """Test helper logic on the main window without full UI setup."""
+
+    def test_hide_empty_frasta_docks_hides_only_empty_docks(self):
+        """Startup helper should hide docks that have no loaded data."""
+        empty_binary = Mock()
+        empty_binary._diff_map = None
+        empty_profile = Mock()
+        empty_profile._positions = None
+        loaded_binary = Mock()
+        loaded_binary._diff_map = np.ones((2, 2), dtype=float)
+        loaded_profile = Mock()
+        loaded_profile._positions = np.array([0.0, 1.0], dtype=float)
+
+        main_window = Mock()
+        main_window.frasta_controller = Mock(
+            binary_dock=empty_binary,
+            profile_dock=empty_profile,
+        )
+        MainWindow._hide_empty_frasta_docks(main_window)
+        empty_binary.hide.assert_called_once()
+        empty_profile.hide.assert_called_once()
+
+        other_window = Mock()
+        other_window.frasta_controller = Mock(
+            binary_dock=loaded_binary,
+            profile_dock=loaded_profile,
+        )
+        MainWindow._hide_empty_frasta_docks(other_window)
+        loaded_binary.hide.assert_not_called()
+        loaded_profile.hide.assert_not_called()

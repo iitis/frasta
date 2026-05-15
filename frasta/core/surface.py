@@ -1,7 +1,20 @@
 # Surface data model
+from enum import Enum
 from functools import cached_property
 
 import numpy as np
+
+
+class SurfaceOrientation(str, Enum):
+    """Supported presentation orientations for one loaded surface.
+
+    The enum describes how scan-space axes are interpreted before any GUI
+    adapter maps them into 2D or 3D views. Only the default orientation is
+    currently active, but explicit enum values make future import-time or
+    per-scan orientation correction type-safe.
+    """
+
+    DEFAULT = "default"
 
 
 class Surface:
@@ -24,6 +37,7 @@ class Surface:
         metadata=None,
         vmin=None,
         vmax=None,
+        orientation: SurfaceOrientation | str = SurfaceOrientation.DEFAULT,
     ):
         self.height = np.asarray(height, dtype=float)
         self.dx = dx
@@ -39,6 +53,11 @@ class Surface:
         # visualization-related (previously GridData)
         self.vmin = vmin
         self.vmax = vmax
+        self.orientation = (
+            orientation
+            if isinstance(orientation, SurfaceOrientation)
+            else SurfaceOrientation(str(orientation).strip() or SurfaceOrientation.DEFAULT.value)
+        )
 
     # ---------------------------
     # Basic properties
@@ -99,6 +118,7 @@ class Surface:
             self.metadata.copy(),
             self.vmin,
             self.vmax,
+            self.orientation,
         )
 
     def crop(self, ny, nx):
@@ -114,5 +134,5 @@ class Surface:
             self.metadata.copy(),
             self.vmin,
             self.vmax,
+            self.orientation,
         )
-

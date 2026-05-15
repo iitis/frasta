@@ -16,6 +16,7 @@ from PyQt5.QtGui import QIcon
 from ..dialogs import AboutDialog, ScanInfoDialog
 from ..scan_tab import ScanTab
 from ..viewers import (
+    close_point_3d_viewer,
     show_point_3d_viewer,
 )
 from ...core import Surface
@@ -99,6 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         _state = _settings.value("mainWindow/state")
         if _state is not None:
             self.restoreState(_state)
+        self._hide_empty_frasta_docks()
 
     def close_tab(self, index: int):
         """Close a tab at given index.
@@ -299,8 +301,21 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             event: Close event
         """
+        self.registration_controller.close_auxiliary_windows()
+        close_point_3d_viewer()
         _settings = self.file_controller.settings
         _settings.setValue("recentFiles", self.file_controller.recent_files)
         _settings.setValue("mainWindow/geometry", self.saveGeometry())
         _settings.setValue("mainWindow/state", self.saveState())
         event.accept()
+
+    def _hide_empty_frasta_docks(self) -> None:
+        """Keep restored FRASTA docks hidden until data is loaded explicitly."""
+        for dock in (
+            self.frasta_controller.binary_dock,
+            self.frasta_controller.profile_dock,
+        ):
+            dock_state = getattr(dock, "__dict__", {})
+            has_data = dock_state.get("_diff_map") is not None or dock_state.get("_positions") is not None
+            if not has_data:
+                dock.hide()

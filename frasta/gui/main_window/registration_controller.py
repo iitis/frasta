@@ -28,6 +28,18 @@ class RegistrationController:
         """
         self.main_window = main_window
         self.viewer = None
+        self._contact_map_dialog = None
+
+    def close_auxiliary_windows(self) -> None:
+        """Close comparison and contact-map windows owned by this controller."""
+        for attr_name in ("viewer", "_contact_map_dialog"):
+            widget = getattr(self, attr_name, None)
+            if widget is None:
+                continue
+            try:
+                widget.close()
+            finally:
+                setattr(self, attr_name, None)
 
     def _initialize_scan_pair_selectors(
         self,
