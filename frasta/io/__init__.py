@@ -1,35 +1,41 @@
-"""Input/Output operations for scan data."""
+"""Compatibility wrapper around shared ``surface_io`` package."""
 
-from .loaders import (
-    load_csv_data,
-    load_npz_data,
-    load_h5_data,
-    load_stl_data,
-    suggest_units
-)
-from .exporters import (
-    save_npz,
-    save_stl,
-    save_h5
-)
-from .parsers import (
+from surface_io import (
+    Surface,
+    SurfaceOrientation,
+    get_scan_reader,
     get_surface_parser,
     load_alicona_al3d,
+    load_csv_data,
+    load_h5_data,
+    load_npz_data,
+    load_scan_file,
+    load_stl_data,
     load_surface_file,
+    register_scan_reader,
     register_surface_parser,
+    save_h5,
+    save_npz,
+    save_stl,
+    suggest_units,
 )
 
 __all__ = [
-    'load_csv_data',
-    'load_npz_data',
-    'load_h5_data',
-    'load_stl_data',
-    'load_alicona_al3d',
-    'load_surface_file',
-    'get_surface_parser',
-    'register_surface_parser',
-    'suggest_units',
-    'save_npz',
-    'save_h5',
-    'save_stl'
+    "Surface",
+    "SurfaceOrientation",
+    "get_scan_reader",
+    "get_surface_parser",
+    "load_alicona_al3d",
+    "load_csv_data",
+    "load_h5_data",
+    "load_npz_data",
+    "load_scan_file",
+    "load_stl_data",
+    "load_surface_file",
+    "register_scan_reader",
+    "register_surface_parser",
+    "save_h5",
+    "save_npz",
+    "save_stl",
+    "suggest_units",
 ]

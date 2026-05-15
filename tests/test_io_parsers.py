@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 
 from frasta.core import Surface
-from frasta.io import get_surface_parser, load_alicona_al3d, load_surface_file
+from frasta.io import (
+    get_scan_reader,
+    get_surface_parser,
+    load_alicona_al3d,
+    load_scan_file,
+    load_surface_file,
+)
 
 _AL3D_MAGIC = b"AliconaImaging\x00\r\n"
 _AL3D_TAG_LAYOUT = "<20s30s2s"
@@ -135,8 +141,44 @@ class TestSurfaceParsers:
         assert surface.height.shape == (1, 2)
         assert surface.height[0, 1] == pytest.approx(2.0)
 
+    def test_load_scan_file_normalizes_single_surface_readers(self, tmp_path):
+        """Unified scan loading should wrap single-surface readers in a list."""
+
+        payload = _build_al3d_file(
+            np.array([[1.0e-6, 2.0e-6, 3.0e-6]], dtype=np.float32),
+            dx_m=2.0e-6,
+            dy_m=4.0e-6,
+            invalid_value=float("nan"),
+        )
+        path = tmp_path / "single.al3d"
+        path.write_bytes(payload)
+
+        reader = get_scan_reader(str(path))
+        surfaces = load_scan_file(str(path))
+
+        assert callable(reader)
+        assert len(surfaces) == 1
+        assert surfaces[0].height.shape == (1, 3)
+        assert surfaces[0].dx == pytest.approx(2.0)
+
+    def test_load_scan_file_handles_multi_surface_archives(self, temp_npz_file):
+        """Unified scan loading should preserve multi-surface archive readers."""
+
+        reader = get_scan_reader(temp_npz_file)
+        surfaces = load_scan_file(temp_npz_file)
+
+        assert callable(reader)
+        assert len(surfaces) == 1
+        assert surfaces[0].metadata["name"] == "test_scan"
+
     def test_get_surface_parser_rejects_unknown_suffix(self):
         """Unknown suffixes should fail with a clear error."""
 
         with pytest.raises(ValueError, match="Unsupported surface parser format"):
             get_surface_parser(".unknown")
+
+    def test_get_scan_reader_rejects_unknown_suffix(self):
+        """Unknown suffixes should fail with a clear reader-registry error."""
+
+        with pytest.raises(ValueError, match="Unsupported scan reader format"):
+            get_scan_reader(".unknown")

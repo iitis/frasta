@@ -1,6 +1,7 @@
-"""Compatibility wrapper around shared ``surface_io`` parser registry."""
+"""Reusable parsers for instrument-specific single-surface file formats."""
 
-from surface_io.parsers.registry import (
+from .alicona import load_alicona_al3d
+from .registry import (
     get_scan_reader,
     get_surface_parser,
     load_scan_file,
@@ -12,6 +13,7 @@ from surface_io.parsers.registry import (
 __all__ = [
     "get_scan_reader",
     "get_surface_parser",
+    "load_alicona_al3d",
     "load_scan_file",
     "load_surface_file",
     "register_scan_reader",

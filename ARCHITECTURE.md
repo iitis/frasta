@@ -33,6 +33,7 @@ FRASTA-toolbox is a modular desktop application for fracture surface analysis bu
 - `io/` = loading/saving data
 - `processing/` = algorithms (pure functions)
 - `gui/` = user interface orchestration
+- `surface_io/` = shared scan I/O and neutral surface model for reuse across projects
 
 **No Circular Dependencies**: Dependencies flow one way:
 ```
@@ -145,9 +146,11 @@ grid orientation is mapped into:
 - 3D world coordinates.
 
 `Surface.orientation` stores the intended presentation orientation for a scan
-as a dedicated enum. At present the application uses only the default enum
-value everywhere, but future import-time or per-scan orientation correction
-should update this single property instead of patching individual viewers.
+as a dedicated enum. The canonical implementation now lives in
+`surface_io.surface`, while `frasta.core.surface` remains a compatibility
+wrapper. At present the application uses only the default enum value
+everywhere, but future import-time or per-scan orientation correction should
+update this single property instead of patching individual viewers.
 
 ---
 
@@ -203,29 +206,45 @@ frasta/
 +-- utils/          # Shared utilities
     +-- decorators.py
     +-- resources.py
+surface_io/         # Shared scan I/O core extracted from FRASTA
++-- surface.py      # Neutral Surface model
++-- loaders.py      # Common loaders
++-- exporters.py    # Common exporters
++-- parsers/        # Shared parser registry and vendor parsers
 ```
 
 ### Detailed Module Responsibilities
 
-#### `core/` - Data Structures
-**Single responsibility:** Define data containers.
+#### `surface_io/` - Shared Scan I/O Core
+**Single responsibility:** Provide a reusable, application-neutral package for
+surface data containers and file readers/writers.
 
-- `Surface` - holds scan data with metadata
+- `surface.py` - shared `Surface` and `SurfaceOrientation`
+- `loaders.py` / `exporters.py` - common file I/O helpers
+- `parsers/` - suffix-based parser registry and instrument parsers
+
+This package is the preferred place for code that should eventually be shared
+with `efs-toolbox` or any other surface-analysis project.
+
+#### `core/` - FRASTA Compatibility Layer
+**Single responsibility:** Re-export the shared surface model for stable FRASTA imports.
+
+- `Surface` - compatibility import that re-exports the shared model
 - No algorithms, no I/O, no GUI dependencies
 - Only simple utility methods (crop, copy)
 
-**When to modify:** Only when changing fundamental data representation.
+**When to modify:** Only when FRASTA needs compatibility glue or project-local helpers.
 
 ---
 
-#### `io/` - File I/O
-**Single responsibility:** Load and save scan data.
+#### `io/` - FRASTA I/O Compatibility Layer
+**Single responsibility:** Provide stable FRASTA import paths while delegating
+loading and saving work to `surface_io`.
 
 **Key Files:**
-- `loaders.py` - functions for reading CSV, NPZ, HDF5, STL formats
-- `exporters.py` - functions for writing NPZ, HDF5, STL formats
-- `parsers/` - reusable parser registry for instrument-native formats that
-  normalize directly to one `Surface`
+- `loaders.py` - compatibility wrappers for shared loaders
+- `exporters.py` - compatibility wrappers for shared exporters
+- `parsers/` - compatibility wrappers for the shared parser registry
 
 **Contract:**
 - **Loaders return:** `Surface` object or list of `Surface` objects
@@ -235,9 +254,20 @@ frasta/
 - **Never** perform data processing (filtering, leveling, etc.)
 - Preserve spatial positioning (`x0`, `y0`) when loading data
 
-Instrument-native import logic should prefer `frasta/io/parsers/` when a file
-describes a single measured surface. This keeps binary format knowledge
-isolated from the GUI and makes the same parser callable from other programs.
+New import/export code that should be reusable outside FRASTA should be added
+to `surface_io`, not directly to `frasta/io`. FRASTA modules can keep using
+`frasta.io` imports where convenient, but these names now proxy to the shared
+package.
+
+The parser registry now also acts as the unified discovery layer for existing
+loaders:
+- `load_scan_file(...)` always returns `list[Surface]`,
+- single-surface formats are adapted to one-item lists,
+- multi-scan archive formats keep returning multiple items.
+
+Legacy helpers such as `load_csv_data()` and `load_h5_data()` remain valid as
+compatibility wrappers, but new code that only needs normalized import should
+prefer the registry API.
 
 **When to add new function:**
 - New file format support

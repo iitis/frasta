@@ -38,6 +38,7 @@ This README is the main entry point for:
 - **Data structures**: `frasta/core/`
 - **Analysis algorithms**: `frasta/processing/`
 - **File I/O**: `frasta/io/`
+- **Shared scan I/O core**: `surface_io/`
 - **GUI components**: `frasta/gui/`
 - **Utilities**: `frasta/utils/`
 
