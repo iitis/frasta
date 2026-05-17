@@ -274,16 +274,15 @@ class TestPoint3DViewer:
         assert viewer._stride_schedule[-1] > 1
         viewer.deleteLater()
 
-    def test_refinement_schedule_uses_preview_and_target_only(self, qapp):
-        """The viewer should use at most one settled preview before the target."""
+    def test_refinement_schedule_uses_only_the_settled_target_stride(self, qapp):
+        """After interaction, the viewer should jump directly to the target stride."""
         viewer = Point3DViewer()
         viewer._ref_grid = np.zeros((4000, 4000), dtype=np.float32)
         viewer._render_mode = "mesh"
 
         viewer._reset_refinement_schedule()
 
-        assert 1 <= len(viewer._stride_schedule) <= 2
-        assert viewer._stride_schedule == sorted(viewer._stride_schedule, reverse=True)
+        assert viewer._stride_schedule == [viewer._stride_schedule[-1]]
         viewer.deleteLater()
 
     def test_reset_refinement_schedule_caps_huge_point_resolution(self, qapp):
@@ -309,33 +308,47 @@ class TestPoint3DViewer:
         viewer.deleteLater()
 
     def test_full_resolution_toggle_allows_stride_one(self, qapp):
-        """Explicit full-resolution mode should bypass the safety stride cap."""
+        """Ultra quality should allow stride 1 when the mesh is still practical."""
         viewer = Point3DViewer()
         viewer._ref_grid = np.zeros((500, 500), dtype=np.float32)
         viewer._render_mode = "mesh"
-        viewer._allow_full_resolution = True
+        viewer._set_quality_preset("ultra")
 
         viewer._reset_refinement_schedule()
 
         assert viewer._stride_schedule[-1] == 1
         viewer.deleteLater()
 
-    def test_full_resolution_mesh_can_still_be_capped_for_huge_grids(self, qapp):
-        """Huge meshes should not force stride 1 when full-res mesh is impractical."""
+    def test_manual_stride_override_can_force_stride_one_even_for_huge_mesh(self, qapp):
+        """Manual quality should allow an explicit stride-1 target on demand."""
         viewer = Point3DViewer()
         viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
         viewer._render_mode = "mesh"
-        viewer._allow_full_resolution = True
+        viewer._set_quality_preset("manual")
+        viewer._manual_target_stride = 1
+        viewer._pending_manual_target_stride = 1
+        viewer._reset_refinement_schedule()
+
+        assert viewer._stride_schedule[-1] == 1
+        assert "manual stride 1" in viewer.label_render_status.text()
+        viewer.deleteLater()
+
+    def test_full_resolution_mesh_can_still_be_capped_for_huge_grids(self, qapp):
+        """Huge meshes should not force stride 1 when ultra mesh is impractical."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+        viewer._set_quality_preset("ultra")
 
         viewer._reset_refinement_schedule()
         viewer._update_render_status()
 
         assert viewer._stride_schedule[-1] > 1
-        assert "full capped" in viewer.label_render_status.text()
+        assert "quality ultra capped" in viewer.label_render_status.text()
         viewer.deleteLater()
 
-    def test_disabling_full_resolution_clears_cached_geometry(self, qapp):
-        """Returning to normal mode should drop stale full-resolution caches."""
+    def test_lowering_quality_clears_cached_geometry(self, qapp):
+        """Returning from ultra to lower quality should drop stale heavy caches."""
         viewer = Point3DViewer()
         viewer._ref_grid = np.zeros((100, 100), dtype=np.float32)
         stale_points = np.ones((10, 3), dtype=np.float32)
@@ -347,8 +360,8 @@ class TestPoint3DViewer:
         viewer._geometry_cache["points"]["ref"][1] = stale_points
         viewer._geometry_cache["mesh"]["ref"][1] = stale_mesh
 
-        viewer._allow_full_resolution = True
-        viewer._full_resolution_toggled(False)
+        viewer._set_quality_preset("ultra")
+        viewer._set_quality_preset("balanced")
 
         rebuilt_point_geometry = viewer._geometry_cache["points"]["ref"].get(1)
         assert rebuilt_point_geometry is not None
@@ -375,8 +388,8 @@ class TestPoint3DViewer:
         assert worker not in viewer._retired_mesh_workers
         viewer.deleteLater()
 
-    def test_mesh_prefers_cached_coarser_mesh_over_point_fallback(self, qapp):
-        """Mesh mode should keep the previous mesh visible while denser mesh builds."""
+    def test_mesh_uses_target_density_points_until_target_mesh_is_ready(self, qapp):
+        """Mesh mode should show points at the target stride until mesh triangles finish."""
         viewer = Point3DViewer()
         viewer._render_mode = "mesh"
         viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
@@ -388,18 +401,39 @@ class TestPoint3DViewer:
         )
         viewer.gl_widget = Mock()
         viewer._get_or_build_geometry = Mock(return_value=None)
+        viewer._get_or_build_point_preview = Mock(
+            return_value=(
+                np.ones((4, 3), dtype=np.float32),
+                np.ones((4, 3), dtype=np.float32),
+            )
+        )
 
         viewer._apply_geometry("ref", 1)
 
-        viewer.gl_widget.set_mesh_data.assert_called_once()
-        viewer.gl_widget.set_cloud_data.assert_not_called()
+        viewer.gl_widget.set_cloud_data.assert_called_once()
+        viewer.gl_widget.set_mesh_data.assert_not_called()
+        viewer.deleteLater()
+
+    def test_mesh_worker_reuses_cached_point_payload_for_same_stride(self, qapp, mocker):
+        """Mesh generation should reuse the already built point payload for one stride."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
+        ensure_worker = mocker.patch.object(viewer, "_ensure_mesh_geometry_worker")
+
+        viewer._get_or_build_geometry("ref", 4, render_mode="mesh")
+
+        ensure_worker.assert_called_once()
+        call_kwargs = ensure_worker.call_args.kwargs
+        assert call_kwargs["base_positions"].shape[1] == 3
+        assert call_kwargs["valid_mask"].ndim == 2
+        assert 4 in viewer._point_payload_cache["ref"]
         viewer.deleteLater()
 
     def test_full_resolution_interaction_uses_point_preview_mode(self, qapp):
-        """Full-resolution interaction should temporarily force point rendering."""
+        """Ultra interaction should temporarily force point rendering."""
         viewer = Point3DViewer()
         viewer._render_mode = "mesh"
-        viewer._allow_full_resolution = True
+        viewer._set_quality_preset("ultra")
         viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
 
         viewer._interaction_state_changed(True)
@@ -413,13 +447,80 @@ class TestPoint3DViewer:
         """After interaction ends the viewer should return to the selected mode."""
         viewer = Point3DViewer()
         viewer._render_mode = "mesh"
-        viewer._allow_full_resolution = True
+        viewer._set_quality_preset("ultra")
         viewer._ref_grid = np.zeros((500, 500), dtype=np.float32)
 
         viewer._interaction_state_changed(True)
         viewer._interaction_state_changed(False)
 
         assert viewer._effective_render_mode() == "mesh"
+        viewer.deleteLater()
+
+    def test_quality_preset_updates_internal_full_resolution_flag(self, qapp):
+        """Ultra should behave as the old full-resolution mode internally."""
+        viewer = Point3DViewer()
+
+        viewer._set_quality_preset("high")
+        assert viewer._allow_full_resolution is False
+        viewer._set_quality_preset("ultra")
+        assert viewer._allow_full_resolution is True
+        viewer.deleteLater()
+
+    def test_manual_stride_controls_stay_visible_but_disabled_outside_manual(self, qapp):
+        """Stride controls should stay visible and become active only in manual mode."""
+        viewer = Point3DViewer()
+
+        assert viewer.manual_stride_label.isHidden() is False
+        assert viewer.slider_manual_stride.isHidden() is False
+        assert viewer.label_manual_stride_value.isHidden() is False
+        assert viewer.slider_manual_stride.isEnabled() is False
+
+        viewer._set_quality_preset("manual")
+
+        assert viewer.manual_stride_label.isHidden() is False
+        assert viewer.slider_manual_stride.isHidden() is False
+        assert viewer.label_manual_stride_value.isHidden() is False
+        assert viewer.slider_manual_stride.isEnabled() is True
+        viewer.deleteLater()
+
+    def test_switching_to_manual_adopts_current_target_stride(self, qapp):
+        """Manual mode should start from the currently settled target stride."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+        viewer._set_quality_preset("balanced")
+
+        expected_stride = viewer._compute_minimum_render_stride()
+        viewer._set_quality_preset("manual")
+
+        assert viewer._manual_target_stride == expected_stride
+        assert viewer._pending_manual_target_stride == expected_stride
+        assert viewer.slider_manual_stride.value() == expected_stride
+        assert viewer.label_manual_stride_value.text() == str(expected_stride)
+        viewer.deleteLater()
+
+    def test_manual_stride_slider_debounces_rebuilds(self, qapp):
+        """Dragging the manual stride slider should delay expensive rebuilds briefly."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((200, 200), dtype=np.float32)
+        viewer._render_mode = "mesh"
+        viewer._set_quality_preset("manual")
+        viewer._manual_target_stride = 8
+        viewer._pending_manual_target_stride = 8
+        viewer.slider_manual_stride.setValue(8)
+        viewer._reset_refinement_schedule()
+
+        viewer._manual_stride_changed(4)
+
+        assert viewer._manual_target_stride == 8
+        assert viewer._pending_manual_target_stride == 4
+        assert viewer._manual_stride_apply_timer.isActive() is True
+        assert viewer.label_manual_stride_value.text() == "4"
+
+        viewer._apply_pending_manual_stride()
+
+        assert viewer._manual_target_stride == 4
+        assert viewer._stride_schedule[-1] == 4
         viewer.deleteLater()
 
     def test_render_status_reports_mesh_state(self, qapp):
@@ -441,8 +542,8 @@ class TestPoint3DViewer:
         viewer = Point3DViewer()
         viewer._render_mode = "points"
         viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
-        viewer._stride_schedule = [4, 2, 1]
-        viewer._stride_schedule_index = 1
+        viewer._stride_schedule = [2]
+        viewer._stride_schedule_index = 0
         viewer._update_render_status()
 
         text = viewer.label_render_status.text()

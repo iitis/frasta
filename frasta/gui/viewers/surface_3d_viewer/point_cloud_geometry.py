@@ -79,6 +79,46 @@ def build_point_geometry_from_grid(
     Returns:
         Tuple ``(positions, normals)`` where both arrays have shape ``(N, 3)``.
     """
+    positions, normals, _valid_mask = build_point_geometry_payload_from_grid(
+        grid,
+        dx=dx,
+        dy=dy,
+        x0=x0,
+        y0=y0,
+        z_offset=z_offset,
+        clip_abs=clip_abs,
+        stride=stride,
+    )
+    return positions, normals
+
+
+def build_point_geometry_payload_from_grid(
+    grid: np.ndarray,
+    dx: float = 1.0,
+    dy: float = 1.0,
+    x0: float = 0.0,
+    y0: float = 0.0,
+    z_offset: float = 0.0,
+    clip_abs: float = 1e6,
+    stride: int = 1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build point geometry together with the sampled validity mask.
+
+    Args:
+        grid: Height map represented as a 2D numpy array.
+        dx: Pixel spacing in the X direction.
+        dy: Pixel spacing in the Y direction.
+        x0: Physical X origin.
+        y0: Physical Y origin.
+        z_offset: Additional Z offset applied to every valid point.
+        clip_abs: Absolute clipping threshold for invalid outliers.
+        stride: Sampling stride for regular decimation.
+
+    Returns:
+        Tuple ``(positions, normals, valid_mask)``. The validity mask keeps the
+        sampled 2D layout so mesh generation can reuse already built point
+        positions and only add triangle indices later.
+    """
     if grid.ndim != 2:
         raise ValueError("grid must be a 2D array")
     if stride < 1:
@@ -90,6 +130,7 @@ def build_point_geometry_from_grid(
         return (
             np.empty((0, 3), dtype=np.float32),
             np.empty((0, 3), dtype=np.float32),
+            valid_mask.astype(bool, copy=False),
         )
 
     rows, cols = sampled.shape
@@ -115,7 +156,7 @@ def build_point_geometry_from_grid(
         dy=float(dy) * float(stride),
     )
     normals = normals_grid[valid_mask].astype(np.float32, copy=False)
-    return positions, normals
+    return positions, normals, valid_mask.astype(bool, copy=False)
 
 
 def build_mesh_geometry_from_grid(
@@ -128,6 +169,8 @@ def build_mesh_geometry_from_grid(
     clip_abs: float = 1e6,
     stride: int = 1,
     cancel_check=None,
+    base_positions: np.ndarray | None = None,
+    valid_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build compact mesh geometry from a structured height map.
 
@@ -142,6 +185,9 @@ def build_mesh_geometry_from_grid(
         stride: Sampling stride for regular decimation.
         cancel_check: Optional callable returning True when mesh generation
             should abort early.
+        base_positions: Optional precomputed point positions for the same
+            sampled grid and stride.
+        valid_mask: Optional sampled validity mask matching ``base_positions``.
 
     Returns:
         Tuple ``(positions, normals, indices)`` where positions and normals
@@ -152,8 +198,23 @@ def build_mesh_geometry_from_grid(
     if stride < 1:
         raise ValueError("stride must be >= 1")
 
-    sampled = np.asarray(grid[::stride, ::stride], dtype=np.float32)
-    valid_mask = np.isfinite(sampled) & (np.abs(sampled) <= clip_abs)
+    if valid_mask is None:
+        positions, _point_normals, sampled_valid_mask = build_point_geometry_payload_from_grid(
+            grid,
+            dx=dx,
+            dy=dy,
+            x0=x0,
+            y0=y0,
+            z_offset=z_offset,
+            clip_abs=clip_abs,
+            stride=stride,
+        )
+        valid_mask = sampled_valid_mask
+    else:
+        valid_mask = np.asarray(valid_mask, dtype=bool)
+        if base_positions is None:
+            raise ValueError("base_positions must be provided together with valid_mask")
+        positions = np.ascontiguousarray(base_positions, dtype=np.float32)
     if not np.any(valid_mask):
         return (
             np.empty((0, 3), dtype=np.float32),
@@ -161,26 +222,12 @@ def build_mesh_geometry_from_grid(
             np.empty((0, 3), dtype=np.uint32),
         )
 
-    rows, cols = sampled.shape
-    col_grid, row_grid = np.meshgrid(
-        np.arange(0, cols * stride, stride, dtype=np.float32),
-        np.arange(0, rows * stride, stride, dtype=np.float32),
-        indexing="xy",
-    )
-    z_grid = sampled + np.float32(z_offset)
-
-    vertex_ids = np.full(sampled.shape, -1, dtype=np.int32)
+    rows, cols = valid_mask.shape
+    vertex_ids = np.full(valid_mask.shape, -1, dtype=np.int32)
     valid_coords = np.argwhere(valid_mask)
     vertex_ids[valid_mask] = np.arange(len(valid_coords), dtype=np.int32)
-    positions = points_to_3d_world(
-        col_grid[valid_mask],
-        row_grid[valid_mask],
-        z_grid[valid_mask],
-        dx=dx,
-        dy=dy,
-        x0=x0,
-        y0=y0,
-    )
+    if len(positions) != len(valid_coords):
+        raise ValueError("base_positions do not match the sampled valid-mask layout")
 
     face_list: list[list[int]] = []
     for row in range(rows - 1):

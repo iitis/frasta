@@ -13,9 +13,6 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ...orientation import index_to_3d_world, points_to_3d_world
 from .point_cloud_geometry import (
     build_colormap_lut,
-    build_point_geometry_from_grid,
-    build_mesh_geometry_from_grid,
-    compute_progressive_stride_schedule,
     compute_stride_for_point_budget,
 )
 from .point_cloud_gl_widget import PointCloudGLWidget
@@ -40,13 +37,45 @@ logger = logging.getLogger(__name__)
 class Point3DViewer(QtWidgets.QWidget):
     """Experimental viewer for rendering one or two grids as points or meshes."""
 
-    POINT_RENDER_TARGET_INITIAL_POINTS = 120_000
-    POINT_RENDER_TARGET_FINAL_POINTS = 900_000
-    POINT_RENDER_TARGET_INTERACTION_POINTS = 180_000
-    POINT_RENDER_TARGET_SETTLED_PREVIEW_POINTS = 320_000
-    MESH_RENDER_TARGET_INITIAL_POINTS = 45_000
-    MESH_RENDER_TARGET_FINAL_VERTICES = 250_000
     MESH_RENDER_FULL_RESOLUTION_MAX_VERTICES = 1_000_000
+    QUALITY_PRESET_ORDER = ("fast", "balanced", "high", "ultra", "manual")
+    QUALITY_PROFILES = {
+        "fast": {
+            "label": "Fast",
+            "point_final": 450_000,
+            "point_interaction": 100_000,
+            "point_preview": 180_000,
+            "mesh_final": 140_000,
+        },
+        "balanced": {
+            "label": "Balanced",
+            "point_final": 900_000,
+            "point_interaction": 180_000,
+            "point_preview": 320_000,
+            "mesh_final": 250_000,
+        },
+        "high": {
+            "label": "High",
+            "point_final": 1_500_000,
+            "point_interaction": 260_000,
+            "point_preview": 520_000,
+            "mesh_final": 450_000,
+        },
+        "ultra": {
+            "label": "Ultra",
+            "point_final": None,
+            "point_interaction": 320_000,
+            "point_preview": 700_000,
+            "mesh_final": MESH_RENDER_FULL_RESOLUTION_MAX_VERTICES,
+        },
+        "manual": {
+            "label": "Manual",
+            "point_final": 900_000,
+            "point_interaction": 220_000,
+            "point_preview": 420_000,
+            "mesh_final": 250_000,
+        },
+    }
 
     def __init__(self, parent=None):
         """Initialize the point viewer and its controls."""
@@ -65,11 +94,18 @@ class Point3DViewer(QtWidgets.QWidget):
         self._separation = 0.0
         self._profile_plane_height_mode = "dynamic"
         self._render_mode = "mesh"
+        self._quality_preset = "balanced"
+        self._manual_target_stride = 1
+        self._pending_manual_target_stride = 1
         self._allow_full_resolution = False
         self._interaction_active = False
         self._geometry_cache: dict[str, dict[str, dict[int, object]]] = {
             "points": {"ref": {}, "adj": {}},
             "mesh": {"ref": {}, "adj": {}},
+        }
+        self._point_payload_cache: dict[str, dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {
+            "ref": {},
+            "adj": {},
         }
         self._mesh_request_id = 0
         self._mesh_workers: dict[tuple[int, str, int], MeshGeometryWorker] = {}
@@ -80,6 +116,9 @@ class Point3DViewer(QtWidgets.QWidget):
         self._refinement_timer = QtCore.QTimer(self)
         self._refinement_timer.setSingleShot(True)
         self._refinement_timer.timeout.connect(self._advance_refinement_stage)
+        self._manual_stride_apply_timer = QtCore.QTimer(self)
+        self._manual_stride_apply_timer.setSingleShot(True)
+        self._manual_stride_apply_timer.timeout.connect(self._apply_pending_manual_stride)
         self.gl_widget.interactionStateChanged.connect(self._interaction_state_changed)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -111,9 +150,23 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_auto_range_mode.addItem("Full", userData="full")
         self.combo_auto_range_mode.addItem("Percentile", userData="percentile")
         self.combo_auto_range_mode.setCurrentIndex(self.combo_auto_range_mode.findData("full"))
-        self.checkbox_full_resolution = QtWidgets.QCheckBox("Full resolution")
-        self.checkbox_full_resolution.setToolTip(
-            "Allow refinement down to stride 1. This can be very slow for large scans."
+        self.combo_quality = QtWidgets.QComboBox()
+        for preset in self.QUALITY_PRESET_ORDER:
+            self.combo_quality.addItem(self.QUALITY_PROFILES[preset]["label"], userData=preset)
+        self.combo_quality.setCurrentIndex(self.combo_quality.findData(self._quality_preset))
+        self.combo_quality.setToolTip(
+            "Choose the quality/performance tradeoff for final 3D rendering."
+        )
+        self.manual_stride_label = QtWidgets.QLabel("Target stride:")
+        self.slider_manual_stride = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_manual_stride.setRange(1, 64)
+        self.slider_manual_stride.setSingleStep(1)
+        self.slider_manual_stride.setPageStep(4)
+        self.slider_manual_stride.setValue(self._manual_target_stride)
+        self.slider_manual_stride.setFixedWidth(120)
+        self.label_manual_stride_value = QtWidgets.QLabel(str(self._manual_target_stride))
+        self.slider_manual_stride.setToolTip(
+            "Manual target stride for the settled final view. Lower is denser and slower."
         )
 
         self.combo_cmap_ref = QtWidgets.QComboBox()
@@ -197,8 +250,6 @@ class Point3DViewer(QtWidgets.QWidget):
         top_row.addWidget(QtWidgets.QLabel("Auto range:"))
         top_row.addWidget(self.combo_auto_range_mode)
         top_row.addSpacing(12)
-        top_row.addWidget(self.checkbox_full_resolution)
-        top_row.addSpacing(12)
         top_row.addWidget(self.point_size_label)
         top_row.addWidget(self.spin_point_size)
         top_row.addSpacing(12)
@@ -221,6 +272,19 @@ class Point3DViewer(QtWidgets.QWidget):
         view_layout = QtWidgets.QVBoxLayout(view_group)
         view_layout.setContentsMargins(10, 12, 10, 10)
         view_layout.setSpacing(6)
+        quality_widget = QtWidgets.QWidget(view_group)
+        quality_layout = QtWidgets.QFormLayout(quality_widget)
+        quality_layout.setContentsMargins(0, 0, 0, 0)
+        quality_layout.setSpacing(4)
+        manual_stride_widget = QtWidgets.QWidget(quality_widget)
+        manual_stride_layout = QtWidgets.QHBoxLayout(manual_stride_widget)
+        manual_stride_layout.setContentsMargins(0, 0, 0, 0)
+        manual_stride_layout.setSpacing(6)
+        manual_stride_layout.addWidget(self.slider_manual_stride)
+        manual_stride_layout.addWidget(self.label_manual_stride_value)
+        quality_layout.addRow("Quality:", self.combo_quality)
+        quality_layout.addRow(self.manual_stride_label, manual_stride_widget)
+        view_layout.addWidget(quality_widget)
         view_layout.addWidget(self.checkbox_ref)
         view_layout.addWidget(self.checkbox_adj)
         view_layout.addWidget(self.checkbox_line)
@@ -290,7 +354,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_render_mode.currentIndexChanged.connect(self._render_mode_changed)
         self.combo_projection_mode.currentIndexChanged.connect(self._projection_mode_changed)
         self.combo_auto_range_mode.currentIndexChanged.connect(self._auto_range_mode_changed)
-        self.checkbox_full_resolution.toggled.connect(self._full_resolution_toggled)
+        self.combo_quality.currentIndexChanged.connect(self._quality_preset_changed)
+        self.slider_manual_stride.valueChanged.connect(self._manual_stride_changed)
         self.button_background.clicked.connect(self._choose_background_color)
         self.button_background_reset.clicked.connect(self.gl_widget.reset_background_color)
         self.combo_cmap_ref.currentIndexChanged.connect(lambda _: self._refresh_clouds())
@@ -311,6 +376,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self.button_colorbar.clicked.connect(self._export_colorbar)
         self._apply_plane_style()
         self._sync_plane_height_controls()
+        self._sync_quality_state()
         self._update_render_status()
         return panel
 
@@ -866,11 +932,6 @@ class Point3DViewer(QtWidgets.QWidget):
         geometry = self._get_or_build_geometry(which, stride, render_mode=effective_mode)
         if effective_mode == "mesh":
             if not self._can_present_mesh_stage(stride):
-                fallback_geometry = self._get_best_available_mesh_geometry(which, stride)
-                if fallback_geometry is not None:
-                    positions, normals, indices = fallback_geometry
-                    self.gl_widget.set_mesh_data(which, positions, normals, indices)
-                    return
                 preview_positions, preview_normals = self._get_or_build_point_preview(which, stride)
                 self.gl_widget.set_cloud_data(which, preview_positions, normals=preview_normals)
                 return
@@ -907,22 +968,33 @@ class Point3DViewer(QtWidgets.QWidget):
             )
 
         if active_render_mode == "mesh":
-            self._ensure_mesh_geometry_worker(which, stride, grid, z_offset)
+            positions, _normals, valid_mask = self._get_or_build_point_payload(which, stride)
+            self._ensure_mesh_geometry_worker(
+                which,
+                stride,
+                grid,
+                z_offset,
+                base_positions=positions,
+                valid_mask=valid_mask,
+            )
             return None
         else:
-            geometry = build_point_geometry_from_grid(
-                grid,
-                dx=self._pixel_size_x,
-                dy=self._pixel_size_y,
-                z_offset=z_offset,
-                stride=stride,
-            )
+            geometry = self._get_or_build_point_preview(which, stride)
         cache[stride] = geometry
         return geometry
 
     def _get_or_build_point_preview(self, which: str, stride: int) -> tuple[np.ndarray, np.ndarray]:
         """Return cached point geometry used as a mesh preview before the mesh is ready."""
-        cache = self._geometry_cache["points"][which]
+        positions, normals, _valid_mask = self._get_or_build_point_payload(which, stride)
+        return positions, normals
+
+    def _get_or_build_point_payload(
+        self,
+        which: str,
+        stride: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return cached point geometry together with its sampled valid-mask layout."""
+        cache = self._point_payload_cache[which]
         if stride in cache:
             return cache[stride]
 
@@ -933,36 +1005,25 @@ class Point3DViewer(QtWidgets.QWidget):
         z_offset = 0.0  # separation is applied as GPU uniform u_z_offset
 
         if grid is None:
-            return (
+            payload = (
                 np.empty((0, 3), dtype=np.float32),
                 np.empty((0, 3), dtype=np.float32),
+                np.zeros((0, 0), dtype=bool),
+            )
+        else:
+            from .point_cloud_geometry import build_point_geometry_payload_from_grid
+
+            payload = build_point_geometry_payload_from_grid(
+                grid,
+                dx=self._pixel_size_x,
+                dy=self._pixel_size_y,
+                z_offset=z_offset,
+                stride=stride,
             )
 
-        preview_geometry = build_point_geometry_from_grid(
-            grid,
-            dx=self._pixel_size_x,
-            dy=self._pixel_size_y,
-            z_offset=z_offset,
-            stride=stride,
-        )
-        cache[stride] = preview_geometry
-        return preview_geometry
-
-    def _get_best_available_mesh_geometry(self, which: str, requested_stride: int):
-        """Return the closest already-built mesh geometry for one cloud.
-
-        When a denser mesh is still building in the background, reusing the
-        best available coarser mesh avoids a distracting fallback to points.
-        """
-        cache = self._geometry_cache["mesh"][which]
-        if not cache:
-            return None
-
-        available_strides = sorted(int(stride) for stride in cache)
-        same_or_coarser = [stride for stride in available_strides if stride >= int(requested_stride)]
-        if same_or_coarser:
-            return cache[same_or_coarser[0]]
-        return cache[available_strides[-1]]
+        cache[stride] = payload
+        self._geometry_cache["points"][which][stride] = payload[:2]
+        return payload
 
     def _current_stride(self) -> int:
         """Return the stride of the currently displayed refinement stage."""
@@ -978,7 +1039,8 @@ class Point3DViewer(QtWidgets.QWidget):
         if self._ref_grid is None:
             return 1
         cloud_count = 2 if self._adj_grid is not None else 1
-        per_cloud_target = max(1, int(self.POINT_RENDER_TARGET_INTERACTION_POINTS / max(1, cloud_count)))
+        profile = self._quality_profile()
+        per_cloud_target = max(1, int(profile["point_interaction"] / max(1, cloud_count)))
         grid_shapes = [self._ref_grid.shape]
         if self._adj_grid is not None:
             grid_shapes.append(self._adj_grid.shape)
@@ -993,21 +1055,12 @@ class Point3DViewer(QtWidgets.QWidget):
         return max(strides, default=1)
 
     def _schedule_next_refinement(self) -> None:
-        """Queue the next refinement stage without blocking the first frame."""
-        if self._stride_schedule_index >= len(self._stride_schedule) - 1:
-            return
-        # Delay slightly so the coarse preview becomes visible first.
-        delay_ms = 75 if self._render_mode == "points" else 120
-        self._refinement_timer.start(delay_ms)
+        """Retain a compatibility hook after removing settled multi-stage refinement."""
+        return
 
     def _advance_refinement_stage(self) -> None:
-        """Render the next denser stage of the point cloud."""
-        if self._stride_schedule_index >= len(self._stride_schedule) - 1:
-            return
-        self._stride_schedule_index += 1
-        self._refresh_clouds()
-        self._schedule_next_refinement()
-        self._update_render_status()
+        """Retain a compatibility hook after removing settled multi-stage refinement."""
+        return
 
     def _render_mode_changed(self, _index: int) -> None:
         """Switch the experimental backend between points and shaded mesh."""
@@ -1040,6 +1093,43 @@ class Point3DViewer(QtWidgets.QWidget):
             self._schedule_next_refinement()
         self._update_render_status()
 
+    def _quality_preset_changed(self, _index: int) -> None:
+        """Apply a user-selected render-quality preset."""
+        self._set_quality_preset(self.combo_quality.currentData() or "balanced")
+
+    def _manual_stride_changed(self, value: int) -> None:
+        """Queue a manually chosen final target stride after a short idle delay."""
+        value = max(1, int(value))
+        self._pending_manual_target_stride = value
+        self.label_manual_stride_value.setText(str(value))
+        if self._quality_preset != "manual":
+            self._manual_target_stride = value
+            return
+        if value == self._manual_target_stride:
+            self._manual_stride_apply_timer.stop()
+            return
+        self._manual_stride_apply_timer.start(300)
+        self._update_render_status()
+
+    def _apply_pending_manual_stride(self) -> None:
+        """Apply the queued manual stride once the slider stops moving briefly."""
+        self._manual_stride_apply_timer.stop()
+        target_stride = max(1, int(self._pending_manual_target_stride))
+        if target_stride == self._manual_target_stride:
+            self._update_render_status()
+            return
+        self._manual_target_stride = target_stride
+        if self._quality_preset != "manual":
+            return
+        self._refinement_timer.stop()
+        self._stop_mesh_workers()
+        self._mesh_request_id += 1
+        self._reset_refinement_schedule()
+        self._apply_render_mode_to_ui()
+        self._refresh_clouds()
+        self._schedule_next_refinement()
+        self._update_render_status()
+
     def _projection_mode_changed(self, _index: int) -> None:
         """Switch the camera projection used by the experimental 3D widget."""
         self.gl_widget.set_projection_mode(
@@ -1064,17 +1154,8 @@ class Point3DViewer(QtWidgets.QWidget):
             self.gl_widget.set_background_color(color)
 
     def _full_resolution_toggled(self, checked: bool) -> None:
-        """Allow the viewer to refine all the way to the native grid stride."""
-        self._allow_full_resolution = bool(checked)
-        self._refinement_timer.stop()
-        self._stop_mesh_workers()
-        self._mesh_request_id += 1
-        if not self._allow_full_resolution:
-            self._reset_geometry_cache()
-        self._reset_refinement_schedule()
-        self._refresh_clouds()
-        self._schedule_next_refinement()
-        self._update_render_status()
+        """Backward-compatible helper mapping the old full-res toggle to presets."""
+        self._set_quality_preset("ultra" if checked else "balanced")
 
     def _plane_height_mode_changed(self, _index: int) -> None:
         """Switch profile-plane height behavior between dynamic, maximum, and manual."""
@@ -1138,9 +1219,72 @@ class Point3DViewer(QtWidgets.QWidget):
         During active camera interaction in full-resolution mode the viewer
         temporarily falls back to decimated points for responsiveness.
         """
-        if self._interaction_active and self._allow_full_resolution:
+        if self._interaction_active and self._uses_interaction_preview():
             return "points"
         return self._render_mode
+
+    def _uses_interaction_preview(self) -> bool:
+        """Return True when interaction should temporarily fall back to points."""
+        return self._quality_preset in {"ultra", "manual"}
+
+    def _quality_profile(self) -> dict[str, object]:
+        """Return the active quality-profile dictionary."""
+        return self.QUALITY_PROFILES.get(self._quality_preset, self.QUALITY_PROFILES["balanced"])
+
+    def _sync_quality_state(self) -> None:
+        """Update internal compatibility flags derived from the chosen preset."""
+        self._allow_full_resolution = self._quality_preset == "ultra"
+        is_manual = self._quality_preset == "manual"
+        if hasattr(self, "manual_stride_label"):
+            self.manual_stride_label.setVisible(True)
+            self.slider_manual_stride.setVisible(True)
+            self.label_manual_stride_value.setVisible(True)
+            self.manual_stride_label.setEnabled(is_manual)
+            self.slider_manual_stride.setEnabled(is_manual)
+            self.label_manual_stride_value.setEnabled(is_manual)
+            self.label_manual_stride_value.setText(str(self._pending_manual_target_stride))
+
+    def _set_quality_preset(self, preset: str) -> None:
+        """Switch the 3D rendering quality preset and rebuild the plan."""
+        preset = str(preset or "balanced").lower()
+        if preset not in self.QUALITY_PROFILES:
+            preset = "balanced"
+        old_preset = self._quality_preset
+        if old_preset != "manual" and preset == "manual":
+            current_target_stride = max(1, int(self._compute_minimum_render_stride()))
+            self._manual_target_stride = current_target_stride
+            self._pending_manual_target_stride = current_target_stride
+            if hasattr(self, "slider_manual_stride"):
+                self.slider_manual_stride.blockSignals(True)
+                self.slider_manual_stride.setValue(current_target_stride)
+                self.slider_manual_stride.blockSignals(False)
+        if old_preset == "manual":
+            self._manual_stride_apply_timer.stop()
+            self._manual_target_stride = max(1, int(self._pending_manual_target_stride))
+        old_rank = self.QUALITY_PRESET_ORDER.index(old_preset)
+        new_rank = self.QUALITY_PRESET_ORDER.index(preset)
+        self._quality_preset = preset
+        self._sync_quality_state()
+
+        if hasattr(self, "combo_quality") and self.combo_quality.currentData() != preset:
+            self.combo_quality.blockSignals(True)
+            self.combo_quality.setCurrentIndex(self.combo_quality.findData(preset))
+            self.combo_quality.blockSignals(False)
+
+        if old_preset == preset:
+            self._update_render_status()
+            return
+
+        self._refinement_timer.stop()
+        self._stop_mesh_workers()
+        self._mesh_request_id += 1
+        if new_rank < old_rank:
+            self._reset_geometry_cache()
+        self._reset_refinement_schedule()
+        self._apply_render_mode_to_ui()
+        self._refresh_clouds()
+        self._schedule_next_refinement()
+        self._update_render_status()
 
     def _reset_geometry_cache(self) -> None:
         """Drop cached CPU-side geometry arrays for all render modes.
@@ -1153,49 +1297,18 @@ class Point3DViewer(QtWidgets.QWidget):
             "points": {"ref": {}, "adj": {}},
             "mesh": {"ref": {}, "adj": {}},
         }
+        self._point_payload_cache = {"ref": {}, "adj": {}}
 
     def _reset_refinement_schedule(self) -> None:
-        """Recompute the simplified preview-to-target render plan."""
+        """Recompute the settled target stride used outside interaction."""
         if self._ref_grid is None:
             self._stride_schedule = [1]
             self._stride_schedule_index = 0
             return
         target_stride = self._compute_minimum_render_stride()
-        preview_stride = self._settled_preview_stride(target_stride)
-        if preview_stride > target_stride:
-            self._stride_schedule = [preview_stride, target_stride]
-        else:
-            self._stride_schedule = [target_stride]
+        self._stride_schedule = [target_stride]
         self._stride_schedule_index = 0
         self._update_render_status()
-
-    def _settled_preview_stride(self, target_stride: int) -> int:
-        """Return one immediate preview stride shown before the final target.
-
-        The viewer no longer walks every intermediate stride level. It now
-        shows at most one reasonably dense point preview and then jumps to the
-        actual target quality.
-        """
-        if self._ref_grid is None:
-            return max(1, int(target_stride))
-
-        cloud_count = 2 if self._adj_grid is not None else 1
-        per_cloud_target = max(
-            1,
-            int(self.POINT_RENDER_TARGET_SETTLED_PREVIEW_POINTS / max(1, cloud_count)),
-        )
-        grid_shapes = [self._ref_grid.shape]
-        if self._adj_grid is not None:
-            grid_shapes.append(self._adj_grid.shape)
-        preview_stride = max(
-            compute_stride_for_point_budget(
-                shape,
-                target_points=per_cloud_target,
-                min_stride=1,
-            )
-            for shape in grid_shapes
-        )
-        return max(int(target_stride), int(preview_stride))
 
     def _compute_minimum_render_stride(self) -> int:
         """Return the finest stride that still keeps 3D geometry manageable.
@@ -1205,6 +1318,10 @@ class Point3DViewer(QtWidgets.QWidget):
         of refining all the way down to a stride that would allocate enormous
         GPU buffers or mesh index arrays.
         """
+        if self._quality_preset == "manual":
+            self._full_resolution_effective = self._manual_target_stride == 1
+            return max(1, int(self._manual_target_stride))
+
         grid_shapes = []
         if self._ref_grid is not None:
             grid_shapes.append(self._ref_grid.shape)
@@ -1215,16 +1332,17 @@ class Point3DViewer(QtWidgets.QWidget):
             return 1
 
         cloud_count = len(grid_shapes)
+        profile = self._quality_profile()
         if self._allow_full_resolution:
             if self._render_mode == "mesh":
-                target_points = self.MESH_RENDER_FULL_RESOLUTION_MAX_VERTICES
+                target_points = int(profile["mesh_final"])
             else:
-                target_points = None
+                target_points = profile["point_final"]
         else:
             if self._render_mode == "mesh":
-                target_points = self.MESH_RENDER_TARGET_FINAL_VERTICES
+                target_points = int(profile["mesh_final"])
             else:
-                target_points = self.POINT_RENDER_TARGET_FINAL_POINTS
+                target_points = int(profile["point_final"])
 
         if target_points is None:
             self._full_resolution_effective = True
@@ -1250,6 +1368,8 @@ class Point3DViewer(QtWidgets.QWidget):
         stride: int,
         grid: np.ndarray,
         z_offset: float,
+        base_positions: np.ndarray | None = None,
+        valid_mask: np.ndarray | None = None,
     ) -> None:
         """Start a background mesh-generation request if one is not pending."""
         key = (self._mesh_request_id, which, int(stride))
@@ -1264,6 +1384,8 @@ class Point3DViewer(QtWidgets.QWidget):
             dx=self._pixel_size_x,
             dy=self._pixel_size_y,
             z_offset=0.0,  # separation is applied as GPU uniform u_z_offset
+            base_positions=base_positions,
+            valid_mask=valid_mask,
         )
         worker.finished_geometry.connect(self._on_mesh_geometry_ready)
         worker.failed_geometry.connect(self._on_mesh_geometry_failed)
@@ -1339,12 +1461,21 @@ class Point3DViewer(QtWidgets.QWidget):
         mode_label = "mesh" if effective_mode == "mesh" else "points"
         stride = self._current_stride()
         visible_clouds = self._visible_cloud_names()
-        if self._allow_full_resolution and self._full_resolution_effective:
-            full_label = "full active"
+        quality_label = self._quality_profile()["label"].lower()
+        if self._quality_preset == "manual":
+            if self._manual_stride_apply_timer.isActive():
+                quality_state = (
+                    f"{quality_label} stride {self._manual_target_stride}"
+                    f" -> {self._pending_manual_target_stride}"
+                )
+            else:
+                quality_state = f"{quality_label} stride {self._manual_target_stride}"
+        elif self._allow_full_resolution and self._full_resolution_effective:
+            quality_state = f"{quality_label} active"
         elif self._allow_full_resolution:
-            full_label = "full capped"
+            quality_state = f"{quality_label} capped"
         else:
-            full_label = "full off"
+            quality_state = quality_label
 
         if self._ref_grid is None:
             status = f"Status: {mode_label}, no data"
@@ -1355,24 +1486,22 @@ class Point3DViewer(QtWidgets.QWidget):
                 for cloud_name in visible_clouds
             ) if visible_clouds else False
             if pending_workers > 0 and not has_current_mesh:
-                phase = "building mesh"
+                phase = "points ready, mesh building"
             elif pending_workers > 0:
-                phase = "refining mesh"
+                phase = "mesh refining"
             else:
                 phase = "mesh ready"
             status = (
                 f"Status: {mode_label}, stride {stride}, {phase}, "
-                f"workers {pending_workers}, {full_label}"
+                f"workers {pending_workers}, quality {quality_state}"
             )
         else:
-            remaining = max(0, len(self._stride_schedule) - self._stride_schedule_index - 1)
-            if self._interaction_active and self._allow_full_resolution:
+            if self._interaction_active and self._uses_interaction_preview():
                 phase = "interaction preview"
             else:
-                phase = "refining points" if remaining > 0 else "points ready"
+                phase = "points ready"
             status = (
-                f"Status: {mode_label}, stride {stride}, {phase}, "
-                f"stages left {remaining}, {full_label}"
+                f"Status: {mode_label}, stride {stride}, {phase}, quality {quality_state}"
             )
 
         self.label_render_status.setText(status)

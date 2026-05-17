@@ -32,6 +32,8 @@ class MeshGeometryWorker(QThread):
         dx: float,
         dy: float,
         z_offset: float,
+        base_positions=None,
+        valid_mask=None,
     ) -> None:
         """Initialize the worker with one mesh-generation request.
 
@@ -43,6 +45,10 @@ class MeshGeometryWorker(QThread):
             dx: Pixel spacing in X.
             dy: Pixel spacing in Y.
             z_offset: Additional Z offset for the mesh.
+            base_positions: Optional precomputed point positions reused by the
+                mesh builder for the same stride.
+            valid_mask: Optional sampled validity mask matching the reused
+                point positions.
         """
         super().__init__()
         self.request_id = request_id
@@ -52,6 +58,8 @@ class MeshGeometryWorker(QThread):
         self.dx = float(dx)
         self.dy = float(dy)
         self.z_offset = float(z_offset)
+        self.base_positions = base_positions
+        self.valid_mask = valid_mask
 
     def run(self) -> None:
         """Build mesh geometry and emit the result or a formatted error."""
@@ -70,6 +78,8 @@ class MeshGeometryWorker(QThread):
                 z_offset=self.z_offset,
                 stride=self.stride,
                 cancel_check=self.isInterruptionRequested,
+                base_positions=self.base_positions,
+                valid_mask=self.valid_mask,
             )
             if self.isInterruptionRequested():
                 return

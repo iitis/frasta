@@ -57,10 +57,14 @@ For very large scans, the GUI also applies adaptive display limits:
   would otherwise make repeated redraws too expensive,
 - the experimental 3D viewer refines only down to a practical point or mesh
   budget instead of always forcing stride `1`,
-- the experimental 3D viewer exposes a `Full resolution` checkbox that lets the
-  user intentionally override the safety cap and refine to the native grid when
-  feasible; for very large mesh scenes the viewer may still cap the final mesh
-  stride to avoid an effectively unbounded build time.
+- the experimental 3D viewer exposes a `Quality` preset selector
+  (`Fast` / `Balanced` / `High` / `Ultra` / `Manual`) so the user can consciously trade
+  off fidelity against responsiveness. `Ultra` plays the role of the old
+  full-resolution mode, but very large mesh scenes may still be capped to avoid
+  an effectively unbounded build time,
+- when `Manual` is selected, a `Target stride` slider becomes active so the
+  user can explicitly choose the settled final stride, including `1` for
+  maximum-fidelity inspection or screenshot export at the cost of performance.
 
 These display-side limits affect responsiveness only. Processing, measurement,
 and export still use the original full-resolution surface data.
@@ -81,13 +85,19 @@ useful as a faster alternative when the full mesh path is too expensive.
 
 When `Full resolution` is enabled, active camera interaction such as orbiting,
 panning, or zooming now temporarily switches the viewport to a decimated point
-preview. After a short idle delay the viewer restores the selected render mode
-and restores the non-interactive view through a simplified `preview -> target`
-path instead of stepping through every intermediate decimation level.
+preview. After a short idle delay the viewer jumps directly to the settled
+target stride. If the selected mode is `mesh`, the non-interactive view first
+shows points at that same target density and only later swaps to triangles once
+the mesh worker finishes building indices and mesh normals in the background.
 
 The sidebar groups controls into:
 - **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,
-  plus section-plane opacity and color controls,
+  plus the quality preset (`Fast`, `Balanced`, `High`, `Ultra`, `Manual`) and
+  the always-visible target-stride slider that stays disabled outside `Manual`,
+  adopts the current settled target stride when `Manual` is enabled, and then
+  applies later edits after a short idle delay so dragging the slider does not
+  rebuild the scene on every intermediate value, plus section-plane opacity and
+  color controls,
 - **Reference** - colormap, range, and clipping controls for the reference surface,
 - **Adjusted** - matching controls for the adjusted surface, shown only when a second surface is available.
 
