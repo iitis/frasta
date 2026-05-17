@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PyQt5 import QtGui
+from PyQt5 import QtCore, QtGui
 
 from frasta.gui.docks.frasta_profile_dock import FrastaProfileDock
 from frasta.gui.docks.frasta_binary_dock import FrastaBinaryDock
@@ -211,6 +211,54 @@ class TestPointCloudGLWidget:
         np.testing.assert_allclose(widget._clouds["ref"]["normals"], normals)
         widget.deleteLater()
 
+    def test_mouse_drag_refreshes_interaction_debounce(self, qapp, mocker):
+        """Dragging should keep extending the temporary interaction-preview mode."""
+        widget = PointCloudGLWidget()
+        widget._last_mouse_pos = QtCore.QPoint(0, 0)
+        begin_mock = mocker.patch.object(widget, "_begin_camera_interaction")
+        update_mock = mocker.patch.object(widget, "update")
+        event = QtGui.QMouseEvent(
+            QtCore.QEvent.MouseMove,
+            QtCore.QPointF(10.0, 5.0),
+            QtCore.Qt.NoButton,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+
+        widget.mouseMoveEvent(event)
+
+        begin_mock.assert_called_once()
+        update_mock.assert_called_once()
+        widget.deleteLater()
+
+    def test_mouse_drag_reactivates_interaction_after_timeout_when_button_is_still_held(self, qapp):
+        """A later drag with held LMB should re-enter preview mode after timeout."""
+        widget = PointCloudGLWidget()
+        captured_states = []
+        widget.interactionStateChanged.connect(captured_states.append)
+        widget._interaction_active = False
+        widget._last_mouse_pos = QtCore.QPoint(0, 0)
+        event = QtGui.QMouseEvent(
+            QtCore.QEvent.MouseMove,
+            QtCore.QPointF(12.0, 4.0),
+            QtCore.Qt.NoButton,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+
+        widget.mouseMoveEvent(event)
+
+        assert widget._interaction_active is True
+        assert captured_states == [True]
+        widget.deleteLater()
+
+    def test_interaction_idle_delay_is_long_enough_for_stable_drag_preview(self, qapp):
+        """Camera interaction preview should not expire too aggressively."""
+        widget = PointCloudGLWidget()
+
+        assert widget.INTERACTION_IDLE_DELAY_MS >= 450
+        widget.deleteLater()
+
 
 class TestPoint3DViewer:
     """Test non-OpenGL helper logic on the 3D viewer widget."""
@@ -224,6 +272,18 @@ class TestPoint3DViewer:
         viewer._reset_refinement_schedule()
 
         assert viewer._stride_schedule[-1] > 1
+        viewer.deleteLater()
+
+    def test_refinement_schedule_uses_preview_and_target_only(self, qapp):
+        """The viewer should use at most one settled preview before the target."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((4000, 4000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+
+        viewer._reset_refinement_schedule()
+
+        assert 1 <= len(viewer._stride_schedule) <= 2
+        assert viewer._stride_schedule == sorted(viewer._stride_schedule, reverse=True)
         viewer.deleteLater()
 
     def test_reset_refinement_schedule_caps_huge_point_resolution(self, qapp):
@@ -333,6 +393,33 @@ class TestPoint3DViewer:
 
         viewer.gl_widget.set_mesh_data.assert_called_once()
         viewer.gl_widget.set_cloud_data.assert_not_called()
+        viewer.deleteLater()
+
+    def test_full_resolution_interaction_uses_point_preview_mode(self, qapp):
+        """Full-resolution interaction should temporarily force point rendering."""
+        viewer = Point3DViewer()
+        viewer._render_mode = "mesh"
+        viewer._allow_full_resolution = True
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+
+        viewer._interaction_state_changed(True)
+
+        assert viewer._effective_render_mode() == "points"
+        assert viewer._current_stride() > 1
+        assert "interaction preview" in viewer.label_render_status.text()
+        viewer.deleteLater()
+
+    def test_interaction_end_restores_selected_render_mode(self, qapp):
+        """After interaction ends the viewer should return to the selected mode."""
+        viewer = Point3DViewer()
+        viewer._render_mode = "mesh"
+        viewer._allow_full_resolution = True
+        viewer._ref_grid = np.zeros((500, 500), dtype=np.float32)
+
+        viewer._interaction_state_changed(True)
+        viewer._interaction_state_changed(False)
+
+        assert viewer._effective_render_mode() == "mesh"
         viewer.deleteLater()
 
     def test_render_status_reports_mesh_state(self, qapp):

@@ -79,6 +79,12 @@ The `Points` render mode now uses lightweight per-point normal estimation and
 shaded circular splats instead of flat square pixels, so it remains visually
 useful as a faster alternative when the full mesh path is too expensive.
 
+When `Full resolution` is enabled, active camera interaction such as orbiting,
+panning, or zooming now temporarily switches the viewport to a decimated point
+preview. After a short idle delay the viewer restores the selected render mode
+and restores the non-interactive view through a simplified `preview -> target`
+path instead of stepping through every intermediate decimation level.
+
 The sidebar groups controls into:
 - **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,
   plus section-plane opacity and color controls,

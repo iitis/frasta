@@ -20,6 +20,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
     """Render one or more point clouds with a simple orbit camera."""
 
     frameSwapped = QtCore.pyqtSignal()
+    interactionStateChanged = QtCore.pyqtSignal(bool)
+    INTERACTION_IDLE_DELAY_MS = 450
     DEFAULT_CAMERA_AZIMUTH = 90.0
     DEFAULT_CAMERA_ELEVATION = -89.0
     DEFAULT_BACKGROUND_RGBA = (0.08, 0.08, 0.10, 1.0)
@@ -70,6 +72,10 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._resize_debounce_timer = QtCore.QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
         self._resize_debounce_timer.timeout.connect(self._finish_resize_interaction)
+        self._interaction_active = False
+        self._interaction_debounce_timer = QtCore.QTimer(self)
+        self._interaction_debounce_timer.setSingleShot(True)
+        self._interaction_debounce_timer.timeout.connect(self._finish_camera_interaction)
 
     def set_cloud_data(
         self,
@@ -474,6 +480,8 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Remember the last mouse position for drag interactions."""
         self._last_mouse_pos = event.pos()
+        if event.button() in (QtCore.Qt.LeftButton, QtCore.Qt.RightButton, QtCore.Qt.MiddleButton):
+            self._begin_camera_interaction()
         event.accept()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -482,6 +490,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._last_mouse_pos = event.pos()
 
         if event.buttons() & QtCore.Qt.LeftButton:
+            self._begin_camera_interaction()
             # Match common 3D-viewer interaction: dragging left rotates the
             # scene left, so the camera azimuth changes in the opposite sign.
             self._camera_azimuth -= delta.x() * 0.5
@@ -490,6 +499,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             )
             self.update()
         elif event.buttons() & QtCore.Qt.RightButton:
+            self._begin_camera_interaction()
             self._pan_camera(delta)
             self.update()
         event.accept()
@@ -499,7 +509,13 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         delta_steps = event.angleDelta().y() / 120.0
         zoom_factor = math.pow(0.85, delta_steps)
         self._camera_distance = max(1e-3, self._camera_distance * zoom_factor)
+        self._begin_camera_interaction()
         self.update()
+        event.accept()
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Debounce the end of one camera interaction gesture."""
+        self._schedule_camera_interaction_finish()
         event.accept()
 
     def _draw_clouds(self, mvp: QtGui.QMatrix4x4) -> None:
@@ -1256,6 +1272,24 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         """Resume normal scene rendering after resize input settles."""
         self._resize_active = False
         self.update()
+
+    def _begin_camera_interaction(self) -> None:
+        """Mark the camera as actively manipulated and debounce its end."""
+        if not self._interaction_active:
+            self._interaction_active = True
+            self.interactionStateChanged.emit(True)
+        self._schedule_camera_interaction_finish()
+
+    def _schedule_camera_interaction_finish(self) -> None:
+        """Delay the end of camera interaction until input briefly stops."""
+        self._interaction_debounce_timer.start(self.INTERACTION_IDLE_DELAY_MS)
+
+    def _finish_camera_interaction(self) -> None:
+        """Emit the end of one camera interaction after a short quiet period."""
+        if not self._interaction_active:
+            return
+        self._interaction_active = False
+        self.interactionStateChanged.emit(False)
 
     def _draw_export_axes(self, mvp: QtGui.QMatrix4x4, axes_overlay: dict[str, object]) -> None:
         """Draw an export-only X/Y frame directly in the 3D scene."""
