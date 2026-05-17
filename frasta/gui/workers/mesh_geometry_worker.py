@@ -56,6 +56,9 @@ class MeshGeometryWorker(QThread):
     def run(self) -> None:
         """Build mesh geometry and emit the result or a formatted error."""
         try:
+            if self.isInterruptionRequested():
+                return
+
             from ..viewers.surface_3d_viewer.point_cloud_geometry import (
                 build_mesh_geometry_from_grid,
             )
@@ -66,13 +69,18 @@ class MeshGeometryWorker(QThread):
                 dy=self.dy,
                 z_offset=self.z_offset,
                 stride=self.stride,
+                cancel_check=self.isInterruptionRequested,
             )
+            if self.isInterruptionRequested():
+                return
             self.finished_geometry.emit(
                 self.request_id,
                 self.which,
                 self.stride,
                 geometry,
             )
+        except InterruptedError:
+            return
         except Exception as exc:
             self.failed_geometry.emit(
                 self.request_id,

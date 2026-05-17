@@ -52,6 +52,17 @@ The experimental point/mesh-based 3D viewer now separates its controls into:
 - a **left sidebar** for grouped visibility and surface-style controls,
 - the **main OpenGL viewport** on the right.
 
+For very large scans, the GUI also applies adaptive display limits:
+- the main 2D scan tab shows a regularly decimated preview when the native grid
+  would otherwise make repeated redraws too expensive,
+- the experimental 3D viewer refines only down to a practical point or mesh
+  budget instead of always forcing stride `1`,
+- the experimental 3D viewer exposes a `Full resolution` checkbox that lets the
+  user intentionally override the safety cap and refine to the native grid.
+
+These display-side limits affect responsiveness only. Processing, measurement,
+and export still use the original full-resolution surface data.
+
 The top action bar contains:
 - render mode,
 - projection mode,

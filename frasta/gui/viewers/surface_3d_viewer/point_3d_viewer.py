@@ -16,6 +16,7 @@ from .point_cloud_geometry import (
     build_mesh_geometry_from_grid,
     build_point_positions_from_grid,
     compute_progressive_stride_schedule,
+    compute_stride_for_point_budget,
 )
 from .point_cloud_gl_widget import PointCloudGLWidget
 from .colormap_manager import ColormapManager
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 class Point3DViewer(QtWidgets.QWidget):
     """Experimental viewer for rendering one or two grids as points or meshes."""
 
+    POINT_RENDER_TARGET_INITIAL_POINTS = 120_000
+    POINT_RENDER_TARGET_FINAL_POINTS = 900_000
+    MESH_RENDER_TARGET_INITIAL_POINTS = 45_000
+    MESH_RENDER_TARGET_FINAL_VERTICES = 250_000
+
     def __init__(self, parent=None):
         """Initialize the point viewer and its controls."""
         super().__init__(parent)
@@ -56,12 +62,14 @@ class Point3DViewer(QtWidgets.QWidget):
         self._separation = 0.0
         self._profile_plane_height_mode = "dynamic"
         self._render_mode = "mesh"
+        self._allow_full_resolution = False
         self._geometry_cache: dict[str, dict[str, dict[int, object]]] = {
             "points": {"ref": {}, "adj": {}},
             "mesh": {"ref": {}, "adj": {}},
         }
         self._mesh_request_id = 0
         self._mesh_workers: dict[tuple[int, str, int], MeshGeometryWorker] = {}
+        self._retired_mesh_workers: list[MeshGeometryWorker] = []
         self._stride_schedule = [1]
         self._stride_schedule_index = 0
         self._refinement_timer = QtCore.QTimer(self)
@@ -96,6 +104,10 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_auto_range_mode.addItem("Full", userData="full")
         self.combo_auto_range_mode.addItem("Percentile", userData="percentile")
         self.combo_auto_range_mode.setCurrentIndex(self.combo_auto_range_mode.findData("full"))
+        self.checkbox_full_resolution = QtWidgets.QCheckBox("Full resolution")
+        self.checkbox_full_resolution.setToolTip(
+            "Allow refinement down to stride 1. This can be very slow for large scans."
+        )
 
         self.combo_cmap_ref = QtWidgets.QComboBox()
         self.combo_cmap_adj = QtWidgets.QComboBox()
@@ -175,6 +187,8 @@ class Point3DViewer(QtWidgets.QWidget):
         top_row.addSpacing(12)
         top_row.addWidget(QtWidgets.QLabel("Auto range:"))
         top_row.addWidget(self.combo_auto_range_mode)
+        top_row.addSpacing(12)
+        top_row.addWidget(self.checkbox_full_resolution)
         top_row.addSpacing(12)
         top_row.addWidget(self.point_size_label)
         top_row.addWidget(self.spin_point_size)
@@ -264,6 +278,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self.combo_render_mode.currentIndexChanged.connect(self._render_mode_changed)
         self.combo_projection_mode.currentIndexChanged.connect(self._projection_mode_changed)
         self.combo_auto_range_mode.currentIndexChanged.connect(self._auto_range_mode_changed)
+        self.checkbox_full_resolution.toggled.connect(self._full_resolution_toggled)
         self.button_background.clicked.connect(self._choose_background_color)
         self.button_background_reset.clicked.connect(self.gl_widget.reset_background_color)
         self.combo_cmap_ref.currentIndexChanged.connect(lambda _: self._refresh_clouds())
@@ -297,6 +312,7 @@ class Point3DViewer(QtWidgets.QWidget):
     ) -> None:
         """Update the rendered point clouds from structured grids."""
         self._refinement_timer.stop()
+        self._stop_mesh_workers()
         self._ref_grid = np.asarray(reference_grid, dtype=np.float32)
         self._adj_grid = None if adjusted_grid is None else np.asarray(adjusted_grid, dtype=np.float32)
         self._line_points = line_points
@@ -304,10 +320,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self._pixel_size_y = float(pixel_size_y)
         self._separation = float(separation)
         self._mesh_request_id += 1
-        self._geometry_cache = {
-            "points": {"ref": {}, "adj": {}},
-            "mesh": {"ref": {}, "adj": {}},
-        }
+        self._reset_geometry_cache()
         self._reset_refinement_schedule()
         has_adjusted = self._adj_grid is not None
         self.checkbox_adj.setVisible(has_adjusted)
@@ -933,7 +946,9 @@ class Point3DViewer(QtWidgets.QWidget):
     def _render_mode_changed(self, _index: int) -> None:
         """Switch the experimental backend between points and shaded mesh."""
         self._render_mode = self.combo_render_mode.currentData() or "points"
+        self._stop_mesh_workers()
         self._mesh_request_id += 1
+        self._reset_geometry_cache()
         self.gl_widget.set_render_mode(self._render_mode)
         self._apply_render_mode_to_ui()
         self._refinement_timer.stop()
@@ -963,6 +978,17 @@ class Point3DViewer(QtWidgets.QWidget):
         )
         if color.isValid():
             self.gl_widget.set_background_color(color)
+
+    def _full_resolution_toggled(self, checked: bool) -> None:
+        """Allow the viewer to refine all the way to the native grid stride."""
+        self._allow_full_resolution = bool(checked)
+        self._refinement_timer.stop()
+        self._stop_mesh_workers()
+        self._mesh_request_id += 1
+        self._reset_geometry_cache()
+        self._reset_refinement_schedule()
+        self._refresh_clouds()
+        self._schedule_next_refinement()
 
     def _plane_height_mode_changed(self, _index: int) -> None:
         """Switch profile-plane height behavior between dynamic, maximum, and manual."""
@@ -1020,17 +1046,29 @@ class Point3DViewer(QtWidgets.QWidget):
         self.checkbox_ref.setText("Ref points" if is_points else "Ref mesh")
         self.checkbox_adj.setText("Adj points" if is_points else "Adj mesh")
 
+    def _reset_geometry_cache(self) -> None:
+        """Drop cached CPU-side geometry arrays for all render modes.
+
+        Full-resolution point clouds and meshes can occupy a large amount of
+        memory. When quality settings change, the stale cache should be released
+        immediately so the viewer returns to its lighter steady-state footprint.
+        """
+        self._geometry_cache = {
+            "points": {"ref": {}, "adj": {}},
+            "mesh": {"ref": {}, "adj": {}},
+        }
+
     def _reset_refinement_schedule(self) -> None:
         """Recompute the stride schedule for the active render mode."""
         if self._ref_grid is None:
             self._stride_schedule = [1]
             self._stride_schedule_index = 0
             return
-        target_initial_points = 120_000 if self._render_mode == "points" else 45_000
         if self._render_mode == "mesh":
-            min_stride = 4 if self._adj_grid is not None else 2
+            target_initial_points = self.MESH_RENDER_TARGET_INITIAL_POINTS
         else:
-            min_stride = 1
+            target_initial_points = self.POINT_RENDER_TARGET_INITIAL_POINTS
+        min_stride = self._compute_minimum_render_stride()
         self._stride_schedule = compute_progressive_stride_schedule(
             self._ref_grid.shape,
             cloud_count=2 if self._adj_grid is not None else 1,
@@ -1038,6 +1076,42 @@ class Point3DViewer(QtWidgets.QWidget):
             min_stride=min_stride,
         )
         self._stride_schedule_index = 0
+
+    def _compute_minimum_render_stride(self) -> int:
+        """Return the finest stride that still keeps 3D geometry manageable.
+
+        Large structured scans can easily contain tens or hundreds of millions
+        of samples. The experimental 3D viewer should stay interactive instead
+        of refining all the way down to a stride that would allocate enormous
+        GPU buffers or mesh index arrays.
+        """
+        if self._allow_full_resolution:
+            return 1
+
+        grid_shapes = []
+        if self._ref_grid is not None:
+            grid_shapes.append(self._ref_grid.shape)
+        if self._adj_grid is not None:
+            grid_shapes.append(self._adj_grid.shape)
+        if not grid_shapes:
+            return 1
+
+        if self._render_mode == "mesh":
+            base_stride = 4 if self._adj_grid is not None else 2
+            target_points = self.MESH_RENDER_TARGET_FINAL_VERTICES
+        else:
+            base_stride = 1
+            target_points = self.POINT_RENDER_TARGET_FINAL_POINTS
+
+        strides = [
+            compute_stride_for_point_budget(
+                shape,
+                target_points=target_points,
+                min_stride=base_stride,
+            )
+            for shape in grid_shapes
+        ]
+        return max(strides, default=base_stride)
 
     def _ensure_mesh_geometry_worker(
         self,
@@ -1063,6 +1137,8 @@ class Point3DViewer(QtWidgets.QWidget):
         worker.finished_geometry.connect(self._on_mesh_geometry_ready)
         worker.failed_geometry.connect(self._on_mesh_geometry_failed)
         worker.finished.connect(lambda _key=key: self._mesh_workers.pop(_key, None))
+        worker.finished.connect(lambda _worker=worker: self._release_retired_mesh_worker(_worker))
+        worker.finished.connect(worker.deleteLater)
         self._mesh_workers[key] = worker
         worker.start()
 
@@ -1071,12 +1147,20 @@ class Point3DViewer(QtWidgets.QWidget):
         workers = list(self._mesh_workers.values())
         self._mesh_workers.clear()
         for worker in workers:
+            if worker not in self._retired_mesh_workers:
+                self._retired_mesh_workers.append(worker)
             try:
                 worker.requestInterruption()
             except Exception:
                 pass
-            worker.quit()
-            worker.wait(250)
+            worker.wait(10)
+
+    def _release_retired_mesh_worker(self, worker: MeshGeometryWorker) -> None:
+        """Forget a previously interrupted worker after it has fully stopped."""
+        try:
+            self._retired_mesh_workers.remove(worker)
+        except ValueError:
+            pass
 
     def _on_mesh_geometry_ready(self, request_id: int, which: str, stride: int, geometry) -> None:
         """Store finished mesh geometry and upload it if still relevant."""

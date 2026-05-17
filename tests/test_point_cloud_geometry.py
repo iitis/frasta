@@ -8,6 +8,7 @@ from frasta.gui.viewers.surface_3d_viewer.point_cloud_geometry import (
     build_point_positions_from_grid,
     build_point_cloud_from_grid,
     compute_progressive_stride_schedule,
+    compute_stride_for_point_budget,
     compute_bounds,
 )
 
@@ -150,6 +151,22 @@ class TestComputeProgressiveStrideSchedule:
 
         assert schedule[-1] == 4
         assert all(step >= 4 for step in schedule)
+
+
+class TestComputeStrideForPointBudget:
+    """Test hard stride limits derived from 3D geometry budgets."""
+
+    def test_small_grid_keeps_full_resolution(self):
+        """Small grids should not be decimated when already under budget."""
+        stride = compute_stride_for_point_budget((200, 300), target_points=100_000)
+
+        assert stride == 1
+
+    def test_large_grid_returns_stride_needed_for_budget(self):
+        """Huge grids should be clamped to a coarser but bounded stride."""
+        stride = compute_stride_for_point_budget((11_000, 11_000), target_points=250_000)
+
+        assert stride >= 22
 
 
 class TestBuildColormapLut:

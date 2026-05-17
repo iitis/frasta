@@ -65,7 +65,9 @@ class ScanTab(QtWidgets.QWidget):
         histogram_manager (HistogramManager): Manages histogram display.
         interactive_handler (InteractiveHandler): Handles mouse interactions.
     """
-    
+
+    MAX_DISPLAY_PIXELS = 2_000_000
+
     def __init__(self, parent=None):
         """Initialize the scan tab widget.
         
@@ -82,6 +84,9 @@ class ScanTab(QtWidgets.QWidget):
         self.image_view.getView().setMenuEnabled(False)
         self.image_view.getView().setAspectLocked(True)
         self.image_view.ui.graphicsView.setBackground((34, 34, 34))
+        image_item = self.image_view.getImageItem()
+        if hasattr(image_item, "setAutoDownsample"):
+            image_item.setAutoDownsample(True)
 
         self.hist_widget = pg.PlotWidget(viewBox=HistogramViewBox())
         self.hist_widget.setMaximumHeight(120)
@@ -335,10 +340,12 @@ class ScanTab(QtWidgets.QWidget):
                 vmax = actual_max
                 logger.warning(f"update_image: using actual data range instead")
         
+        display_grid = self._get_display_grid()
+
         # IMPORTANT: grid.T creates a VIEW, not a copy!
-        # Make a copy immediately to avoid accidentally modifying self.grid.
+        # Make a copy immediately to avoid accidentally modifying the source grid.
         image_data = grid_to_image_data(
-            self.grid,
+            display_grid,
             orientation=getattr(self, "orientation", "default"),
             copy=True,
         )
@@ -381,6 +388,37 @@ class ScanTab(QtWidgets.QWidget):
         )
         self._apply_physical_image_rect()
         self.interactive_handler.clear_seed_points()
+
+    @classmethod
+    def _compute_display_stride(cls, grid_shape: tuple[int, int]) -> int:
+        """Return a 2D preview stride that keeps redraw cost bounded.
+
+        The tab still stores and processes the full-resolution grid. Only the
+        interactive 2D display is decimated for very large scans so that
+        histogram threshold drags and repeated redraws remain responsive.
+        """
+        if len(grid_shape) != 2:
+            return 1
+
+        rows, cols = int(grid_shape[0]), int(grid_shape[1])
+        if rows <= 0 or cols <= 0:
+            return 1
+
+        total_pixels = rows * cols
+        if total_pixels <= cls.MAX_DISPLAY_PIXELS:
+            return 1
+        return max(1, int(np.ceil(np.sqrt(total_pixels / float(cls.MAX_DISPLAY_PIXELS)))))
+
+    def _get_display_grid(self) -> np.ndarray:
+        """Return the grid used for interactive 2D drawing.
+
+        Very large scans are shown through a regularly decimated preview while
+        all processing and exports continue to use the original full grid.
+        """
+        stride = self._compute_display_stride(self.grid.shape)
+        if stride <= 1:
+            return self.grid
+        return self.grid[::stride, ::stride]
 
     def _apply_physical_image_rect(self):
         """Map the image to physical coordinates using scan spacing and origin."""

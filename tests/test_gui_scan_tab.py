@@ -253,7 +253,7 @@ class TestHistogramManager:
         
         # Should not call update callback
         mock_update_callback.assert_not_called()
-    
+
     def test_on_threshold_changed_calls_callback(self, hist_manager, mock_update_callback):
         """Test _on_threshold_changed triggers callback when not blocked."""
         mock_min_line = Mock()
@@ -269,6 +269,18 @@ class TestHistogramManager:
         
         # Should call update callback with sorted range
         mock_update_callback.assert_called_once_with(20.0, 80.0)
+
+
+class TestScanTabPerformanceHelpers:
+    """Test adaptive display helpers used for large 2D scans."""
+
+    def test_compute_display_stride_keeps_small_images_full_resolution(self):
+        """Small grids should remain undownsampled in the interactive tab."""
+        assert ScanTab._compute_display_stride((512, 512)) == 1
+
+    def test_compute_display_stride_downsamples_very_large_images(self):
+        """Huge grids should be previewed through a coarser display stride."""
+        assert ScanTab._compute_display_stride((11_000, 11_000)) > 1
 
 
 # ============================================================================

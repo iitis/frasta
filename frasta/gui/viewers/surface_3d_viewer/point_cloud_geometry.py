@@ -75,6 +75,7 @@ def build_mesh_geometry_from_grid(
     z_offset: float = 0.0,
     clip_abs: float = 1e6,
     stride: int = 1,
+    cancel_check=None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build compact mesh geometry from a structured height map.
 
@@ -87,6 +88,8 @@ def build_mesh_geometry_from_grid(
         z_offset: Additional Z offset applied to every valid vertex.
         clip_abs: Absolute clipping threshold for invalid outliers.
         stride: Sampling stride for regular decimation.
+        cancel_check: Optional callable returning True when mesh generation
+            should abort early.
 
     Returns:
         Tuple ``(positions, normals, indices)`` where positions and normals
@@ -129,6 +132,8 @@ def build_mesh_geometry_from_grid(
 
     face_list: list[list[int]] = []
     for row in range(rows - 1):
+        if cancel_check is not None and (row % 64 == 0) and cancel_check():
+            raise InterruptedError("Mesh generation cancelled.")
         for col in range(cols - 1):
             quad = (
                 valid_mask[row, col]
@@ -262,6 +267,33 @@ def compute_progressive_stride_schedule(
     if schedule[-1] != min_stride:
         schedule.append(min_stride)
     return schedule
+
+
+def compute_stride_for_point_budget(
+    grid_shape: tuple[int, int],
+    target_points: int,
+    min_stride: int = 1,
+) -> int:
+    """Return the minimum stride needed to stay within a point budget.
+
+    Args:
+        grid_shape: Input grid shape as ``(rows, cols)``.
+        target_points: Maximum preferred number of samples after decimation.
+        min_stride: Lower bound for the returned stride.
+
+    Returns:
+        Sampling stride large enough that ``rows * cols / stride**2`` stays at
+        or below ``target_points`` for large grids.
+    """
+    rows, cols = grid_shape
+    if rows <= 0 or cols <= 0:
+        return max(1, int(min_stride))
+
+    min_stride = max(1, int(min_stride))
+    target_points = max(1, int(target_points))
+    total_points = max(1, int(rows) * int(cols))
+    stride = int(np.ceil(np.sqrt(total_points / float(target_points))))
+    return max(min_stride, stride)
 
 
 def build_colormap_lut(

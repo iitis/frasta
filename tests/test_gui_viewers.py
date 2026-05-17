@@ -204,6 +204,78 @@ class TestPointCloudGLWidget:
 class TestPoint3DViewer:
     """Test non-OpenGL helper logic on the 3D viewer widget."""
 
+    def test_reset_refinement_schedule_caps_huge_mesh_resolution(self, qapp):
+        """Mesh refinement should stop above full resolution for very large grids."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+
+        viewer._reset_refinement_schedule()
+
+        assert viewer._stride_schedule[-1] > 1
+        viewer.deleteLater()
+
+    def test_reset_refinement_schedule_caps_huge_point_resolution(self, qapp):
+        """Point refinement should also stop once the point budget is reached."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "points"
+
+        viewer._reset_refinement_schedule()
+
+        assert viewer._stride_schedule[-1] > 1
+        viewer.deleteLater()
+
+    def test_full_resolution_toggle_allows_stride_one(self, qapp):
+        """Explicit full-resolution mode should bypass the safety stride cap."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+        viewer._allow_full_resolution = True
+
+        viewer._reset_refinement_schedule()
+
+        assert viewer._stride_schedule[-1] == 1
+        viewer.deleteLater()
+
+    def test_full_resolution_toggle_clears_cached_geometry(self, qapp):
+        """Changing the quality mode should drop stale cached full-res arrays."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((100, 100), dtype=np.float32)
+        stale_points = np.ones((10, 3), dtype=np.float32)
+        stale_mesh = (
+            np.ones((10, 3), dtype=np.float32),
+            np.ones((10, 3), dtype=np.float32),
+            np.ones((4, 3), dtype=np.uint32),
+        )
+        viewer._geometry_cache["points"]["ref"][1] = stale_points
+        viewer._geometry_cache["mesh"]["ref"][1] = stale_mesh
+
+        viewer._full_resolution_toggled(True)
+
+        rebuilt_points = viewer._geometry_cache["points"]["ref"].get(1)
+        assert rebuilt_points is not stale_points
+        assert rebuilt_points is not None
+        assert rebuilt_points.shape != stale_points.shape
+        assert viewer._geometry_cache["mesh"]["ref"].get(1) is not stale_mesh
+        viewer.deleteLater()
+
+    def test_stop_mesh_workers_keeps_interrupted_threads_referenced(self, qapp):
+        """Interrupted workers should stay referenced until they actually finish."""
+        viewer = Point3DViewer()
+        worker = Mock()
+        worker.wait = Mock(return_value=False)
+        viewer._mesh_workers[(1, "ref", 1)] = worker
+
+        viewer._stop_mesh_workers()
+
+        worker.requestInterruption.assert_called_once()
+        worker.wait.assert_called_once_with(10)
+        assert worker in viewer._retired_mesh_workers
+        viewer._release_retired_mesh_worker(worker)
+        assert worker not in viewer._retired_mesh_workers
+        viewer.deleteLater()
+
     def test_profile_plane_z_limits_keep_minimum_visual_height(self, qapp):
         """Flat profiles should still produce a visibly tall section plane."""
         viewer = Point3DViewer()

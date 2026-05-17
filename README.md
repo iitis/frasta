@@ -179,6 +179,22 @@ Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph,
 - RAM: depends on grid size; large scans require proportionally more memory.
 - GPU/OpenGL: required for interactive 3D visualization. The core numerical processing does not require a dedicated GPU.
 
+### Large-scan responsiveness
+
+For very large structured scans, especially on the order of `10000 x 10000`
+samples or larger, the GUI now uses two protective display strategies:
+
+- the main 2D tab renders an adaptive decimated preview while keeping the full
+  grid for processing and export,
+- the experimental 3D viewer stops automatic refinement once the point or mesh
+  geometry reaches a practical GPU budget instead of always forcing full
+  resolution,
+- the experimental 3D viewer offers an explicit `Full resolution` toggle when
+  you want to override that limit for close inspection.
+
+These limits improve interaction latency during threshold edits, panning, and
+3D camera work, while preserving the original data for numerical operations.
+
 ## Installation
 
 If you only want to get the GUI running, the fastest path is:
