@@ -17,6 +17,7 @@ from ...io import (
     load_csv_data,
     load_h5_data,
     load_npz_data,
+    load_sensofar_plux,
     load_stl_data,
     save_h5,
     save_npz,
@@ -327,6 +328,40 @@ class FileController:
             if idx >= 0:
                 tabs.removeTab(idx)
             tab.deleteLater()
+
+    def load_plux(self, fname: str) -> bool:
+        """Load one Sensofar PLUX archive and open each height layer in a tab.
+
+        Args:
+            fname (str): Path to the PLUX file.
+
+        Returns:
+            bool: True if at least one layer was loaded successfully.
+        """
+
+        dlg = QtWidgets.QProgressDialog("Loading Sensofar PLUX file...", None, 0, 100, self.main_window)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+
+        try:
+            surfaces = load_sensofar_plux(fname, progress_callback=dlg.setValue)
+            tabs = self.main_window.tabs
+            for surface in surfaces:
+                name = surface.metadata.get("name", "Scan")
+                tab = ScanTab()
+                tabs.addTab(tab, str(name))
+                tabs.setCurrentWidget(tab)
+                tab.set_surface(surface)
+            dlg.setValue(100)
+            self.add_to_recent_files(fname)
+            return True
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load PLUX file:\n{e}")
+            return False
     
     def create_tab_and_load(self, fname: str):
         """Create a new tab and load file into it.
@@ -335,27 +370,30 @@ class FileController:
             fname (str): Path to file to load
         """
         tabs = self.main_window.tabs
-        
-        if fname.endswith('.csv') or fname.endswith('.dat') or fname.endswith('.txt'):
+        suffix = fname.lower()
+
+        if suffix.endswith('.csv') or suffix.endswith('.dat') or suffix.endswith('.txt'):
             tab = ScanTab()
             tabs.addTab(tab, fname.split('/')[-1])
             tabs.setCurrentWidget(tab)
             self.load_csv(fname, tab)
-        elif fname.endswith('.npz'):
+        elif suffix.endswith('.npz'):
             self.load_npz(fname)
-        elif fname.endswith('.h5'):
+        elif suffix.endswith('.h5'):
             self.load_h5(fname)
-        elif fname.endswith('.stl'):
+        elif suffix.endswith('.stl'):
             tab = ScanTab()
             tabs.addTab(tab, fname.split('/')[-1])
             tabs.setCurrentWidget(tab)
             self.load_stl(fname, tab)
             self.add_to_recent_files(fname)
-        elif fname.endswith('.al3d'):
+        elif suffix.endswith('.al3d'):
             tab = ScanTab()
             tabs.addTab(tab, fname.split('/')[-1])
             tabs.setCurrentWidget(tab)
             self.load_al3d(fname, tab)
+        elif suffix.endswith('.plux'):
+            self.load_plux(fname)
         else:
             QtWidgets.QMessageBox.warning(self.main_window, "Unknown format", "Unsupported file type.")
             return
@@ -366,7 +404,7 @@ class FileController:
             self.main_window, 
             "Open file", 
             "", 
-            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d)"
+            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d *.plux);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d);;Sensofar PLUX (*.plux)"
         )
         if not fname:
             return

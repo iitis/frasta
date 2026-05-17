@@ -4,6 +4,7 @@ import numpy as np
 
 from frasta.gui.viewers.surface_3d_viewer.point_cloud_geometry import (
     build_colormap_lut,
+    build_point_geometry_from_grid,
     build_mesh_geometry_from_grid,
     build_point_positions_from_grid,
     build_point_cloud_from_grid,
@@ -33,6 +34,28 @@ class TestBuildPointPositionsFromGrid:
                 dtype=np.float32,
             ),
         )
+
+
+class TestBuildPointGeometryFromGrid:
+    """Test point-geometry extraction with shading normals."""
+
+    def test_flat_grid_produces_upward_normals(self):
+        """A flat sampled grid should emit normals aligned with +Z."""
+        grid = np.full((3, 3), 5.0, dtype=np.float32)
+
+        positions, normals = build_point_geometry_from_grid(grid)
+
+        assert positions.shape == normals.shape == (9, 3)
+        np.testing.assert_allclose(normals, np.tile(np.array([[0.0, 0.0, 1.0]], dtype=np.float32), (9, 1)))
+
+    def test_sloped_grid_produces_tilted_normals(self):
+        """A monotonic slope should yield non-vertical point normals."""
+        grid = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=np.float32)
+
+        _positions, normals = build_point_geometry_from_grid(grid, dx=1.0, dy=1.0)
+
+        assert np.all(normals[:, 2] > 0.0)
+        assert np.any(np.abs(normals[:, 0]) > 1e-3)
 
 
 class TestBuildPointCloudFromGrid:

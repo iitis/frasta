@@ -38,6 +38,47 @@ def build_point_positions_from_grid(
     Returns:
         Point positions with shape ``(N, 3)``.
     """
+    positions, _normals = build_point_geometry_from_grid(
+        grid,
+        dx=dx,
+        dy=dy,
+        x0=x0,
+        y0=y0,
+        z_offset=z_offset,
+        clip_abs=clip_abs,
+        stride=stride,
+    )
+    return positions
+
+
+def build_point_geometry_from_grid(
+    grid: np.ndarray,
+    dx: float = 1.0,
+    dy: float = 1.0,
+    x0: float = 0.0,
+    y0: float = 0.0,
+    z_offset: float = 0.0,
+    clip_abs: float = 1e6,
+    stride: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build point positions together with approximate per-point normals.
+
+    The point-viewer path uses these normals only for lightweight shading, so
+    they are derived from local grid gradients instead of a full triangle mesh.
+
+    Args:
+        grid: Height map represented as a 2D numpy array.
+        dx: Pixel spacing in the X direction.
+        dy: Pixel spacing in the Y direction.
+        x0: Physical X origin.
+        y0: Physical Y origin.
+        z_offset: Additional Z offset applied to every valid point.
+        clip_abs: Absolute clipping threshold for invalid outliers.
+        stride: Sampling stride for regular decimation.
+
+    Returns:
+        Tuple ``(positions, normals)`` where both arrays have shape ``(N, 3)``.
+    """
     if grid.ndim != 2:
         raise ValueError("grid must be a 2D array")
     if stride < 1:
@@ -46,7 +87,10 @@ def build_point_positions_from_grid(
     sampled = np.asarray(grid[::stride, ::stride], dtype=np.float32)
     valid_mask = np.isfinite(sampled) & (np.abs(sampled) <= clip_abs)
     if not np.any(valid_mask):
-        return np.empty((0, 3), dtype=np.float32)
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 3), dtype=np.float32),
+        )
 
     rows, cols = sampled.shape
     col_grid, row_grid = np.meshgrid(
@@ -55,7 +99,7 @@ def build_point_positions_from_grid(
         indexing="xy",
     )
     z_values = sampled[valid_mask] + np.float32(z_offset)
-    return points_to_3d_world(
+    positions = points_to_3d_world(
         col_grid[valid_mask],
         row_grid[valid_mask],
         z_values,
@@ -64,6 +108,14 @@ def build_point_positions_from_grid(
         x0=x0,
         y0=y0,
     )
+    normals_grid = _compute_point_normals_from_sampled_grid(
+        sampled,
+        valid_mask,
+        dx=float(dx) * float(stride),
+        dy=float(dy) * float(stride),
+    )
+    normals = normals_grid[valid_mask].astype(np.float32, copy=False)
+    return positions, normals
 
 
 def build_mesh_geometry_from_grid(
@@ -410,4 +462,62 @@ def _compute_vertex_normals(
     valid = lengths[:, 0] > 1e-12
     normals[valid] /= lengths[valid]
     normals[~valid] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    return normals.astype(np.float32, copy=False)
+
+
+def _compute_point_normals_from_sampled_grid(
+    sampled: np.ndarray,
+    valid_mask: np.ndarray,
+    dx: float,
+    dy: float,
+) -> np.ndarray:
+    """Approximate smooth point normals from local height-map gradients."""
+    rows, cols = sampled.shape
+    z_left = np.empty_like(sampled)
+    z_right = np.empty_like(sampled)
+    z_up = np.empty_like(sampled)
+    z_down = np.empty_like(sampled)
+    left_valid = np.zeros_like(valid_mask, dtype=bool)
+    right_valid = np.zeros_like(valid_mask, dtype=bool)
+    up_valid = np.zeros_like(valid_mask, dtype=bool)
+    down_valid = np.zeros_like(valid_mask, dtype=bool)
+
+    z_left[:, 1:] = sampled[:, :-1]
+    z_right[:, :-1] = sampled[:, 1:]
+    z_up[1:, :] = sampled[:-1, :]
+    z_down[:-1, :] = sampled[1:, :]
+    left_valid[:, 1:] = valid_mask[:, :-1]
+    right_valid[:, :-1] = valid_mask[:, 1:]
+    up_valid[1:, :] = valid_mask[:-1, :]
+    down_valid[:-1, :] = valid_mask[1:, :]
+
+    dz_dx = np.zeros_like(sampled, dtype=np.float32)
+    central_x = left_valid & right_valid
+    forward_x = (~left_valid) & right_valid
+    backward_x = left_valid & (~right_valid)
+    dz_dx[central_x] = (z_right[central_x] - z_left[central_x]) / max(2.0 * dx, 1e-6)
+    dz_dx[forward_x] = (z_right[forward_x] - sampled[forward_x]) / max(dx, 1e-6)
+    dz_dx[backward_x] = (sampled[backward_x] - z_left[backward_x]) / max(dx, 1e-6)
+
+    dz_drow = np.zeros_like(sampled, dtype=np.float32)
+    central_y = up_valid & down_valid
+    forward_y = (~up_valid) & down_valid
+    backward_y = up_valid & (~down_valid)
+    dz_drow[central_y] = (z_down[central_y] - z_up[central_y]) / max(2.0 * dy, 1e-6)
+    dz_drow[forward_y] = (z_down[forward_y] - sampled[forward_y]) / max(dy, 1e-6)
+    dz_drow[backward_y] = (sampled[backward_y] - z_up[backward_y]) / max(dy, 1e-6)
+
+    normals = np.stack(
+        [
+            -dz_dx,
+            dz_drow,
+            np.ones_like(sampled, dtype=np.float32),
+        ],
+        axis=-1,
+    )
+    lengths = np.linalg.norm(normals, axis=2, keepdims=True)
+    valid_lengths = lengths[..., 0] > 1e-12
+    normals[valid_lengths] /= lengths[valid_lengths]
+    normals[~valid_lengths] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    normals[~valid_mask] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
     return normals.astype(np.float32, copy=False)

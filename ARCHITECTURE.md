@@ -222,6 +222,9 @@ surface data containers and file readers/writers.
 - `surface.py` - shared `Surface` and `SurfaceOrientation`
 - `loaders.py` / `exporters.py` - common file I/O helpers
 - `parsers/` - suffix-based parser registry and instrument parsers
+- Native archives that may contain multiple height layers, such as Sensofar
+  `.plux`, should be registered as scan readers so the GUI can open one tab per
+  layer without special-case logic in the parser itself.
 
 This package is the preferred place for code that should eventually be shared
 with `efs-toolbox` or any other surface-analysis project.

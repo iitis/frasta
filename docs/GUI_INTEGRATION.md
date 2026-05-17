@@ -58,7 +58,9 @@ For very large scans, the GUI also applies adaptive display limits:
 - the experimental 3D viewer refines only down to a practical point or mesh
   budget instead of always forcing stride `1`,
 - the experimental 3D viewer exposes a `Full resolution` checkbox that lets the
-  user intentionally override the safety cap and refine to the native grid.
+  user intentionally override the safety cap and refine to the native grid when
+  feasible; for very large mesh scenes the viewer may still cap the final mesh
+  stride to avoid an effectively unbounded build time.
 
 These display-side limits affect responsiveness only. Processing, measurement,
 and export still use the original full-resolution surface data.
@@ -67,9 +69,15 @@ The top action bar contains:
 - render mode,
 - projection mode,
 - auto-range mode (`Full` or `Percentile`) for 3D color normalization,
+- a live render-status line reporting the current mode, stride, and whether the
+  mesh or point representation is still refining,
 - point size,
 - background-color actions,
 - screenshot and colorbar export actions.
+
+The `Points` render mode now uses lightweight per-point normal estimation and
+shaded circular splats instead of flat square pixels, so it remains visually
+useful as a faster alternative when the full mesh path is too expensive.
 
 The sidebar groups controls into:
 - **View** - visibility toggles for reference surface, adjusted surface, profile line, section plane, and the `Z=0` reference rectangle,

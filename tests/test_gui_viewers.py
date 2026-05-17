@@ -200,6 +200,17 @@ class TestPointCloudGLWidget:
         assert stored.alphaF() == pytest.approx(0.4, abs=1e-3)
         widget.deleteLater()
 
+    def test_set_cloud_data_stores_point_normals(self, qapp):
+        """Point clouds should keep normals for shaded point rendering."""
+        widget = PointCloudGLWidget()
+        positions = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+        normals = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+
+        widget.set_cloud_data("ref", positions, normals=normals)
+
+        np.testing.assert_allclose(widget._clouds["ref"]["normals"], normals)
+        widget.deleteLater()
+
 
 class TestPoint3DViewer:
     """Test non-OpenGL helper logic on the 3D viewer widget."""
@@ -226,10 +237,21 @@ class TestPoint3DViewer:
         assert viewer._stride_schedule[-1] > 1
         viewer.deleteLater()
 
+    def test_small_mesh_uses_full_resolution_without_checkbox(self, qapp):
+        """Small single-surface meshes should stay at stride 1 by default."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((20, 28), dtype=np.float32)
+        viewer._render_mode = "mesh"
+
+        viewer._reset_refinement_schedule()
+
+        assert viewer._stride_schedule[-1] == 1
+        viewer.deleteLater()
+
     def test_full_resolution_toggle_allows_stride_one(self, qapp):
         """Explicit full-resolution mode should bypass the safety stride cap."""
         viewer = Point3DViewer()
-        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._ref_grid = np.zeros((500, 500), dtype=np.float32)
         viewer._render_mode = "mesh"
         viewer._allow_full_resolution = True
 
@@ -238,8 +260,22 @@ class TestPoint3DViewer:
         assert viewer._stride_schedule[-1] == 1
         viewer.deleteLater()
 
-    def test_full_resolution_toggle_clears_cached_geometry(self, qapp):
-        """Changing the quality mode should drop stale cached full-res arrays."""
+    def test_full_resolution_mesh_can_still_be_capped_for_huge_grids(self, qapp):
+        """Huge meshes should not force stride 1 when full-res mesh is impractical."""
+        viewer = Point3DViewer()
+        viewer._ref_grid = np.zeros((2000, 2000), dtype=np.float32)
+        viewer._render_mode = "mesh"
+        viewer._allow_full_resolution = True
+
+        viewer._reset_refinement_schedule()
+        viewer._update_render_status()
+
+        assert viewer._stride_schedule[-1] > 1
+        assert "full capped" in viewer.label_render_status.text()
+        viewer.deleteLater()
+
+    def test_disabling_full_resolution_clears_cached_geometry(self, qapp):
+        """Returning to normal mode should drop stale full-resolution caches."""
         viewer = Point3DViewer()
         viewer._ref_grid = np.zeros((100, 100), dtype=np.float32)
         stale_points = np.ones((10, 3), dtype=np.float32)
@@ -251,12 +287,15 @@ class TestPoint3DViewer:
         viewer._geometry_cache["points"]["ref"][1] = stale_points
         viewer._geometry_cache["mesh"]["ref"][1] = stale_mesh
 
-        viewer._full_resolution_toggled(True)
+        viewer._allow_full_resolution = True
+        viewer._full_resolution_toggled(False)
 
-        rebuilt_points = viewer._geometry_cache["points"]["ref"].get(1)
+        rebuilt_point_geometry = viewer._geometry_cache["points"]["ref"].get(1)
+        assert rebuilt_point_geometry is not None
+        rebuilt_points, rebuilt_normals = rebuilt_point_geometry
         assert rebuilt_points is not stale_points
-        assert rebuilt_points is not None
         assert rebuilt_points.shape != stale_points.shape
+        assert rebuilt_normals.shape == rebuilt_points.shape
         assert viewer._geometry_cache["mesh"]["ref"].get(1) is not stale_mesh
         viewer.deleteLater()
 
@@ -274,6 +313,54 @@ class TestPoint3DViewer:
         assert worker in viewer._retired_mesh_workers
         viewer._release_retired_mesh_worker(worker)
         assert worker not in viewer._retired_mesh_workers
+        viewer.deleteLater()
+
+    def test_mesh_prefers_cached_coarser_mesh_over_point_fallback(self, qapp):
+        """Mesh mode should keep the previous mesh visible while denser mesh builds."""
+        viewer = Point3DViewer()
+        viewer._render_mode = "mesh"
+        viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
+        viewer.checkbox_ref.setChecked(True)
+        viewer._geometry_cache["mesh"]["ref"][2] = (
+            np.ones((4, 3), dtype=np.float32),
+            np.ones((4, 3), dtype=np.float32),
+            np.array([[0, 1, 2], [0, 2, 3]], dtype=np.uint32),
+        )
+        viewer.gl_widget = Mock()
+        viewer._get_or_build_geometry = Mock(return_value=None)
+
+        viewer._apply_geometry("ref", 1)
+
+        viewer.gl_widget.set_mesh_data.assert_called_once()
+        viewer.gl_widget.set_cloud_data.assert_not_called()
+        viewer.deleteLater()
+
+    def test_render_status_reports_mesh_state(self, qapp):
+        """The status label should summarize current mesh refinement state."""
+        viewer = Point3DViewer()
+        viewer._render_mode = "mesh"
+        viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
+        viewer._stride_schedule = [2, 1]
+        viewer._stride_schedule_index = 0
+        viewer._update_render_status()
+
+        text = viewer.label_render_status.text()
+        assert "mesh" in text
+        assert "stride 2" in text
+        viewer.deleteLater()
+
+    def test_render_status_reports_point_state(self, qapp):
+        """The status label should summarize current point refinement state."""
+        viewer = Point3DViewer()
+        viewer._render_mode = "points"
+        viewer._ref_grid = np.zeros((50, 50), dtype=np.float32)
+        viewer._stride_schedule = [4, 2, 1]
+        viewer._stride_schedule_index = 1
+        viewer._update_render_status()
+
+        text = viewer.label_render_status.text()
+        assert "points" in text
+        assert "stride 2" in text
         viewer.deleteLater()
 
     def test_profile_plane_z_limits_keep_minimum_visual_height(self, qapp):

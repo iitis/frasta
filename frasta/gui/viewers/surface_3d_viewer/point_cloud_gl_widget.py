@@ -75,6 +75,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self,
         name: str,
         positions: np.ndarray,
+        normals: np.ndarray | None = None,
         recenter: bool = False,
     ) -> None:
         """Replace the geometry buffers for a named point cloud.
@@ -82,6 +83,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         Args:
             name: Cloud identifier.
             positions: Point positions with shape ``(N, 3)``.
+            normals: Optional point normals used for point-splat shading.
             recenter: If True, recenter the camera after the update.
         """
         entry = self._clouds.get(name)
@@ -99,6 +101,13 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             self._clouds[name] = entry
 
         entry["positions"] = np.ascontiguousarray(positions, dtype=np.float32)
+        if normals is None:
+            entry["normals"] = np.tile(
+                np.array([[0.0, 0.0, 1.0]], dtype=np.float32),
+                (len(entry["positions"]), 1),
+            )
+        else:
+            entry["normals"] = np.ascontiguousarray(normals, dtype=np.float32)
         entry["index_count"] = 0
         self._upload_cloud_buffers(name)
         if recenter:
@@ -124,7 +133,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         """
         entry = self._clouds.get(name)
         if entry is None:
-            self.set_cloud_data(name, positions, recenter=False)
+            self.set_cloud_data(name, positions, normals=normals, recenter=False)
             entry = self._clouds[name]
         entry["positions"] = np.ascontiguousarray(positions, dtype=np.float32)
         entry["normals"] = np.ascontiguousarray(normals, dtype=np.float32)
@@ -158,7 +167,11 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         """
         entry = self._clouds.get(name)
         if entry is None:
-            self.set_cloud_data(name, np.empty((0, 3), dtype=np.float32))
+            self.set_cloud_data(
+                name,
+                np.empty((0, 3), dtype=np.float32),
+                normals=np.empty((0, 3), dtype=np.float32),
+            )
             entry = self._clouds[name]
         lo, hi = value_range
         if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
@@ -499,13 +512,16 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
         self._program.setUniformValue("u_point_size", float(self._point_size))
         self._program.setUniformValue("u_colormap", 0)
 
+        self._program.setUniformValue("u_light_dir", QtGui.QVector3D(-0.4, 0.3, 1.0))
         pos_loc = self._program.attributeLocation("a_position")
+        norm_loc = self._program.attributeLocation("a_normal")
         for entry in self._clouds.values():
             if not entry["visible"] or len(entry["positions"]) == 0:
                 continue
             vbo_positions = entry.get("vbo_positions")
+            vbo_normals = entry.get("vbo_normals")
             texture_id = entry.get("texture_id")
-            if vbo_positions is None or texture_id is None:
+            if vbo_positions is None or vbo_normals is None or texture_id is None:
                 continue
             lo, hi = entry.get("value_range", (0.0, 1.0))
             self._program.setUniformValue("u_z_offset", float(entry.get("z_offset", 0.0)))
@@ -524,11 +540,16 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             vbo_positions.bind()
             self._program.enableAttributeArray(pos_loc)
             self._program.setAttributeBuffer(pos_loc, GL.GL_FLOAT, 0, 3)
+            vbo_normals.bind()
+            self._program.enableAttributeArray(norm_loc)
+            self._program.setAttributeBuffer(norm_loc, GL.GL_FLOAT, 0, 3)
             GL.glDrawArrays(GL.GL_POINTS, 0, len(entry["positions"]))
+            vbo_normals.release()
             vbo_positions.release()
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
         self._program.disableAttributeArray(pos_loc)
+        self._program.disableAttributeArray(norm_loc)
         self._program.release()
 
     def _draw_profile_line(self, mvp: QtGui.QMatrix4x4) -> None:
@@ -1266,6 +1287,7 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
 _POINT_VERTEX_SHADER = """
 #version 120
 attribute vec3 a_position;
+attribute vec3 a_normal;
 uniform mat4 u_mvp;
 uniform float u_point_size;
 uniform float u_lo;
@@ -1273,6 +1295,7 @@ uniform float u_hi;
 uniform float u_z_offset;
 varying float v_t;
 varying float v_z;
+varying vec3 v_normal;
 
 void main() {
     float z_actual = a_position.z + u_z_offset;
@@ -1280,6 +1303,7 @@ void main() {
     gl_PointSize = u_point_size;
     v_t = clamp((z_actual - u_lo) / max(u_hi - u_lo, 1e-6), 0.0, 1.0);
     v_z = z_actual;
+    v_normal = normalize(a_normal);
 }
 """
 
@@ -1291,8 +1315,10 @@ uniform float u_lo;
 uniform float u_hi;
 uniform int u_hide_below_range;
 uniform int u_hide_above_range;
+uniform vec3 u_light_dir;
 varying float v_t;
 varying float v_z;
+varying vec3 v_normal;
 
 void main() {
     if (u_hide_below_range != 0 && v_z < u_lo) {
@@ -1301,7 +1327,10 @@ void main() {
     if (u_hide_above_range != 0 && v_z > u_hi) {
         discard;
     }
-    gl_FragColor = texture2D(u_colormap, vec2(v_t, 0.5));
+    vec4 base_color = texture2D(u_colormap, vec2(v_t, 0.5));
+    float diffuse = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.0);
+    float lighting = 0.30 + 0.70 * diffuse;
+    gl_FragColor = vec4(base_color.rgb * lighting, base_color.a);
 }
 """
 

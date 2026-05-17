@@ -1,8 +1,10 @@
-"""Tests for reusable single-surface instrument parsers."""
+"""Tests for reusable instrument parsers and scan readers."""
 
 from __future__ import annotations
 
+import io
 import struct
+import zipfile
 
 import numpy as np
 import pytest
@@ -12,6 +14,7 @@ from frasta.io import (
     get_scan_reader,
     get_surface_parser,
     load_alicona_al3d,
+    load_sensofar_plux,
     load_scan_file,
     load_surface_file,
 )
@@ -81,8 +84,82 @@ def _build_al3d_file(
     return bytes(header + payload)
 
 
+def _build_plux_file(
+    layers_um: list[np.ndarray],
+    *,
+    dx_um: float,
+    dy_um: float,
+    author: str = "Unit Test",
+    timestamp: str = "2026-05-17T12:34:56",
+    recipe_comment: str = "Synthetic recipe",
+) -> bytes:
+    """Build a minimal PLUX ZIP archive for parser tests."""
+
+    if not layers_um:
+        raise ValueError("PLUX fixture requires at least one layer.")
+
+    yres, xres = layers_um[0].shape
+    info_items = [
+        ("Device", "Sensofar S Test"),
+        ("Objective", "20x"),
+        ("Technique", "Confocal"),
+        ("Comment", "Synthetic PLUX sample"),
+    ]
+    info_xml = "\n".join(
+        f"""
+    <ITEM_{index}>
+      <NAME>{name}</NAME>
+      <VALUE>{value}</VALUE>
+    </ITEM_{index}>""".rstrip()
+        for index, (name, value) in enumerate(info_items)
+    )
+    layer_xml = "\n".join(
+        f"""
+  <LAYER_{layer_id}>
+    <FILENAME_Z>LAYER_{layer_id}.raw</FILENAME_Z>
+    <POSITION_X>{1.5 * layer_id:.2f}</POSITION_X>
+    <POSITION_Y>{2.5 * layer_id:.2f}</POSITION_Y>
+    <POSITION_Z>{3.5 * layer_id:.2f}</POSITION_Z>
+  </LAYER_{layer_id}>""".rstrip()
+        for layer_id, _layer in enumerate(layers_um)
+    )
+    index_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<xml>
+  <GENERAL>
+    <AUTHOR>{author}</AUTHOR>
+    <DATE>{timestamp}</DATE>
+    <IMAGE_SIZE_X>{xres}</IMAGE_SIZE_X>
+    <IMAGE_SIZE_Y>{yres}</IMAGE_SIZE_Y>
+    <FOV_X>{dx_um}</FOV_X>
+    <FOV_Y>{dy_um}</FOV_Y>
+  </GENERAL>
+  <INFO>
+    <SIZE>{len(info_items)}</SIZE>
+{info_xml}
+  </INFO>
+{layer_xml}
+</xml>
+"""
+    recipe_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<xml>
+  <CAPTURE>
+    <STEP>Coarse</STEP>
+    <COMMENT>{recipe_comment}</COMMENT>
+  </CAPTURE>
+</xml>
+"""
+
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("index.xml", index_xml.encode("utf-8"))
+        archive.writestr("./recipe.txt", recipe_xml.encode("utf-8"))
+        for layer_id, layer in enumerate(layers_um):
+            archive.writestr(f"LAYER_{layer_id}.raw", np.asarray(layer, dtype="<f4").tobytes())
+    return payload.getvalue()
+
+
 class TestSurfaceParsers:
-    """Test suite for reusable instrument parsers."""
+    """Test suite for reusable instrument parsers and scan readers."""
 
     def test_load_alicona_al3d_returns_surface(self, tmp_path):
         """AL3D parser should normalize depth data into a ``Surface``."""
@@ -160,6 +237,55 @@ class TestSurfaceParsers:
         assert len(surfaces) == 1
         assert surfaces[0].height.shape == (1, 3)
         assert surfaces[0].dx == pytest.approx(2.0)
+
+    def test_load_sensofar_plux_returns_all_height_layers(self, tmp_path):
+        """PLUX reader should normalize each ``LAYER_*`` height file into a ``Surface``."""
+
+        payload = _build_plux_file(
+            [
+                np.array([[1.0, np.nan], [3.5, 4.5]], dtype=np.float32),
+                np.array([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32),
+            ],
+            dx_um=0.8,
+            dy_um=1.2,
+        )
+        path = tmp_path / "synthetic.plux"
+        path.write_bytes(payload)
+
+        progress = []
+        surfaces = load_sensofar_plux(str(path), progress_callback=progress.append)
+
+        assert len(surfaces) == 2
+        assert all(isinstance(surface, Surface) for surface in surfaces)
+        assert surfaces[0].height.shape == (2, 2)
+        assert np.isnan(surfaces[0].height[0, 1])
+        assert surfaces[0].dx == pytest.approx(0.8)
+        assert surfaces[0].dy == pytest.approx(1.2)
+        assert surfaces[0].metadata["format"] == "sensofar_plux"
+        assert surfaces[0].metadata["info"]["Device"] == "Sensofar S Test"
+        assert surfaces[0].metadata["recipe"]["xml/CAPTURE/STEP"] == "Coarse"
+        assert surfaces[1].metadata["name"] == "synthetic_L1"
+        assert progress[0] == 10
+        assert progress[-1] == 100
+
+    def test_load_scan_file_dispatches_registered_plux_reader(self, tmp_path):
+        """Registry-based scan loading should dispatch ``.plux`` files automatically."""
+
+        payload = _build_plux_file(
+            [np.array([[10.0, 11.0, 12.0]], dtype=np.float32)],
+            dx_um=1.5,
+            dy_um=2.5,
+        )
+        path = tmp_path / "dispatch.plux"
+        path.write_bytes(payload)
+
+        reader = get_scan_reader(str(path))
+        surfaces = load_scan_file(str(path))
+
+        assert callable(reader)
+        assert len(surfaces) == 1
+        assert surfaces[0].height[0, 2] == pytest.approx(12.0)
+        assert surfaces[0].metadata["name"] == "dispatch"
 
     def test_load_scan_file_handles_multi_surface_archives(self, temp_npz_file):
         """Unified scan loading should preserve multi-surface archive readers."""
