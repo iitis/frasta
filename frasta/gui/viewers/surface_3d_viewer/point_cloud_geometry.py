@@ -229,34 +229,38 @@ def build_mesh_geometry_from_grid(
     if len(positions) != len(valid_coords):
         raise ValueError("base_positions do not match the sampled valid-mask layout")
 
-    face_list: list[list[int]] = []
-    for row in range(rows - 1):
-        if cancel_check is not None and (row % 64 == 0) and cancel_check():
-            raise InterruptedError("Mesh generation cancelled.")
-        for col in range(cols - 1):
-            quad = (
-                valid_mask[row, col]
-                and valid_mask[row + 1, col]
-                and valid_mask[row, col + 1]
-                and valid_mask[row + 1, col + 1]
-            )
-            if not quad:
-                continue
-            v00 = int(vertex_ids[row, col])
-            v10 = int(vertex_ids[row + 1, col])
-            v01 = int(vertex_ids[row, col + 1])
-            v11 = int(vertex_ids[row + 1, col + 1])
-            face_list.append([v00, v10, v11])
-            face_list.append([v00, v11, v01])
+    if cancel_check is not None and cancel_check():
+        raise InterruptedError("Mesh generation cancelled.")
 
-    if not face_list:
+    # Build all valid quads at once so large high-resolution meshes avoid
+    # Python-level nested loops in the hottest part of the conversion.
+    quad_mask = (
+        valid_mask[:-1, :-1]
+        & valid_mask[1:, :-1]
+        & valid_mask[:-1, 1:]
+        & valid_mask[1:, 1:]
+    )
+    if not np.any(quad_mask):
         return (
             positions,
             np.zeros_like(positions, dtype=np.float32),
             np.empty((0, 3), dtype=np.uint32),
         )
 
-    indices = np.asarray(face_list, dtype=np.uint32)
+    v00 = vertex_ids[:-1, :-1][quad_mask]
+    v10 = vertex_ids[1:, :-1][quad_mask]
+    v01 = vertex_ids[:-1, 1:][quad_mask]
+    v11 = vertex_ids[1:, 1:][quad_mask]
+    if cancel_check is not None and cancel_check():
+        raise InterruptedError("Mesh generation cancelled.")
+
+    indices = np.empty((len(v00) * 2, 3), dtype=np.uint32)
+    indices[0::2, 0] = v00
+    indices[0::2, 1] = v10
+    indices[0::2, 2] = v11
+    indices[1::2, 0] = v00
+    indices[1::2, 1] = v11
+    indices[1::2, 2] = v01
     normals = _compute_vertex_normals(positions, indices)
     return positions, normals, indices
 
@@ -393,6 +397,39 @@ def compute_stride_for_point_budget(
     total_points = max(1, int(rows) * int(cols))
     stride = int(np.ceil(np.sqrt(total_points / float(target_points))))
     return max(min_stride, stride)
+
+
+def compute_stride_for_mesh_budget(
+    grid_shape: tuple[int, int],
+    max_vertices: int,
+    max_triangles: int,
+    min_stride: int = 1,
+) -> int:
+    """Return the minimum stride needed to keep mesh buffers within limits.
+
+    Args:
+        grid_shape: Input grid shape as ``(rows, cols)``.
+        max_vertices: Maximum preferred number of vertices in one mesh buffer.
+        max_triangles: Maximum preferred number of triangles in one index buffer.
+        min_stride: Lower bound for the returned stride.
+
+    Returns:
+        Sampling stride large enough that the worst-case regularly sampled mesh
+        stays within both the vertex and triangle budgets for one cloud.
+    """
+    rows, cols = grid_shape
+    if rows <= 0 or cols <= 0:
+        return max(1, int(min_stride))
+
+    min_stride = max(1, int(min_stride))
+    max_vertices = max(1, int(max_vertices))
+    max_triangles = max(1, int(max_triangles))
+
+    total_vertices = max(1, int(rows) * int(cols))
+    total_triangles = max(1, 2 * max(0, int(rows) - 1) * max(0, int(cols) - 1))
+    vertex_stride = int(np.ceil(np.sqrt(total_vertices / float(max_vertices))))
+    triangle_stride = int(np.ceil(np.sqrt(total_triangles / float(max_triangles))))
+    return max(min_stride, vertex_stride, triangle_stride)
 
 
 def build_colormap_lut(

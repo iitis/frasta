@@ -64,7 +64,10 @@ For very large scans, the GUI also applies adaptive display limits:
   an effectively unbounded build time,
 - when `Manual` is selected, a `Target stride` slider becomes active so the
   user can explicitly choose the settled final stride, including `1` for
-  maximum-fidelity inspection or screenshot export at the cost of performance.
+  maximum-fidelity inspection or screenshot export at the cost of performance
+  when the resulting mesh still fits within the OpenGL buffer-allocation
+  limits used by the Qt backend. Extremely large mesh scenes may still be
+  clamped to a coarser stride to avoid impossible uploads.
 
 These display-side limits affect responsiveness only. Processing, measurement,
 and export still use the original full-resolution surface data.

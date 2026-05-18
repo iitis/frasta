@@ -13,6 +13,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ...orientation import index_to_3d_world, points_to_3d_world
 from .point_cloud_geometry import (
     build_colormap_lut,
+    compute_stride_for_mesh_budget,
     compute_stride_for_point_budget,
 )
 from .point_cloud_gl_widget import PointCloudGLWidget
@@ -38,6 +39,9 @@ class Point3DViewer(QtWidgets.QWidget):
     """Experimental viewer for rendering one or two grids as points or meshes."""
 
     MESH_RENDER_FULL_RESOLUTION_MAX_VERTICES = 1_000_000
+    OPENGL_BUFFER_MAX_BYTES = (1 << 31) - 1
+    MESH_RENDER_MAX_UPLOAD_VERTICES = OPENGL_BUFFER_MAX_BYTES // (3 * np.dtype(np.float32).itemsize)
+    MESH_RENDER_MAX_UPLOAD_TRIANGLES = OPENGL_BUFFER_MAX_BYTES // (3 * np.dtype(np.uint32).itemsize)
     QUALITY_PRESET_ORDER = ("fast", "balanced", "high", "ultra", "manual")
     QUALITY_PROFILES = {
         "fast": {
@@ -1318,10 +1322,6 @@ class Point3DViewer(QtWidgets.QWidget):
         of refining all the way down to a stride that would allocate enormous
         GPU buffers or mesh index arrays.
         """
-        if self._quality_preset == "manual":
-            self._full_resolution_effective = self._manual_target_stride == 1
-            return max(1, int(self._manual_target_stride))
-
         grid_shapes = []
         if self._ref_grid is not None:
             grid_shapes.append(self._ref_grid.shape)
@@ -1330,6 +1330,15 @@ class Point3DViewer(QtWidgets.QWidget):
         if not grid_shapes:
             self._full_resolution_effective = self._allow_full_resolution
             return 1
+
+        mesh_upload_stride = self._compute_minimum_mesh_upload_stride(grid_shapes)
+        if self._quality_preset == "manual":
+            requested_stride = max(1, int(self._manual_target_stride))
+            effective_stride = requested_stride
+            if self._render_mode == "mesh":
+                effective_stride = max(effective_stride, mesh_upload_stride)
+            self._full_resolution_effective = effective_stride == requested_stride == 1
+            return effective_stride
 
         cloud_count = len(grid_shapes)
         profile = self._quality_profile()
@@ -1359,8 +1368,28 @@ class Point3DViewer(QtWidgets.QWidget):
             for shape in grid_shapes
         ]
         min_stride = max(strides, default=1)
+        if self._render_mode == "mesh":
+            min_stride = max(min_stride, mesh_upload_stride)
         self._full_resolution_effective = (not self._allow_full_resolution) or (min_stride == 1)
         return min_stride
+
+    def _compute_minimum_mesh_upload_stride(
+        self,
+        grid_shapes: list[tuple[int, int]],
+    ) -> int:
+        """Return the minimum stride that keeps one mesh upload within API limits."""
+        if self._render_mode != "mesh":
+            return 1
+        strides = [
+            compute_stride_for_mesh_budget(
+                shape,
+                max_vertices=self.MESH_RENDER_MAX_UPLOAD_VERTICES,
+                max_triangles=self.MESH_RENDER_MAX_UPLOAD_TRIANGLES,
+                min_stride=1,
+            )
+            for shape in grid_shapes
+        ]
+        return max(strides, default=1)
 
     def _ensure_mesh_geometry_worker(
         self,
@@ -1463,10 +1492,16 @@ class Point3DViewer(QtWidgets.QWidget):
         visible_clouds = self._visible_cloud_names()
         quality_label = self._quality_profile()["label"].lower()
         if self._quality_preset == "manual":
+            current_stride = self._current_stride()
             if self._manual_stride_apply_timer.isActive():
                 quality_state = (
                     f"{quality_label} stride {self._manual_target_stride}"
                     f" -> {self._pending_manual_target_stride}"
+                )
+            elif effective_mode == "mesh" and current_stride != self._manual_target_stride:
+                quality_state = (
+                    f"{quality_label} stride {self._manual_target_stride}"
+                    f" capped to {current_stride}"
                 )
             else:
                 quality_state = f"{quality_label} stride {self._manual_target_stride}"

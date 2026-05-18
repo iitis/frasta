@@ -8,6 +8,7 @@ from frasta.gui.viewers.surface_3d_viewer.point_cloud_geometry import (
     build_mesh_geometry_from_grid,
     build_point_positions_from_grid,
     build_point_cloud_from_grid,
+    compute_stride_for_mesh_budget,
     compute_progressive_stride_schedule,
     compute_stride_for_point_budget,
     compute_bounds,
@@ -125,6 +126,48 @@ class TestBuildMeshGeometryFromGrid:
         assert normals.shape == (3, 3)
         assert indices.shape == (0, 3)
 
+    def test_generates_only_fully_valid_quads_on_sparse_grid(self):
+        """Only fully valid adjacent cells should produce two triangles each."""
+        grid = np.array(
+            [
+                [1.0, 2.0, np.nan],
+                [4.0, 5.0, 6.0],
+                [7.0, 8.0, 9.0],
+            ],
+            dtype=np.float32,
+        )
+
+        positions, normals, indices = build_mesh_geometry_from_grid(grid)
+
+        expected_positions = np.array(
+            [
+                [0.0, -0.0, 1.0],
+                [1.0, -0.0, 2.0],
+                [0.0, -1.0, 4.0],
+                [1.0, -1.0, 5.0],
+                [2.0, -1.0, 6.0],
+                [0.0, -2.0, 7.0],
+                [1.0, -2.0, 8.0],
+                [2.0, -2.0, 9.0],
+            ],
+            dtype=np.float32,
+        )
+        expected_indices = np.array(
+            [
+                [0, 2, 3],
+                [0, 3, 1],
+                [2, 5, 6],
+                [2, 6, 3],
+                [3, 6, 7],
+                [3, 7, 4],
+            ],
+            dtype=np.uint32,
+        )
+
+        np.testing.assert_allclose(positions, expected_positions)
+        assert normals.shape == positions.shape
+        np.testing.assert_array_equal(indices, expected_indices)
+
 
 class TestComputeBounds:
     """Test axis-aligned point-cloud bounds calculation."""
@@ -190,6 +233,30 @@ class TestComputeStrideForPointBudget:
         stride = compute_stride_for_point_budget((11_000, 11_000), target_points=250_000)
 
         assert stride >= 22
+
+
+class TestComputeStrideForMeshBudget:
+    """Test hard stride limits derived from per-buffer mesh upload limits."""
+
+    def test_small_grid_keeps_full_resolution(self):
+        """Small meshes should remain at stride 1 under generous budgets."""
+        stride = compute_stride_for_mesh_budget(
+            (200, 300),
+            max_vertices=1_000_000,
+            max_triangles=1_000_000,
+        )
+
+        assert stride == 1
+
+    def test_large_grid_respects_triangle_upload_limit(self):
+        """Huge meshes should be clamped by the per-buffer triangle budget."""
+        stride = compute_stride_for_mesh_budget(
+            (11_554, 11_600),
+            max_vertices=178_956_970,
+            max_triangles=178_956_970,
+        )
+
+        assert stride >= 2
 
 
 class TestBuildColormapLut:

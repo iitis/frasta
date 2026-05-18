@@ -11,6 +11,8 @@ import math
 
 import numpy as np
 from OpenGL import GL
+
+OPENGL_BUFFER_MAX_BYTES = (1 << 31) - 1
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .point_cloud_geometry import compute_bounds
@@ -1152,6 +1154,11 @@ class PointCloudGLWidget(QtWidgets.QOpenGLWidget):
             contiguous = np.ascontiguousarray(data, dtype=np.uint32)
         else:
             contiguous = np.ascontiguousarray(data, dtype=np.float32)
+        if contiguous.nbytes > OPENGL_BUFFER_MAX_BYTES:
+            raise ValueError(
+                f"OpenGL buffer upload too large: {contiguous.nbytes} bytes exceeds "
+                f"the Qt buffer-allocation limit of {OPENGL_BUFFER_MAX_BYTES} bytes."
+            )
         buffer_obj.bind()
         buffer_obj.allocate(contiguous.tobytes(), contiguous.nbytes)
         buffer_obj.release()

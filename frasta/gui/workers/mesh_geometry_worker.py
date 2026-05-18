@@ -7,9 +7,13 @@ prepared.
 
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 import traceback
 
 from PyQt5.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 
 class MeshGeometryWorker(QThread):
@@ -71,6 +75,7 @@ class MeshGeometryWorker(QThread):
                 build_mesh_geometry_from_grid,
             )
 
+            start_time = perf_counter()
             geometry = build_mesh_geometry_from_grid(
                 self.grid,
                 dx=self.dx,
@@ -80,6 +85,15 @@ class MeshGeometryWorker(QThread):
                 cancel_check=self.isInterruptionRequested,
                 base_positions=self.base_positions,
                 valid_mask=self.valid_mask,
+            )
+            elapsed_ms = (perf_counter() - start_time) * 1000.0
+            logger.debug(
+                f"Mesh geometry rebuilt for {self.which}: "
+                f"grid={getattr(self.grid, 'shape', None)}, "
+                f"stride={self.stride}, "
+                f"vertices={len(geometry[0])}, "
+                f"triangles={len(geometry[2])}, "
+                f"time={elapsed_ms:.2f} ms"
             )
             if self.isInterruptionRequested():
                 return

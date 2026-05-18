@@ -796,6 +796,9 @@ Follow same pattern as filters, but use `TransformDialog` and `processing/transf
 **1. Implement in `gui/viewers/surface_3d_viewer/` modules:**
    - point or mesh rendering changes -> `point_3d_viewer.py`
    - geometry preparation -> `point_cloud_geometry.py`
+     Keep the hot path vectorized with NumPy whenever possible. High-resolution
+     mesh index generation should avoid Python-level nested loops because that
+     work dominates CPU time long before OpenGL upload begins.
    - OpenGL widget behavior -> `point_cloud_gl_widget.py`
    - colormap schemes or range logic -> `colormap_manager.py`
 
