@@ -33,11 +33,21 @@ def test_crack_path_dialog_initializes_with_analysis_result(qapp):
         assert dialog._threshold_sweep_result is not None
         assert dialog._lbl_status.text() == "OK"
         assert dialog._lbl_tortuosity.text() != "—"
+        assert dialog._lbl_dominant_orientation.text() != "—"
+        assert dialog._lbl_orientation_strength.text() != "—"
 
         x_data, y_data = dialog._path_curve.getData()
         assert x_data is not None and y_data is not None
         assert len(x_data) > 0
         assert len(y_data) > 0
+        dir_x, dir_y = dialog._propagation_direction_curve.getData()
+        assert dir_x is not None and dir_y is not None
+        assert len(dir_x) == 2
+        assert len(dir_y) == 2
+        lx, ly = dialog._local_tortuosity_curve.getData()
+        assert lx is not None and ly is not None
+        assert len(lx) > 0
+        assert len(ly) > 0
         sx, sy = dialog._sweep_curve.getData()
         assert sx is not None and sy is not None
         assert len(sx) == 41
@@ -88,6 +98,35 @@ def test_crack_path_dialog_smoothing_control_reduces_reported_curvature(qapp):
         smooth_value = float(dialog._lbl_curvature.text().split()[0])
         assert smooth_value <= raw_value
         assert dialog._current_threshold_line.value() == dialog._threshold_spin.value()
+        assert dialog._orientation_ref_line.value() == dialog._reference_angle_spin.value()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_crack_path_dialog_supports_manual_propagation_angle(qapp):
+    """The dialog should allow switching from axis-aligned to manual propagation angles."""
+    surface_a, surface_b = _build_surface_pair_with_wavy_front()
+
+    dialog = CrackPathDialog(surface_a, surface_b)
+    try:
+        assert dialog._propagation_angle_spin.isEnabled() is False
+
+        dialog._propagation_axis_combo.setCurrentIndex(2)
+        dialog._propagation_angle_spin.setValue(30.0)
+
+        assert dialog._propagation_angle_spin.isEnabled() is True
+        assert dialog._analysis_result is not None
+        assert dialog._analysis_result["propagation_axis"] == "angle"
+        assert dialog._analysis_result["propagation_angle_degrees"] == 30.0
+        assert dialog._lbl_status.text() == "OK"
+
+        dir_x, dir_y = dialog._propagation_direction_curve.getData()
+        assert dir_x is not None and dir_y is not None
+        assert len(dir_x) == 2
+        assert len(dir_y) == 2
+        assert not np.isclose(dir_y[0], dir_y[1])
     finally:
         dialog.close()
         dialog.deleteLater()
@@ -114,6 +153,7 @@ def test_crack_path_dialog_exports_metrics_to_json(qapp, tmp_path):
         assert data["path_point_count"] > 0
         assert data["tortuosity"] is not None
         assert data["mean_abs_curvature_inv_um"] is not None
+        assert data["propagation_angle_degrees"] is not None
     finally:
         dialog.close()
         dialog.deleteLater()

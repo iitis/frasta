@@ -8,6 +8,8 @@ from frasta.processing.crack_path import (
     analyze_crack_path,
     crack_opening_map,
     crack_path_curvature,
+    crack_path_local_tortuosity,
+    crack_path_orientation_statistics,
     crack_path_tortuosity,
     extract_crack_path,
     extract_crack_path_contour,
@@ -70,6 +72,25 @@ def test_crack_path_tortuosity_exceeds_one_for_wavy_front():
     assert result["tortuosity"] == pytest.approx(expected_length / 4.0)
 
 
+def test_crack_path_tortuosity_supports_manual_propagation_angle():
+    """Manual propagation angles should project a diagonal path correctly."""
+    points = np.array([
+        [0.0, 0.0],
+        [2.0, 2.0],
+        [4.0, 4.0],
+    ])
+
+    result = crack_path_tortuosity(
+        points,
+        propagation_axis="angle",
+        propagation_angle_degrees=45.0,
+    )
+
+    assert result["effective_length"] == pytest.approx(4.0 * np.sqrt(2.0))
+    assert result["projected_length"] == pytest.approx(4.0 * np.sqrt(2.0))
+    assert result["tortuosity"] == pytest.approx(1.0)
+
+
 def test_crack_path_curvature_is_zero_for_straight_line():
     """Straight fronts should have zero curvature everywhere."""
     points = np.array([
@@ -84,6 +105,39 @@ def test_crack_path_curvature_is_zero_for_straight_line():
 
     assert np.allclose(result["arc_length"], np.array([0.0, 1.0, 2.0, 3.0, 4.0]))
     assert np.allclose(result["curvature"], 0.0)
+
+
+def test_local_tortuosity_is_one_for_straight_line():
+    """A straight line should have unit local tortuosity everywhere it is defined."""
+    points = np.array([
+        [0.0, 2.0],
+        [1.0, 2.0],
+        [2.0, 2.0],
+        [3.0, 2.0],
+        [4.0, 2.0],
+        [5.0, 2.0],
+    ])
+
+    result = crack_path_local_tortuosity(points, propagation_axis="x", window_length=3.0)
+    finite = np.isfinite(result["local_tortuosity"])
+    assert np.allclose(result["local_tortuosity"][finite], 1.0)
+
+
+def test_orientation_statistics_match_horizontal_line():
+    """A horizontal path should report a dominant orientation near 0 degrees."""
+    points = np.array([
+        [0.0, 2.0],
+        [1.0, 2.0],
+        [2.0, 2.0],
+        [3.0, 2.0],
+        [4.0, 2.0],
+    ])
+
+    result = crack_path_orientation_statistics(points, reference_angle_degrees=0.0)
+
+    assert result["dominant_orientation_degrees"] == pytest.approx(0.0)
+    assert result["orientation_strength"] == pytest.approx(1.0)
+    assert result["alignment_delta_degrees"] == pytest.approx(0.0)
 
 
 def test_extract_crack_path_contour_returns_valid_polyline():
@@ -115,6 +169,28 @@ def test_extract_crack_path_contour_resamples_to_constant_axis_step():
     )
 
     assert np.allclose(np.diff(points[:, 0]), 2.0)
+
+
+def test_extract_crack_path_supports_manual_propagation_angle():
+    """The scanline extractor should support a manually defined propagation angle."""
+    open_mask = np.zeros((6, 6), dtype=bool)
+    for row in range(6):
+        open_mask[row, row:] = True
+
+    points = extract_crack_path(
+        open_mask,
+        dx=1.0,
+        dy=1.0,
+        propagation_axis="angle",
+        propagation_angle_degrees=45.0,
+        front_side="min",
+    )
+
+    assert points.ndim == 2
+    assert points.shape[1] == 2
+    assert len(points) >= 2
+    projected = (points @ np.array([np.cos(np.pi / 4.0), np.sin(np.pi / 4.0)]))
+    assert np.all(np.diff(projected) >= 0.0)
 
 
 def test_crack_opening_map_respects_separation_threshold():
@@ -159,6 +235,8 @@ def test_analyze_crack_path_runs_end_to_end_for_surface_pair():
     assert np.allclose(result["path_points"][:, 1], front_rows.astype(float) * 3.0)
     assert result["tortuosity"] > 1.0
     assert result["curvature"].shape[0] == result["path_points"].shape[0]
+    assert result["local_tortuosity"].shape[0] == result["path_points"].shape[0]
+    assert 0.0 <= result["dominant_orientation_degrees"] < 180.0
 
 
 def test_analyze_crack_path_supports_contour_method():
@@ -187,6 +265,34 @@ def test_analyze_crack_path_supports_contour_method():
     assert result["path_method"] == "contour"
     assert result["tortuosity"] >= 1.0
     assert result["curvature"].shape[0] == result["path_points"].shape[0]
+
+
+def test_analyze_crack_path_supports_manual_propagation_angle():
+    """The high-level analysis should preserve a manually defined propagation angle."""
+    open_mask = np.zeros((6, 6), dtype=bool)
+    for row in range(6):
+        open_mask[row, row:] = True
+
+    reference = np.ones((6, 6), dtype=float)
+    adjusted = np.ones((6, 6), dtype=float)
+    adjusted[open_mask] = -1.0
+    surface_a = Surface(reference, dx=1.0, dy=1.0)
+    surface_b = Surface(adjusted, dx=1.0, dy=1.0)
+
+    result = analyze_crack_path(
+        surface_a,
+        surface_b,
+        dx=surface_a.dx,
+        dy=surface_a.dy,
+        separation=1.0,
+        propagation_axis="angle",
+        propagation_angle_degrees=45.0,
+        front_side="min",
+    )
+
+    assert result["propagation_axis"] == "angle"
+    assert result["propagation_angle_degrees"] == pytest.approx(45.0)
+    assert result["tortuosity"] >= 1.0
 
 
 def test_contour_smoothing_reduces_mean_absolute_curvature():

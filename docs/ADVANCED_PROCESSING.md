@@ -279,7 +279,8 @@ print(result["tortuosity"])
 - for the contour method, orient the path along the propagation axis,
   resample it to a constant step, and optionally smooth the transverse
   coordinate before curvature is computed,
-- compute path length, projected length, tortuosity, and local curvature,
+- compute path length, projected length, tortuosity, local curvature, local
+  tortuosity, and tangent-orientation statistics,
 - optionally evaluate `tau(s)` over a threshold sweep to inspect method
   stability.
 

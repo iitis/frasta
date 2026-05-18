@@ -56,6 +56,8 @@ from .crack_path import (
     extract_crack_path_contour,
     crack_path_tortuosity,
     crack_path_curvature,
+    crack_path_local_tortuosity,
+    crack_path_orientation_statistics,
     analyze_crack_path,
     sweep_crack_path_thresholds,
 )
@@ -103,6 +105,8 @@ __all__ = [
     'extract_crack_path_contour',
     'crack_path_tortuosity',
     'crack_path_curvature',
+    'crack_path_local_tortuosity',
+    'crack_path_orientation_statistics',
     'analyze_crack_path',
     'sweep_crack_path_thresholds',
 ]

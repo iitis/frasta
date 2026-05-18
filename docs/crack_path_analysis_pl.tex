@@ -1,0 +1,500 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[polish]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+\geometry{margin=2.5cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!50!black,
+    urlcolor=blue!50!black,
+    pdftitle={Crack Path Analysis w FRASTA-toolbox},
+    pdfauthor={OpenAI Codex},
+    pdfsubject={Opis metod i implementacji},
+    pdfkeywords={FRASTA, crack path, tortuosity, orientacja, kontakt, LaTeX}
+}
+
+\title{Crack Path Analysis w FRASTA-toolbox\\
+\large Opis metody, implementacji i interpretacji wynikow}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Cel modulu}
+
+Modul \texttt{Crack Path Analysis} sluzy do ilosciowego opisu geometrii
+frontu lub sciezki propagacji pekniecia na podstawie dwoch dopasowanych
+powierzchni przelomu zapisanych jako regularne mapy wysokosci.
+
+W aktualnym stanie implementacji modul pozwala na:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item wyznaczenie obszaru \emph{open/contact} na podstawie mapy roznicy,
+    \item ekstrakcje sciezki pekniecia dwiema metodami,
+    \item obliczenie globalnej tortuosity,
+    \item obliczenie lokalnej tortuosity w oknie przesuwanym,
+    \item analize lokalnej krzywizny trajektorii,
+    \item analize orientacji stycznej do trajektorii,
+    \item analize stabilnosci wyniku w funkcji progu separacji.
+\end{itemize}
+
+Modul ten nie zastępuje interpretacji mechanicznej. Dostarcza natomiast
+powtarzalny zestaw deskryptorow geometrycznych, ktore moga byc dalej
+porownywane z warunkami procesu, mikrostruktura materialu lub wynikami testow
+wytrzymalosciowych.
+
+\section{Dane wejsciowe i zalozenia}
+
+\subsection{Model danych}
+
+Kazda powierzchnia jest reprezentowana jako regularna dwuwymiarowa siatka
+wysokosci:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{height} -- macierz wartosci wysokosci,
+    \item \texttt{dx}, \texttt{dy} -- krok probkowania w osi \(X\) i \(Y\),
+    \item jednostka wewnetrzna -- mikrometry.
+\end{itemize}
+
+Modul zaklada, ze:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item obie powierzchnie zostaly juz wzajemnie dopasowane,
+    \item obie siatki maja zgodny rozmiar,
+    \item brakujace lub niewazne punkty sa reprezentowane przez \texttt{NaN}.
+\end{enumerate}
+
+\subsection{Mapa roznicy}
+
+Punktem wyjscia jest mapa roznicy:
+
+\begin{equation}
+    D(x, y) = H_{\mathrm{ref}}(x, y) - H_{\mathrm{adj}}(x, y),
+\end{equation}
+
+gdzie:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \(H_{\mathrm{ref}}\) -- powierzchnia referencyjna,
+    \item \(H_{\mathrm{adj}}\) -- powierzchnia dopasowana.
+\end{itemize}
+
+Interpretacja znaku jest nastepujaca:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item male wartosci \(D\) odpowiadaja obszarom kontaktu lub niemal
+    kontaktu,
+    \item duze wartosci \(D\) odpowiadaja obszarom otwarcia.
+\end{itemize}
+
+\subsection{Prog separacji}
+
+Uzytkownik wybiera prog \(s\), na podstawie ktorego budowany jest binarny
+obszar otwarcia:
+
+\begin{equation}
+    \mathrm{open}(x, y) =
+    \begin{cases}
+        1, & \text{gdy } D(x, y) \ge s, \\
+        0, & \text{gdy } D(x, y) < s.
+    \end{cases}
+\end{equation}
+
+Prog \(s\) jest zatem parametrem segmentacji. Nie jest on w aktualnej
+implementacji wyznaczany automatycznie; jest wybierany przez uzytkownika i
+powinien byc interpretowany jako kryterium analityczne, a nie uniwersalna
+wlasciwosc materialu.
+
+\section{Metody ekstrakcji sciezki}
+
+\subsection{Metoda \texttt{first\_open\_pixel}}
+
+Pierwsza metoda jest celowo prosta i stabilna. Dla kazdej linii prostopadlej
+do nominalnego kierunku propagacji wybierany jest pierwszy piksel nalezacy do
+obszaru \texttt{open}.
+
+Kierunek propagacji moze byc zdefiniowany wzdluz osi \(X\), wzdluz osi \(Y\)
+albo jako dowolny kat w plaszczyznie. Dla przypadkow osiowych wybierany jest
+pierwszy lub ostatni piksel \texttt{open} w zaleznosci od ustawienia
+\texttt{front side = min/max}. Dla przypadku katowego ta sama logika jest
+realizowana po projekcji punktow na zadany kierunek propagacji i kierunek
+poprzeczny.
+
+Zalety tej metody:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item prostota,
+    \item duza powtarzalnosc,
+    \item niewielka wrazliwosc na lokalne schodkowanie konturu.
+\end{itemize}
+
+Ograniczenia:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item metoda narzuca jeden punkt na kazda kolumne lub wiersz,
+    \item w praktyce wygładza geometrie frontu,
+    \item moze pomijac drobniejsze lokalne odnogi lub zafalowania.
+\end{itemize}
+
+\subsection{Metoda \texttt{contour}}
+
+Druga metoda sledzi granice pomiedzy obszarem \texttt{open} i \texttt{contact}
+na podstawie konturu maski binarnej. Sama surowa granica pikselowa jest jednak
+zbyt niestabilna, aby bezposrednio liczyc z niej krzywizne i deskryptory
+lokalne. Dlatego w aktualnej implementacji zastosowano trzy dodatkowe kroki:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Uporzadkowanie wzgledem osi propagacji} -- kontur jest
+    orientowany tak, aby wspolrzedna propagacji rosla monotonicznie.
+    \item \textbf{Resampling} -- trajektoria jest probkowana do stalego kroku
+    wzdłuż osi propagacji.
+    \item \textbf{Wygładzanie} -- skladowa poprzeczna trajektorii jest
+    wygładzana w oknie ruchomym przed obliczeniem krzywizny i orientacji.
+\end{enumerate}
+
+Zalety tej metody:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item lepiej sledzi rzeczywista granice \texttt{open/contact},
+    \item jest blizsza bezposredniej geometrii frontu,
+    \item daje bogatsza odpowiedz lokalna.
+\end{itemize}
+
+Ograniczenia:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item jest bardziej wrazliwa na jakosc segmentacji,
+    \item silniej reaguje na schodkowanie siatki i drobne artefakty,
+    \item wymaga sensownego doboru kroku resamplingu i wygładzania.
+\end{itemize}
+
+\section{Deskryptory globalne}
+
+\subsection{Dlugosc rozwinięta i rzutowana}
+
+Dla wyznaczonej polilinii \(\mathbf{p}_i = (x_i, y_i)\) liczona jest:
+
+\begin{equation}
+    L_{\mathrm{eff}} = \sum_{i=1}^{N-1} \left\| \mathbf{p}_{i+1} - \mathbf{p}_i \right\|,
+\end{equation}
+
+czyli efektywna dlugosc rozwinięta trajektorii.
+
+Nastepnie liczona jest dlugosc rzutowana na nominalny kierunek propagacji:
+
+\begin{equation}
+    L_{\mathrm{proj}} = \max(u_i) - \min(u_i),
+\end{equation}
+
+gdzie \(u_i\) jest wspolrzedna punktu w osi propagacji.
+
+\subsection{Globalna tortuosity}
+
+Podstawowy deskryptor globalny definiowany jest jako:
+
+\begin{equation}
+    \tau = \frac{L_{\mathrm{eff}}}{L_{\mathrm{proj}}}.
+\end{equation}
+
+Interpretacja:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \(\tau \approx 1\) -- trajektoria prawie prosta,
+    \item \(\tau > 1\) -- trajektoria rozwinięta lub meandrujaca,
+    \item im wieksza wartosc \(\tau\), tym bardziej zlozona jest droga
+    propagacji w skali calej sciezki.
+\end{itemize}
+
+\section{Deskryptory lokalne}
+
+\subsection{Krzywizna lokalna}
+
+Po wyznaczeniu wspolrzednej luku \(s\) liczony jest lokalny kat stycznej
+\(\theta(s)\), a nastepnie przyblizona krzywizna:
+
+\begin{equation}
+    \kappa(s) = \frac{d\theta}{ds}.
+\end{equation}
+
+Interpretacja:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item wartosci bliskie zeru odpowiadaja lokalnie prostym odcinkom,
+    \item duze dodatnie i ujemne wartosci odpowiadaja miejscom gwaltownej
+    zmiany kierunku,
+    \item srednia \(|\kappa|\) jest miara lokalnej ``ostrosci'' trajektorii.
+\end{itemize}
+
+\subsection{Lokalna tortuosity}
+
+Lokalna tortuosity \(\tau_{\mathrm{local}}(s)\) jest liczona w oknie
+przesuwanym o zadanej dlugosci \(w\) wzdluz trajektorii.
+
+Dla kazdego polozenia okna porownywane sa:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item lokalna dlugosc rozwinięta,
+    \item lokalna dlugosc rzutowana.
+\end{itemize}
+
+Definicja jest analogiczna do wersji globalnej:
+
+\begin{equation}
+    \tau_{\mathrm{local}}(s) =
+    \frac{L_{\mathrm{eff,local}}(s)}{L_{\mathrm{proj,local}}(s)}.
+\end{equation}
+
+W praktyce:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \(\tau_{\mathrm{local}} \approx 1\) oznacza lokalnie prawie prosty
+    fragment,
+    \item podwyzszone wartosci wskazuja, gdzie trajektoria jest lokalnie
+    bardziej rozwinięta,
+    \item parametr \texttt{Local window [\textmu m]} steruje skala usredniania.
+\end{itemize}
+
+To nie jest wykres zaleznosci od progu, lecz profil po dlugosci sciezki.
+Oznacza to, ze os pozioma odpowiada polozeniu wzdluz wyznaczonej trajektorii,
+a nie wartosci \(s\).
+
+\section{Analiza orientacji}
+
+\subsection{Kat stycznej i histogram orientacji}
+
+Po wyznaczeniu trajektorii liczony jest lokalny kat stycznej do sciezki.
+Nastepnie budowany jest histogram orientacji osiowych, to znaczy takich, dla
+ktorych orientacje \(0^\circ\) i \(180^\circ\) sa traktowane jako rownowazne.
+
+Taka reprezentacja jest naturalna dla trajektorii, w ktorej interesuje nas
+kierunek geometryczny odcinka, a nie jego orientacja zwrotna.
+
+\subsection{Dominujacy kierunek}
+
+Modul raportuje dominujaca orientacje osiowa:
+
+\begin{equation}
+    \theta_{\mathrm{dom}} \in [0^\circ, 180^\circ),
+\end{equation}
+
+oraz sile orientacji:
+
+\begin{equation}
+    R \in [0, 1],
+\end{equation}
+
+gdzie:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \(R \approx 1\) oznacza bardzo uporzadkowany rozklad orientacji,
+    \item mniejsze \(R\) oznacza szerszy i bardziej rozproszony rozklad.
+\end{itemize}
+
+\subsection{Kat referencyjny}
+
+Pole \texttt{Ref angle} nie zmienia samej geometrii sciezki ani nie wplywa na
+tortuosity. Jest to wyłącznie kat odniesienia do interpretacji orientacji.
+
+Moze on odpowiadac na przyklad:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item kierunkowi budowy (\emph{build direction}),
+    \item kierunkowi hatchingu,
+    \item osi probki,
+    \item nominalnemu kierunkowi obciazenia.
+\end{itemize}
+
+Na tej podstawie liczona jest roznica:
+
+\begin{equation}
+    \Delta \theta_{\mathrm{ref}} =
+    \min\left(
+        |\theta_{\mathrm{dom}} - \theta_{\mathrm{ref}}|,
+        180^\circ - |\theta_{\mathrm{dom}} - \theta_{\mathrm{ref}}|
+    \right).
+\end{equation}
+
+\section{Analiza stabilnosci wyniku: \(\tau(s)\)}
+
+Oprocz pojedynczego wyniku dla wybranego progu modul oblicza sweep:
+
+\begin{equation}
+    \tau = \tau(s)
+\end{equation}
+
+w zakresie obejmujacym aktualne wartosci mapy roznicy.
+
+Cel tego wykresu jest praktyczny: sprawdzic, czy wynik globalnej tortuosity
+jest stabilny dla rozsądnego zakresu progow.
+
+Interpretacja:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{plateau} -- wynik stabilny i wiarygodny,
+    \item \textbf{pojedynczy skok, potem plateau} -- czesto akceptowalny
+    przypadek przejscia od segmentacji zbyt liberalnej do poprawnej,
+    \item \textbf{liczne skoki} -- silna zaleznosc od progu,
+    \item \textbf{ciagly trend bez plateau} -- brak wyraznego zakresu stabilnej
+    interpretacji.
+\end{itemize}
+
+W praktyce zaleca sie wybierac prog z obszaru plateau, a nie z zakresu, w
+ktorym \(\tau(s)\) zmienia sie gwaltownie.
+
+\section{Interfejs uzytkownika}
+
+\subsection{Powiazanie z Contact Map Analysis}
+
+Analiza crack path jest aktualnie realizowana w osobnym oknie
+\texttt{CrackPathDialog}, otwieranym z poziomu okna
+\texttt{ContactMapDialog}.
+
+Takie rozwiazanie zostalo przyjete z dwoch powodow:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item okno kontaktu pozostaje czytelne i nie jest przeciazone informacja,
+    \item analiza tortuosity i orientacji moze rozwinac sie niezaleznie od
+    podstawowej segmentacji \texttt{open/contact}.
+\end{enumerate}
+
+Okno crack path pozostaje powiazane z tym samym zestawem danych i moze
+otrzymywac aktualizacje progu z okna kontaktu.
+
+\subsection{Glowne kontrolki}
+
+W aktualnym interfejsie dostepne sa miedzy innymi:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{Threshold s [\textmu m]},
+    \item \texttt{Method},
+    \item \texttt{Propagation direction},
+    \item \texttt{Angle [deg]} dla trybu \texttt{Manual angle},
+    \item \texttt{Front side},
+    \item \texttt{Resample [\textmu m]} dla metody \texttt{contour},
+    \item \texttt{Smooth win} dla metody \texttt{contour},
+    \item \texttt{Local window [\textmu m]},
+    \item \texttt{Ref angle [deg]}.
+\end{itemize}
+
+\subsection{Zakladki i wykresy}
+
+Aktualne okno zawiera:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item podglad obszaru \texttt{open} z nałożoną trajektoria,
+    \item wykres krzywizny,
+    \item wykres lokalnej tortuosity,
+    \item wykres \(\tau(s)\),
+    \item histogram orientacji.
+\end{itemize}
+
+\subsection{Eksport}
+
+Modul pozwala eksportowac:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item dane sciezki i profili do pliku \texttt{NPZ},
+    \item statystyki i deskryptory do pliku \texttt{JSON}.
+\end{itemize}
+
+\section{Przyklady syntetyczne}
+
+W katalogu \texttt{examples/data/} przygotowano kilka kontrolowanych zbiorow:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{crack\_path\_straight\_demo},
+    \item \texttt{crack\_path\_wavy\_demo},
+    \item \texttt{crack\_path\_y\_axis\_demo},
+    \item \texttt{crack\_path\_realistic\_demo}.
+\end{itemize}
+
+Kazdy zbior ma odpowiadajacy mu plik \texttt{JSON} z sugerowanym progiem,
+kierunkiem propagacji, strona frontu i wartosciami referencyjnymi. Kierunek
+moze byc osiowy albo opisany jawnym katem w plaszczyznie.
+
+Szczegolnie istotny jest zbior \texttt{realistic}, ktory zawiera:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item nieregularny front,
+    \item wieloskalowa chropowatosc,
+    \item stopniowy wzrost otwarcia za frontem,
+    \item lokalne mostki kontaktu,
+    \item rzadkie braki danych.
+\end{itemize}
+
+Jest on bardziej zblizony do danych rzeczywistych niz proste przypadki
+kontrolne \texttt{straight} i \texttt{wavy}.
+
+\section{Mocne strony obecnej implementacji}
+
+\begin{itemize}[leftmargin=1.5em]
+    \item modul jest deterministyczny i testowalny na danych syntetycznych,
+    \item posiada dwa warianty ekstrakcji sciezki,
+    \item laczy informacje globalne, lokalne i orientacyjne,
+    \item pozwala oceniac stabilnosc wyniku wzgledem progu segmentacji,
+    \item jest zintegrowany z istniejacym workflow kontaktu i mapy roznicy.
+\end{itemize}
+
+\section{Ograniczenia}
+
+Obecny stan implementacji ma kilka swiadomie przyjetych ograniczen:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item brak automatycznego doboru progu,
+    \item brak pelnej obslugi rozgalezien i wielu konkurencyjnych frontow,
+    \item brak analizy 2D pola lokalnej tortuosity poza sama trajektoria,
+    \item brak wbudowanej analizy wieloskalowej PSD lub wavelet dla trajektorii,
+    \item wyniki nadal zależą od definicji frontu i ustawien segmentacji.
+\end{itemize}
+
+\section{Naturalne kierunki dalszego rozwoju}
+
+Na podstawie dotychczasowych prac najbardziej naturalne wydaja sie:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item automatyczne wyznaczanie stabilnego zakresu progow na podstawie
+    wykresu \(\tau(s)\),
+    \item osobna analiza zgodnosci z \emph{build direction} i
+    \emph{hatch direction},
+    \item analiza wieloskalowa trajektorii,
+    \item wykrywanie odnog i metryki branchingu,
+    \item rozszerzenie lokalnej tortuosity do map przestrzennych 2D.
+\end{enumerate}
+
+\section{Podsumowanie}
+
+Aktualny modul \texttt{Crack Path Analysis} w FRASTA-toolbox stanowi juz
+spojny zestaw narzedzi do analizy geometrii frontu pekniecia.
+
+W obecnym stanie uzytkownik otrzymuje:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item segmentacje \texttt{open/contact},
+    \item dwie metody ekstrakcji trajektorii,
+    \item deskryptory globalne,
+    \item deskryptory lokalne,
+    \item analize orientacji,
+    \item test stabilnosci wzgledem progu.
+\end{itemize}
+
+Oznacza to, ze narzedzie nie jest juz tylko wizualizacja kontaktu, lecz staje
+sie pelnoprawnym modulem analitycznym, ktory mozna rozwijac w kierunku badan
+materialowych, analizy SLM i bardziej zaawansowanej interpretacji zmeczeniowej.
+
+\end{document}

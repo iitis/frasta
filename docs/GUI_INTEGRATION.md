@@ -176,6 +176,12 @@ It currently supports two extraction methods:
 - `first_open_pixel` - one front point per scanline or row,
 - `contour` - front traced from the open/contact contour.
 
+The propagation direction used by crack-path analysis can be set in three
+ways:
+- `X` axis,
+- `Y` axis,
+- `Manual angle` for an arbitrary in-plane direction.
+
 For the `contour` method, the dialog also exposes:
 - a constant resampling step along the propagation axis,
 - a transverse smoothing-window length used before curvature is computed.
@@ -184,10 +190,18 @@ The crack-path window reports:
 - effective path length,
 - projected length,
 - tortuosity,
+- a propagation-direction overlay drawn directly on the left-hand map view,
 - local-curvature plot,
+- local tortuosity as a sliding-window profile along the path,
+- a tangent-orientation histogram with dominant orientation and alignment to a
+  user-specified reference angle,
 - a threshold-sweep `tau(s)` plot showing how tortuosity changes across the
   valid difference-map range for the currently selected method and contour
   post-processing settings.
+
+The manual propagation angle changes path ordering and projected-length
+calculations. The orientation reference angle is independent and is used only
+for comparison against the dominant path orientation.
 
 ### Toolbar
 

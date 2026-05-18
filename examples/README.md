@@ -57,7 +57,8 @@ Deterministic NPZ datasets for the contact-map and crack-path workflow:
 - `data/crack_path_realistic_demo.npz`
 
 Each file has a companion JSON manifest with the recommended threshold,
-propagation axis, front side, and expected tortuosity metrics.
+propagation direction, front side, and expected tortuosity metrics. The
+direction may be axis-aligned or described by an explicit in-plane angle.
 
 Generate them with:
 ```bash

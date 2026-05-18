@@ -45,8 +45,8 @@ def _validate_matching_shapes(reference: np.ndarray, adjusted: np.ndarray) -> No
 def _normalize_axis_name(propagation_axis: str) -> str:
     """Normalize the nominal propagation axis name."""
     axis = str(propagation_axis).strip().lower()
-    if axis not in {"x", "y"}:
-        raise ValueError("Propagation axis must be 'x' or 'y'")
+    if axis not in {"x", "y", "angle"}:
+        raise ValueError("Propagation axis must be 'x', 'y', or 'angle'")
     return axis
 
 
@@ -64,6 +64,36 @@ def _normalize_path_method(method: str) -> str:
     if value not in {"first_open_pixel", "contour"}:
         raise ValueError("Crack-path method must be 'first_open_pixel' or 'contour'")
     return value
+
+
+def _resolve_propagation_angle(
+    propagation_axis: str,
+    propagation_angle_degrees: float | None = None,
+) -> tuple[str, float]:
+    """Return a normalized axis label and propagation angle in degrees."""
+    axis = _normalize_axis_name(propagation_axis)
+    if axis == "x":
+        return axis, 0.0
+    if axis == "y":
+        return axis, 90.0
+    if propagation_angle_degrees is None:
+        raise ValueError("Propagation axis 'angle' requires propagation_angle_degrees")
+    return axis, float(propagation_angle_degrees)
+
+
+def _direction_basis(
+    propagation_axis: str,
+    propagation_angle_degrees: float | None = None,
+) -> tuple[str, float, np.ndarray, np.ndarray]:
+    """Return the propagation-angle basis vectors in world coordinates."""
+    axis, angle_degrees = _resolve_propagation_angle(
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    angle_radians = np.radians(angle_degrees)
+    u = np.array([np.cos(angle_radians), np.sin(angle_radians)], dtype=float)
+    v = np.array([-np.sin(angle_radians), np.cos(angle_radians)], dtype=float)
+    return axis, angle_degrees, u, v
 
 
 def _normalize_positive_step(step: float | None, fallback: float) -> float:
@@ -102,49 +132,103 @@ def _deduplicate_consecutive_points(points: np.ndarray) -> np.ndarray:
     return result
 
 
-def _orient_points_along_axis(points: np.ndarray, propagation_axis: str) -> np.ndarray:
+def _project_points_to_uv(
+    points: np.ndarray,
+    propagation_axis: str,
+    propagation_angle_degrees: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, str, float, np.ndarray, np.ndarray]:
+    """Project 2D points onto propagation and transverse coordinates."""
+    axis, angle_degrees, u_vec, v_vec = _direction_basis(
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    u_coords = np.asarray(points, dtype=float) @ u_vec
+    v_coords = np.asarray(points, dtype=float) @ v_vec
+    return u_coords, v_coords, axis, angle_degrees, u_vec, v_vec
+
+
+def _reconstruct_points_from_uv(
+    u_coords: np.ndarray,
+    v_coords: np.ndarray,
+    u_vec: np.ndarray,
+    v_vec: np.ndarray,
+) -> np.ndarray:
+    """Map propagation/transverse coordinates back into XY points."""
+    u_arr = np.asarray(u_coords, dtype=float).reshape(-1, 1)
+    v_arr = np.asarray(v_coords, dtype=float).reshape(-1, 1)
+    return u_arr * np.asarray(u_vec, dtype=float) + v_arr * np.asarray(v_vec, dtype=float)
+
+
+def _orient_points_along_axis(
+    points: np.ndarray,
+    propagation_axis: str,
+    propagation_angle_degrees: float | None = None,
+) -> np.ndarray:
     """Orient a path so its propagation coordinate increases monotonically overall."""
-    axis = _normalize_axis_name(propagation_axis)
-    coord_index = 0 if axis == "x" else 1
-    if points[-1, coord_index] < points[0, coord_index]:
+    u_coords, _v_coords, _axis, _angle, _u_vec, _v_vec = _project_points_to_uv(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    if u_coords[-1] < u_coords[0]:
         return np.asarray(points[::-1], dtype=float)
     return np.asarray(points, dtype=float)
 
 
-def _collapse_points_by_axis(points: np.ndarray, propagation_axis: str) -> np.ndarray:
-    """Reduce a contour path to one transverse value per propagation coordinate."""
-    axis = _normalize_axis_name(propagation_axis)
-    coord_index = 0 if axis == "x" else 1
-    transverse_index = 1 - coord_index
+def _collapse_points_by_axis(
+    points: np.ndarray,
+    propagation_axis: str,
+    propagation_angle_degrees: float | None = None,
+    bin_step: float = 1.0,
+) -> np.ndarray:
+    """Reduce a path to one transverse value per propagation-coordinate bin."""
+    ordered = _orient_points_along_axis(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    u_coords, v_coords, _axis, _angle, u_vec, v_vec = _project_points_to_uv(
+        ordered,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    step = _normalize_positive_step(bin_step, fallback=1.0)
+    order = np.argsort(u_coords, kind="mergesort")
+    u_sorted = u_coords[order]
+    v_sorted = v_coords[order]
 
-    ordered = _orient_points_along_axis(points, axis)
-    order = np.argsort(ordered[:, coord_index], kind="mergesort")
-    sorted_points = ordered[order]
+    bin_indices = np.floor((u_sorted - float(u_sorted[0])) / step + 1e-9).astype(int)
+    unique_bins = np.unique(bin_indices)
+    collapsed_u = np.empty(len(unique_bins), dtype=float)
+    collapsed_v = np.empty(len(unique_bins), dtype=float)
+    for out_idx, bin_idx in enumerate(unique_bins):
+        mask = bin_indices == bin_idx
+        collapsed_u[out_idx] = float(np.mean(u_sorted[mask]))
+        collapsed_v[out_idx] = float(np.mean(v_sorted[mask]))
 
-    unique_coords, inverse = np.unique(sorted_points[:, coord_index], return_inverse=True)
-    collapsed = np.empty((len(unique_coords), 2), dtype=float)
-    collapsed[:, coord_index] = unique_coords
-    for idx, coord_value in enumerate(unique_coords):
-        mask = inverse == idx
-        collapsed[idx, transverse_index] = float(np.mean(sorted_points[mask, transverse_index]))
-
-    return _deduplicate_consecutive_points(collapsed)
+    collapsed_points = _reconstruct_points_from_uv(collapsed_u, collapsed_v, u_vec, v_vec)
+    return _deduplicate_consecutive_points(collapsed_points)
 
 
 def _resample_path_by_axis(
     points: np.ndarray,
     propagation_axis: str,
     step: float,
+    propagation_angle_degrees: float | None = None,
 ) -> np.ndarray:
     """Resample a single-valued path to a constant propagation-axis step."""
-    axis = _normalize_axis_name(propagation_axis)
-    coord_index = 0 if axis == "x" else 1
-    transverse_index = 1 - coord_index
     step = _normalize_positive_step(step, fallback=1.0)
 
-    ordered = _collapse_points_by_axis(points, axis)
-    coords = ordered[:, coord_index]
-    transverse = ordered[:, transverse_index]
+    ordered = _orient_points_along_axis(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    coords, transverse, _axis, _angle, u_vec, v_vec = _project_points_to_uv(
+        ordered,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
     if len(coords) < 2:
         raise ValueError("Contour resampling requires at least two ordered points")
 
@@ -160,10 +244,7 @@ def _resample_path_by_axis(
     else:
         new_coords[-1] = stop
     new_transverse = np.interp(new_coords, coords, transverse)
-
-    resampled = np.empty((len(new_coords), 2), dtype=float)
-    resampled[:, coord_index] = new_coords
-    resampled[:, transverse_index] = new_transverse
+    resampled = _reconstruct_points_from_uv(new_coords, new_transverse, u_vec, v_vec)
     return _deduplicate_consecutive_points(resampled)
 
 
@@ -171,24 +252,29 @@ def _smooth_path_transverse(
     points: np.ndarray,
     propagation_axis: str,
     window: int,
+    propagation_angle_degrees: float | None = None,
 ) -> np.ndarray:
     """Smooth only the transverse coordinate of an ordered path."""
-    axis = _normalize_axis_name(propagation_axis)
-    coord_index = 0 if axis == "x" else 1
-    transverse_index = 1 - coord_index
     window = _normalize_smoothing_window(window)
 
     if window == 1 or len(points) < 3:
         return np.asarray(points, dtype=float)
 
+    ordered = _orient_points_along_axis(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    u_coords, transverse, _axis, _angle, u_vec, v_vec = _project_points_to_uv(
+        ordered,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
     half = window // 2
-    transverse = np.asarray(points[:, transverse_index], dtype=float)
     padded = np.pad(transverse, (half, half), mode="edge")
     kernel = np.full(window, 1.0 / window, dtype=float)
     smoothed_transverse = np.convolve(padded, kernel, mode="valid")
-
-    smoothed = np.asarray(points, dtype=float).copy()
-    smoothed[:, transverse_index] = smoothed_transverse
+    smoothed = _reconstruct_points_from_uv(u_coords, smoothed_transverse, u_vec, v_vec)
     return _deduplicate_consecutive_points(smoothed)
 
 
@@ -229,6 +315,7 @@ def extract_crack_path(
     dy: float = 1.0,
     propagation_axis: str = "x",
     front_side: str = "min",
+    propagation_angle_degrees: float | None = None,
 ) -> np.ndarray:
     """Extract a simple crack-front polyline from a binary opening map.
 
@@ -240,9 +327,12 @@ def extract_crack_path(
         open_mask: Boolean 2D array in which ``True`` marks open crack pixels.
         dx: Physical pixel spacing along the X axis.
         dy: Physical pixel spacing along the Y axis.
-        propagation_axis: Nominal propagation direction, ``'x'`` or ``'y'``.
+        propagation_axis: Nominal propagation direction, ``'x'``, ``'y'``, or
+            ``'angle'``.
         front_side: Which side to scan from on the transverse axis, ``'min'``
             or ``'max'``.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
 
     Returns:
         ``(N, 2)`` array of polyline points in physical coordinates ``[x, y]``.
@@ -258,27 +348,58 @@ def extract_crack_path(
     axis = _normalize_axis_name(propagation_axis)
     side = _normalize_front_side(front_side)
 
-    points: list[tuple[float, float]] = []
+    if axis in {"x", "y"}:
+        points: list[tuple[float, float]] = []
 
-    if axis == "x":
-        for col in range(mask.shape[1]):
-            rows = np.flatnonzero(mask[:, col])
-            if rows.size == 0:
-                continue
-            row = int(rows[0] if side == "min" else rows[-1])
-            points.append((float(col) * float(dx), float(row) * float(dy)))
-    else:
-        for row in range(mask.shape[0]):
-            cols = np.flatnonzero(mask[row, :])
-            if cols.size == 0:
-                continue
-            col = int(cols[0] if side == "min" else cols[-1])
-            points.append((float(col) * float(dx), float(row) * float(dy)))
+        if axis == "x":
+            for col in range(mask.shape[1]):
+                rows = np.flatnonzero(mask[:, col])
+                if rows.size == 0:
+                    continue
+                row = int(rows[0] if side == "min" else rows[-1])
+                points.append((float(col) * float(dx), float(row) * float(dy)))
+        else:
+            for row in range(mask.shape[0]):
+                cols = np.flatnonzero(mask[row, :])
+                if cols.size == 0:
+                    continue
+                col = int(cols[0] if side == "min" else cols[-1])
+                points.append((float(col) * float(dx), float(row) * float(dy)))
 
-    if len(points) < 2:
+        if len(points) < 2:
+            raise ValueError("Open-mask crack path extraction requires at least two sampled points")
+
+        return _deduplicate_consecutive_points(np.asarray(points, dtype=float))
+
+    rows, cols = np.nonzero(mask)
+    if rows.size < 2:
         raise ValueError("Open-mask crack path extraction requires at least two sampled points")
 
-    return _deduplicate_consecutive_points(np.asarray(points, dtype=float))
+    raw_points = np.column_stack((cols.astype(float) * float(dx), rows.astype(float) * float(dy)))
+    u_coords, v_coords, _axis, _angle, u_vec, v_vec = _project_points_to_uv(
+        raw_points,
+        axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+
+    sample_step = min(float(dx), float(dy))
+    u_start = float(np.min(u_coords))
+    bin_indices = np.floor((u_coords - u_start) / sample_step + 1e-9).astype(int)
+    unique_bins = np.unique(bin_indices)
+
+    path_u = np.empty(len(unique_bins), dtype=float)
+    path_v = np.empty(len(unique_bins), dtype=float)
+    for out_idx, bin_idx in enumerate(unique_bins):
+        mask_bin = bin_indices == bin_idx
+        local_u = u_coords[mask_bin]
+        local_v = v_coords[mask_bin]
+        edge_index = int(np.argmin(local_v) if side == "min" else np.argmax(local_v))
+        path_u[out_idx] = float(local_u[edge_index])
+        path_v[out_idx] = float(local_v[edge_index])
+
+    return _deduplicate_consecutive_points(
+        _reconstruct_points_from_uv(path_u, path_v, u_vec, v_vec)
+    )
 
 
 def extract_crack_path_contour(
@@ -286,6 +407,7 @@ def extract_crack_path_contour(
     dx: float = 1.0,
     dy: float = 1.0,
     propagation_axis: str = "x",
+    propagation_angle_degrees: float | None = None,
     resample_step: float | None = None,
     smoothing_window: int = 5,
 ) -> np.ndarray:
@@ -301,7 +423,10 @@ def extract_crack_path_contour(
         open_mask: Boolean 2D array in which ``True`` marks open crack pixels.
         dx: Physical pixel spacing along the X axis.
         dy: Physical pixel spacing along the Y axis.
-        propagation_axis: Nominal propagation direction, ``'x'`` or ``'y'``.
+        propagation_axis: Nominal propagation direction, ``'x'``, ``'y'``, or
+            ``'angle'``.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
         resample_step: Optional resampling step along the propagation axis in
             physical units. When omitted, ``min(dx, dy)`` is used.
         smoothing_window: Odd moving-average window applied to the transverse
@@ -324,8 +449,6 @@ def extract_crack_path_contour(
     best_points: np.ndarray | None = None
     best_span = -np.inf
     best_length = -np.inf
-    coord_index = 0 if axis == "x" else 1
-
     for contour in contours:
         if len(contour) < 2:
             continue
@@ -336,7 +459,12 @@ def extract_crack_path_contour(
             )
         )
         points = _deduplicate_consecutive_points(points)
-        span = float(np.max(points[:, coord_index]) - np.min(points[:, coord_index]))
+        u_coords, _v_coords, _axis, _angle, _u_vec, _v_vec = _project_points_to_uv(
+            points,
+            axis,
+            propagation_angle_degrees=propagation_angle_degrees,
+        )
+        span = float(np.max(u_coords) - np.min(u_coords))
         length = float(np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1)))
         if span > best_span or (np.isclose(span, best_span) and length > best_length):
             best_points = points
@@ -346,29 +474,39 @@ def extract_crack_path_contour(
     if best_points is None:
         raise ValueError("Open-mask contour extraction did not produce a valid polyline")
 
-    ordered = _collapse_points_by_axis(best_points, axis)
+    ordered = _collapse_points_by_axis(
+        best_points,
+        axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+        bin_step=min(float(dx), float(dy)),
+    )
     resampled = _resample_path_by_axis(
         ordered,
         axis,
         step=_normalize_positive_step(resample_step, fallback=min(float(dx), float(dy))),
+        propagation_angle_degrees=propagation_angle_degrees,
     )
     return _smooth_path_transverse(
         resampled,
         axis,
         window=_normalize_smoothing_window(smoothing_window),
+        propagation_angle_degrees=propagation_angle_degrees,
     )
 
 
 def crack_path_tortuosity(
     path_points: np.ndarray,
     propagation_axis: str = "x",
+    propagation_angle_degrees: float | None = None,
 ) -> dict[str, float]:
     """Compute effective length, projected length, and tortuosity of a path.
 
     Args:
         path_points: ``(N, 2)`` array of physical polyline coordinates ``[x, y]``.
         propagation_axis: Nominal propagation direction used for projected
-            length, ``'x'`` or ``'y'``.
+            length, ``'x'``, ``'y'``, or ``'angle'``.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
 
     Returns:
         Dictionary with:
@@ -381,13 +519,14 @@ def crack_path_tortuosity(
         raise ValueError("Crack-path tortuosity requires an (N, 2) coordinate array")
 
     points = _deduplicate_consecutive_points(points)
-    axis = _normalize_axis_name(propagation_axis)
-
     step_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
     effective_length = float(np.sum(step_lengths))
-
-    coord_index = 0 if axis == "x" else 1
-    projected_length = float(np.max(points[:, coord_index]) - np.min(points[:, coord_index]))
+    u_coords, _v_coords, _axis, _angle, _u_vec, _v_vec = _project_points_to_uv(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    projected_length = float(np.max(u_coords) - np.min(u_coords))
     if projected_length <= 0.0:
         raise ValueError("Projected crack-path length must be positive to compute tortuosity")
 
@@ -436,6 +575,129 @@ def crack_path_curvature(path_points: np.ndarray) -> dict[str, np.ndarray]:
     }
 
 
+def crack_path_local_tortuosity(
+    path_points: np.ndarray,
+    propagation_axis: str = "x",
+    window_length: float | None = None,
+    propagation_angle_degrees: float | None = None,
+) -> dict[str, np.ndarray | float]:
+    """Compute a sliding-window tortuosity profile along a crack path.
+
+    Args:
+        path_points: ``(N, 2)`` array of physical polyline coordinates ``[x, y]``.
+        propagation_axis: Nominal propagation direction used for projected
+            length, ``'x'``, ``'y'``, or ``'angle'``.
+        window_length: Sliding-window length in physical units. When omitted,
+            a default of one fifth of the total arc length is used, but never
+            less than three median point spacings.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
+
+    Returns:
+        Dictionary with:
+        ``arc_length``: cumulative arc-length coordinate,
+        ``local_tortuosity``: local tortuosity at each path point,
+        ``window_length``: effective physical window length used.
+    """
+    points = np.asarray(path_points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("Local crack-path tortuosity requires an (N, 2) coordinate array")
+
+    points = _deduplicate_consecutive_points(points)
+    deltas = np.diff(points, axis=0)
+    step_lengths = np.linalg.norm(deltas, axis=1)
+    if np.any(step_lengths <= 0.0):
+        raise ValueError("Local crack-path tortuosity requires positive arc-length steps")
+
+    arc_length = np.concatenate(([0.0], np.cumsum(step_lengths)))
+    u_coords, _v_coords, _axis, _angle, _u_vec, _v_vec = _project_points_to_uv(
+        points,
+        propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    total_length = float(arc_length[-1])
+    median_step = float(np.median(step_lengths))
+    if window_length is None:
+        effective_window = max(3.0 * median_step, total_length / 5.0)
+    else:
+        effective_window = float(window_length)
+        if effective_window <= 0.0:
+            raise ValueError("Local tortuosity window length must be positive")
+        effective_window = max(effective_window, 3.0 * median_step)
+
+    half_window = 0.5 * effective_window
+    local_tortuosity = np.full(len(points), np.nan, dtype=float)
+
+    for idx, center_s in enumerate(arc_length):
+        left = max(0.0, center_s - half_window)
+        right = min(total_length, center_s + half_window)
+        mask = (arc_length >= left) & (arc_length <= right)
+        indices = np.flatnonzero(mask)
+        if indices.size < 2:
+            continue
+        i0 = int(indices[0])
+        i1 = int(indices[-1])
+        effective = float(arc_length[i1] - arc_length[i0])
+        projected = float(np.max(u_coords[i0 : i1 + 1]) - np.min(u_coords[i0 : i1 + 1]))
+        if projected > 0.0:
+            local_tortuosity[idx] = effective / projected
+
+    return {
+        "arc_length": arc_length,
+        "local_tortuosity": local_tortuosity,
+        "window_length": float(effective_window),
+    }
+
+
+def crack_path_orientation_statistics(
+    path_points: np.ndarray,
+    reference_angle_degrees: float | None = None,
+) -> dict[str, np.ndarray | float | None]:
+    """Compute tangent-orientation statistics along a crack path.
+
+    Args:
+        path_points: ``(N, 2)`` array of physical polyline coordinates ``[x, y]``.
+        reference_angle_degrees: Optional external direction for alignment
+            comparison, such as build or hatch direction.
+
+    Returns:
+        Dictionary with:
+        ``arc_length``: cumulative arc-length coordinate,
+        ``tangent_angle_degrees``: local tangent angles in degrees,
+        ``orientation_degrees``: axial orientation wrapped to ``[0, 180)``,
+        ``dominant_orientation_degrees``: axial circular-mean orientation,
+        ``orientation_strength``: axial mean-resultant length in ``[0, 1]``,
+        ``alignment_delta_degrees``: minimal absolute difference to the
+        reference angle when provided.
+    """
+    curvature = crack_path_curvature(path_points)
+    tangent_angle = np.asarray(curvature["tangent_angle"], dtype=float)
+    tangent_angle_degrees = np.degrees(tangent_angle)
+    orientation_degrees = np.mod(tangent_angle_degrees, 180.0)
+
+    doubled = np.radians(2.0 * orientation_degrees)
+    mean_cos = float(np.mean(np.cos(doubled)))
+    mean_sin = float(np.mean(np.sin(doubled)))
+    dominant_orientation = 0.5 * np.degrees(np.arctan2(mean_sin, mean_cos))
+    dominant_orientation = float(np.mod(dominant_orientation, 180.0))
+    orientation_strength = float(np.hypot(mean_cos, mean_sin))
+
+    alignment_delta: float | None = None
+    if reference_angle_degrees is not None:
+        ref = float(reference_angle_degrees) % 180.0
+        diff = abs(dominant_orientation - ref)
+        alignment_delta = float(min(diff, 180.0 - diff))
+
+    return {
+        "arc_length": np.asarray(curvature["arc_length"], dtype=float),
+        "tangent_angle_degrees": tangent_angle_degrees,
+        "orientation_degrees": orientation_degrees,
+        "dominant_orientation_degrees": dominant_orientation,
+        "orientation_strength": orientation_strength,
+        "alignment_delta_degrees": alignment_delta,
+    }
+
+
 def analyze_crack_path(
     reference_surface: Any,
     adjusted_surface: Any,
@@ -443,10 +705,13 @@ def analyze_crack_path(
     dy: float = 1.0,
     separation: float = 0.0,
     propagation_axis: str = "x",
+    propagation_angle_degrees: float | None = None,
     front_side: str = "min",
     method: str = "first_open_pixel",
     contour_resample_step: float | None = None,
     contour_smoothing_window: int = 5,
+    local_window_length: float | None = None,
+    reference_angle_degrees: float | None = None,
 ) -> dict[str, Any]:
     """Run the complete MVP crack-path analysis on an aligned surface pair.
 
@@ -456,7 +721,10 @@ def analyze_crack_path(
         dx: Physical pixel spacing along X used to convert path coordinates.
         dy: Physical pixel spacing along Y used to convert path coordinates.
         separation: Opening threshold in the height unit of the surfaces.
-        propagation_axis: Nominal propagation direction, ``'x'`` or ``'y'``.
+        propagation_axis: Nominal propagation direction, ``'x'``, ``'y'``, or
+            ``'angle'``.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
         front_side: Side from which the front is detected on the transverse
             axis, ``'min'`` or ``'max'``.
         method: Crack-path extraction method. Supported values are
@@ -465,6 +733,9 @@ def analyze_crack_path(
             the contour method after ordering and collapsing the raw contour.
         contour_smoothing_window: Moving-average window for transverse
             smoothing used by the contour method.
+        local_window_length: Sliding-window length for local tortuosity.
+        reference_angle_degrees: Optional external direction used for
+            orientation-alignment reporting.
 
     Returns:
         Dictionary containing the raw maps, extracted path, tortuosity
@@ -483,6 +754,7 @@ def analyze_crack_path(
             dy=dy,
             propagation_axis=propagation_axis,
             front_side=front_side,
+            propagation_angle_degrees=propagation_angle_degrees,
         )
     else:
         path_points = extract_crack_path_contour(
@@ -490,14 +762,26 @@ def analyze_crack_path(
             dx=dx,
             dy=dy,
             propagation_axis=propagation_axis,
+            propagation_angle_degrees=propagation_angle_degrees,
             resample_step=contour_resample_step,
             smoothing_window=contour_smoothing_window,
         )
     tortuosity = crack_path_tortuosity(
         path_points,
         propagation_axis=propagation_axis,
+        propagation_angle_degrees=propagation_angle_degrees,
     )
     curvature = crack_path_curvature(path_points)
+    local_tortuosity = crack_path_local_tortuosity(
+        path_points,
+        propagation_axis=propagation_axis,
+        window_length=local_window_length,
+        propagation_angle_degrees=propagation_angle_degrees,
+    )
+    orientation = crack_path_orientation_statistics(
+        path_points,
+        reference_angle_degrees=reference_angle_degrees,
+    )
 
     return {
         "difference_map": difference_map,
@@ -505,7 +789,14 @@ def analyze_crack_path(
         "valid_mask": valid_mask,
         "path_points": path_points,
         "path_method": path_method,
-        "propagation_axis": _normalize_axis_name(propagation_axis),
+        "propagation_axis": _resolve_propagation_angle(
+            propagation_axis,
+            propagation_angle_degrees=propagation_angle_degrees,
+        )[0],
+        "propagation_angle_degrees": _resolve_propagation_angle(
+            propagation_axis,
+            propagation_angle_degrees=propagation_angle_degrees,
+        )[1],
         "front_side": _normalize_front_side(front_side),
         "contour_resample_step": (
             _normalize_positive_step(contour_resample_step, fallback=min(float(dx), float(dy)))
@@ -517,8 +808,14 @@ def analyze_crack_path(
             if path_method == "contour"
             else None
         ),
+        "local_window_length": float(local_tortuosity["window_length"]),
+        "reference_angle_degrees": (
+            None if reference_angle_degrees is None else float(reference_angle_degrees)
+        ),
         **tortuosity,
         **curvature,
+        **local_tortuosity,
+        **orientation,
     }
 
 
@@ -529,6 +826,7 @@ def sweep_crack_path_thresholds(
     dx: float = 1.0,
     dy: float = 1.0,
     propagation_axis: str = "x",
+    propagation_angle_degrees: float | None = None,
     front_side: str = "min",
     method: str = "first_open_pixel",
     contour_resample_step: float | None = None,
@@ -542,7 +840,10 @@ def sweep_crack_path_thresholds(
         thresholds: One-dimensional array of thresholds to evaluate.
         dx: Physical pixel spacing along X used to convert path coordinates.
         dy: Physical pixel spacing along Y used to convert path coordinates.
-        propagation_axis: Nominal propagation direction, ``'x'`` or ``'y'``.
+        propagation_axis: Nominal propagation direction, ``'x'``, ``'y'``, or
+            ``'angle'``.
+        propagation_angle_degrees: Propagation direction angle in degrees when
+            ``propagation_axis='angle'``.
         front_side: Side from which the first-open-pixel path is detected.
         method: Crack-path extraction method.
         contour_resample_step: Contour resampling step in physical units.
@@ -572,6 +873,7 @@ def sweep_crack_path_thresholds(
                 dy=dy,
                 separation=float(threshold),
                 propagation_axis=propagation_axis,
+                propagation_angle_degrees=propagation_angle_degrees,
                 front_side=front_side,
                 method=method,
                 contour_resample_step=contour_resample_step,
@@ -592,7 +894,14 @@ def sweep_crack_path_thresholds(
         "tortuosity": tortuosity,
         "mean_abs_curvature": mean_abs_curvature,
         "method": _normalize_path_method(method),
-        "propagation_axis": _normalize_axis_name(propagation_axis),
+        "propagation_axis": _resolve_propagation_angle(
+            propagation_axis,
+            propagation_angle_degrees=propagation_angle_degrees,
+        )[0],
+        "propagation_angle_degrees": _resolve_propagation_angle(
+            propagation_axis,
+            propagation_angle_degrees=propagation_angle_degrees,
+        )[1],
         "front_side": _normalize_front_side(front_side),
         "contour_resample_step": (
             _normalize_positive_step(contour_resample_step, fallback=min(float(dx), float(dy)))

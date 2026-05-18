@@ -113,17 +113,48 @@ class CrackPathDialog(QtWidgets.QWidget):
         self._smoothing_spin.setMaximumWidth(70)
         top_row.addWidget(self._smoothing_spin)
 
-        top_row.addWidget(QtWidgets.QLabel("Propagation axis:"))
+        top_row.addWidget(QtWidgets.QLabel("Propagation direction:"))
         self._propagation_axis_combo = QtWidgets.QComboBox()
         self._propagation_axis_combo.addItem("X", userData="x")
         self._propagation_axis_combo.addItem("Y", userData="y")
+        self._propagation_axis_combo.addItem("Manual angle", userData="angle")
         top_row.addWidget(self._propagation_axis_combo)
+
+        top_row.addWidget(QtWidgets.QLabel("Angle [deg]:"))
+        self._propagation_angle_spin = QtWidgets.QDoubleSpinBox()
+        self._propagation_angle_spin.setDecimals(2)
+        self._propagation_angle_spin.setRange(-180.0, 180.0)
+        self._propagation_angle_spin.setSingleStep(5.0)
+        self._propagation_angle_spin.setValue(0.0)
+        self._propagation_angle_spin.setMaximumWidth(90)
+        self._propagation_angle_spin.setToolTip(
+            "Reference propagation direction used for path ordering and projected-length calculations."
+        )
+        top_row.addWidget(self._propagation_angle_spin)
 
         top_row.addWidget(QtWidgets.QLabel("Front side:"))
         self._front_side_combo = QtWidgets.QComboBox()
         self._front_side_combo.addItem("Min", userData="min")
         self._front_side_combo.addItem("Max", userData="max")
         top_row.addWidget(self._front_side_combo)
+
+        top_row.addWidget(QtWidgets.QLabel("Local window [µm]:"))
+        self._local_window_spin = QtWidgets.QDoubleSpinBox()
+        self._local_window_spin.setDecimals(3)
+        self._local_window_spin.setRange(0.001, 1e6)
+        self._local_window_spin.setSingleStep(10.0)
+        self._local_window_spin.setValue(120.0)
+        self._local_window_spin.setMaximumWidth(100)
+        top_row.addWidget(self._local_window_spin)
+
+        top_row.addWidget(QtWidgets.QLabel("Ref angle [deg]:"))
+        self._reference_angle_spin = QtWidgets.QDoubleSpinBox()
+        self._reference_angle_spin.setDecimals(1)
+        self._reference_angle_spin.setRange(0.0, 180.0)
+        self._reference_angle_spin.setSingleStep(5.0)
+        self._reference_angle_spin.setValue(0.0)
+        self._reference_angle_spin.setMaximumWidth(90)
+        top_row.addWidget(self._reference_angle_spin)
 
         root.addLayout(top_row)
 
@@ -150,6 +181,19 @@ class CrackPathDialog(QtWidgets.QWidget):
             symbolBrush=pg.mkBrush(255, 170, 40),
             symbolPen=None,
         )
+        self._propagation_direction_curve = pg.PlotDataItem(
+            pen=pg.mkPen(80, 220, 255, width=2, style=QtCore.Qt.DashLine)
+        )
+        self._propagation_direction_arrow = pg.ArrowItem(
+            angle=0.0,
+            headLen=16,
+            tipAngle=28,
+            tailLen=0,
+            brush=pg.mkBrush(80, 220, 255),
+            pen=pg.mkPen(30, 30, 30, width=1),
+        )
+        self._open_view.getView().addItem(self._propagation_direction_curve)
+        self._open_view.getView().addItem(self._propagation_direction_arrow)
         self._open_view.getView().addItem(self._path_curve)
         left_layout.addWidget(self._open_view)
         splitter.addWidget(left_group)
@@ -167,13 +211,21 @@ class CrackPathDialog(QtWidgets.QWidget):
         self._lbl_path_projection = QtWidgets.QLabel("—")
         self._lbl_tortuosity = QtWidgets.QLabel("—")
         self._lbl_curvature = QtWidgets.QLabel("—")
+        self._lbl_dominant_orientation = QtWidgets.QLabel("—")
+        self._lbl_orientation_strength = QtWidgets.QLabel("—")
+        self._lbl_alignment_delta = QtWidgets.QLabel("—")
         form.addRow("Status:", self._lbl_status)
         form.addRow("Method:", self._lbl_path_method)
         form.addRow("Effective length:", self._lbl_path_length)
         form.addRow("Projected length:", self._lbl_path_projection)
         form.addRow("Tortuosity:", self._lbl_tortuosity)
         form.addRow("Mean |curvature|:", self._lbl_curvature)
+        form.addRow("Dominant orientation:", self._lbl_dominant_orientation)
+        form.addRow("Orientation strength:", self._lbl_orientation_strength)
+        form.addRow("Alignment to ref:", self._lbl_alignment_delta)
         right_layout.addLayout(form)
+
+        self._plot_tabs = QtWidgets.QTabWidget()
 
         self._curvature_plot = pg.PlotWidget(plotItem=pg.PlotItem(enableMenu=False))
         self._curvature_plot.setMinimumWidth(340)
@@ -184,7 +236,18 @@ class CrackPathDialog(QtWidgets.QWidget):
         self._curvature_curve = self._curvature_plot.plot(
             pen=pg.mkPen(255, 170, 40, width=2)
         )
-        right_layout.addWidget(self._curvature_plot, stretch=1)
+        self._plot_tabs.addTab(self._curvature_plot, "Curvature")
+
+        self._local_tortuosity_plot = pg.PlotWidget(plotItem=pg.PlotItem(enableMenu=False))
+        self._local_tortuosity_plot.setMinimumWidth(340)
+        self._local_tortuosity_plot.setMinimumHeight(180)
+        self._local_tortuosity_plot.setLabel("bottom", "Arc length", units="µm")
+        self._local_tortuosity_plot.setLabel("left", "Local tortuosity", units="")
+        self._local_tortuosity_plot.showGrid(x=True, y=True, alpha=0.2)
+        self._local_tortuosity_curve = self._local_tortuosity_plot.plot(
+            pen=pg.mkPen(140, 220, 120, width=2)
+        )
+        self._plot_tabs.addTab(self._local_tortuosity_plot, "Local Tau")
 
         self._sweep_plot = pg.PlotWidget(plotItem=pg.PlotItem(enableMenu=False))
         self._sweep_plot.setMinimumWidth(340)
@@ -204,7 +267,24 @@ class CrackPathDialog(QtWidgets.QWidget):
             pen=pg.mkPen(255, 170, 40, width=1, style=QtCore.Qt.DashLine),
         )
         self._sweep_plot.addItem(self._current_threshold_line)
-        right_layout.addWidget(self._sweep_plot, stretch=1)
+        self._plot_tabs.addTab(self._sweep_plot, "Tau(s)")
+
+        self._orientation_plot = pg.PlotWidget(plotItem=pg.PlotItem(enableMenu=False))
+        self._orientation_plot.setMinimumWidth(340)
+        self._orientation_plot.setMinimumHeight(180)
+        self._orientation_plot.setLabel("bottom", "Orientation", units="deg")
+        self._orientation_plot.setLabel("left", "Count", units="")
+        self._orientation_plot.showGrid(x=True, y=True, alpha=0.2)
+        self._orientation_bars = pg.BarGraphItem(x=np.array([]), height=np.array([]), width=5.0, brush=(180, 120, 255, 180))
+        self._orientation_plot.addItem(self._orientation_bars)
+        self._orientation_ref_line = pg.InfiniteLine(
+            angle=90,
+            pen=pg.mkPen(255, 170, 40, width=1, style=QtCore.Qt.DashLine),
+        )
+        self._orientation_plot.addItem(self._orientation_ref_line)
+        self._plot_tabs.addTab(self._orientation_plot, "Orientation")
+
+        right_layout.addWidget(self._plot_tabs, stretch=1)
 
         button_row = QtWidgets.QHBoxLayout()
         self._btn_export_npz = QtWidgets.QPushButton("Export path data (NPZ)…")
@@ -230,11 +310,16 @@ class CrackPathDialog(QtWidgets.QWidget):
         self._resample_spin.valueChanged.connect(self._refresh_analysis)
         self._smoothing_spin.valueChanged.connect(self._refresh_analysis)
         self._propagation_axis_combo.currentIndexChanged.connect(self._refresh_analysis)
+        self._propagation_axis_combo.currentIndexChanged.connect(self._update_direction_controls)
+        self._propagation_angle_spin.valueChanged.connect(self._refresh_analysis)
         self._front_side_combo.currentIndexChanged.connect(self._refresh_analysis)
+        self._local_window_spin.valueChanged.connect(self._refresh_analysis)
+        self._reference_angle_spin.valueChanged.connect(self._refresh_analysis)
         self._btn_export_npz.clicked.connect(self._export_npz)
         self._btn_export_json.clicked.connect(self._export_json)
         self._btn_close.clicked.connect(self.close)
         self._update_contour_controls()
+        self._update_direction_controls()
 
     def set_threshold(self, value: float) -> None:
         """Update the threshold from an external linked dialog."""
@@ -290,16 +375,22 @@ class CrackPathDialog(QtWidgets.QWidget):
                 dy=self._dy,
                 separation=self._threshold,
                 propagation_axis=self._current_propagation_axis(),
+                propagation_angle_degrees=self._current_propagation_angle(),
                 front_side=self._current_front_side(),
                 method=self._current_method(),
                 contour_resample_step=float(self._resample_spin.value()),
                 contour_smoothing_window=int(self._smoothing_spin.value()),
+                local_window_length=float(self._local_window_spin.value()),
+                reference_angle_degrees=float(self._reference_angle_spin.value()),
             )
         except ValueError as exc:
             self._analysis_result = None
             self._threshold_sweep_result = None
             self._path_curve.setData([], [])
+            self._propagation_direction_curve.setData([], [])
+            self._propagation_direction_arrow.hide()
             self._curvature_curve.setData([], [])
+            self._local_tortuosity_curve.setData([], [])
             self._sweep_curve.setData([], [])
             self._open_view.setImage(np.zeros(self._diff.T.shape, dtype=np.uint8), autoLevels=False, levels=(0, 1))
             self._lbl_status.setText(str(exc))
@@ -308,16 +399,21 @@ class CrackPathDialog(QtWidgets.QWidget):
             self._lbl_path_projection.setText("—")
             self._lbl_tortuosity.setText("—")
             self._lbl_curvature.setText("—")
+            self._lbl_dominant_orientation.setText("—")
+            self._lbl_orientation_strength.setText("—")
+            self._lbl_alignment_delta.setText("—")
             self._current_threshold_line.setPos(self._threshold)
             return
 
         self._analysis_result = result
         open_image = result["open_mask"].T.astype(np.uint8)
         self._open_view.setImage(open_image, autoLevels=False, levels=(0, 1))
+        self._refresh_direction_overlay()
 
         path_points = np.asarray(result["path_points"], dtype=float)
         self._path_curve.setData(path_points[:, 0] / self._dx, path_points[:, 1] / self._dy)
         self._curvature_curve.setData(result["arc_length"], result["curvature"])
+        self._local_tortuosity_curve.setData(result["arc_length"], result["local_tortuosity"])
 
         abs_curvature = np.abs(np.asarray(result["curvature"], dtype=float))
         self._lbl_status.setText("OK")
@@ -326,7 +422,35 @@ class CrackPathDialog(QtWidgets.QWidget):
         self._lbl_path_projection.setText(f"{float(result['projected_length']):.3f} µm")
         self._lbl_tortuosity.setText(f"{float(result['tortuosity']):.5f}")
         self._lbl_curvature.setText(f"{float(np.mean(abs_curvature)):.6f} 1/µm")
+        self._lbl_dominant_orientation.setText(f"{float(result['dominant_orientation_degrees']):.2f}°")
+        self._lbl_orientation_strength.setText(f"{float(result['orientation_strength']):.4f}")
+        alignment_delta = result.get("alignment_delta_degrees")
+        self._lbl_alignment_delta.setText(
+            "—" if alignment_delta is None else f"{float(alignment_delta):.2f}°"
+        )
+        self._refresh_orientation_histogram()
         self._refresh_threshold_sweep()
+
+    def _refresh_orientation_histogram(self) -> None:
+        """Rebuild the histogram of local tangent orientations."""
+        if self._analysis_result is None:
+            self._orientation_bars.setOpts(x=np.array([]), height=np.array([]), width=5.0)
+            self._orientation_ref_line.setPos(float(self._reference_angle_spin.value()))
+            return
+
+        orientation = np.asarray(self._analysis_result["orientation_degrees"], dtype=float)
+        counts, edges = np.histogram(orientation, bins=np.linspace(0.0, 180.0, 19))
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        widths = np.diff(edges)
+        self._orientation_plot.removeItem(self._orientation_bars)
+        self._orientation_bars = pg.BarGraphItem(
+            x=centers,
+            height=counts.astype(float),
+            width=0.9 * widths,
+            brush=(180, 120, 255, 180),
+        )
+        self._orientation_plot.addItem(self._orientation_bars)
+        self._orientation_ref_line.setPos(float(self._reference_angle_spin.value()))
 
     def _refresh_threshold_sweep(self) -> None:
         """Recompute and redraw the tortuosity-versus-threshold sweep."""
@@ -338,6 +462,7 @@ class CrackPathDialog(QtWidgets.QWidget):
             dx=self._dx,
             dy=self._dy,
             propagation_axis=self._current_propagation_axis(),
+            propagation_angle_degrees=self._current_propagation_angle(),
             front_side=self._current_front_side(),
             method=self._current_method(),
             contour_resample_step=float(self._resample_spin.value()),
@@ -349,11 +474,75 @@ class CrackPathDialog(QtWidgets.QWidget):
         )
         self._current_threshold_line.setPos(self._threshold)
 
+    def _refresh_direction_overlay(self) -> None:
+        """Draw the current propagation direction over the left-hand map view."""
+        x_data, y_data = self._compute_direction_overlay_pixels()
+        self._propagation_direction_curve.setData(x_data, y_data)
+        if x_data.size >= 2:
+            delta_x = float(x_data[-1] - x_data[-2])
+            delta_y = float(y_data[-1] - y_data[-2])
+            display_angle = float(np.degrees(np.arctan2(delta_y, delta_x)))
+            self._propagation_direction_arrow.setPos(float(x_data[-1]), float(y_data[-1]))
+            # ArrowItem uses a left-pointing base orientation, so the display
+            # angle must be shifted by 180 degrees to match the overlay line.
+            self._propagation_direction_arrow.setStyle(angle=display_angle + 180.0)
+            self._propagation_direction_arrow.show()
+        else:
+            self._propagation_direction_arrow.hide()
+
+    def _compute_direction_overlay_pixels(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return a line spanning the view bounds along the propagation direction."""
+        rows, cols = self._diff.shape
+        if rows < 2 or cols < 2:
+            return np.empty((0,), dtype=float), np.empty((0,), dtype=float)
+
+        max_x = float(cols - 1) * self._dx
+        max_y = float(rows - 1) * self._dy
+        center_x = 0.5 * max_x
+        center_y = 0.5 * max_y
+        angle_radians = np.radians(self._current_propagation_angle_for_display_degrees())
+        direction = np.array([np.cos(angle_radians), np.sin(angle_radians)], dtype=float)
+        tol = 1e-9
+        candidates: list[tuple[float, np.ndarray]] = []
+
+        if abs(direction[0]) > tol:
+            for x_boundary in (0.0, max_x):
+                t = (x_boundary - center_x) / direction[0]
+                y_value = center_y + t * direction[1]
+                if -tol <= y_value <= max_y + tol:
+                    candidates.append((t, np.array([x_boundary, np.clip(y_value, 0.0, max_y)])))
+
+        if abs(direction[1]) > tol:
+            for y_boundary in (0.0, max_y):
+                t = (y_boundary - center_y) / direction[1]
+                x_value = center_x + t * direction[0]
+                if -tol <= x_value <= max_x + tol:
+                    candidates.append((t, np.array([np.clip(x_value, 0.0, max_x), y_boundary])))
+
+        if len(candidates) < 2:
+            return np.empty((0,), dtype=float), np.empty((0,), dtype=float)
+
+        candidates.sort(key=lambda item: item[0])
+        endpoints: list[np.ndarray] = []
+        for _t_value, point in candidates:
+            if not endpoints or not np.allclose(point, endpoints[-1], atol=1e-6):
+                endpoints.append(point)
+        if len(endpoints) < 2:
+            return np.empty((0,), dtype=float), np.empty((0,), dtype=float)
+
+        line_points = np.vstack((endpoints[0], endpoints[-1]))
+        return line_points[:, 0] / self._dx, line_points[:, 1] / self._dy
+
     def _update_contour_controls(self) -> None:
         """Enable contour-specific controls only for contour extraction."""
         is_contour = self._current_method() == "contour"
         self._resample_spin.setEnabled(is_contour)
         self._smoothing_spin.setEnabled(is_contour)
+
+    def _update_direction_controls(self) -> None:
+        """Enable the manual-angle editor only when that direction mode is selected."""
+        is_manual = self._current_propagation_axis() == "angle"
+        self._propagation_angle_spin.setEnabled(is_manual)
 
     def _current_method(self) -> str:
         """Return the selected crack-path extraction method."""
@@ -362,6 +551,21 @@ class CrackPathDialog(QtWidgets.QWidget):
     def _current_propagation_axis(self) -> str:
         """Return the currently selected propagation axis."""
         return str(self._propagation_axis_combo.currentData() or "x")
+
+    def _current_propagation_angle(self) -> float | None:
+        """Return the propagation angle when manual-direction mode is active."""
+        if self._current_propagation_axis() != "angle":
+            return None
+        return float(self._propagation_angle_spin.value())
+
+    def _current_propagation_angle_for_display_degrees(self) -> float:
+        """Return the active propagation direction angle in degrees."""
+        axis = self._current_propagation_axis()
+        if axis == "x":
+            return 0.0
+        if axis == "y":
+            return 90.0
+        return float(self._propagation_angle_spin.value())
 
     def _current_front_side(self) -> str:
         """Return the currently selected front side."""
@@ -384,6 +588,8 @@ class CrackPathDialog(QtWidgets.QWidget):
             arc_length=self._analysis_result["arc_length"],
             curvature=self._analysis_result["curvature"],
             tangent_angle=self._analysis_result["tangent_angle"],
+            local_tortuosity=self._analysis_result["local_tortuosity"],
+            orientation_degrees=self._analysis_result["orientation_degrees"],
             sweep_thresholds=(
                 self._threshold_sweep_result["thresholds"]
                 if self._threshold_sweep_result is not None
@@ -399,6 +605,7 @@ class CrackPathDialog(QtWidgets.QWidget):
             dy_um=self._dy,
             method=self._current_method(),
             propagation_axis=self._current_propagation_axis(),
+            propagation_angle_degrees=self._analysis_result.get("propagation_angle_degrees"),
             front_side=self._current_front_side(),
             contour_resample_step_um=self._analysis_result.get("contour_resample_step"),
             contour_smoothing_window=self._analysis_result.get("contour_smoothing_window"),
@@ -422,6 +629,7 @@ class CrackPathDialog(QtWidgets.QWidget):
             "threshold_um": round(self._threshold, 6),
             "method": self._current_method(),
             "propagation_axis": self._current_propagation_axis(),
+            "propagation_angle_degrees": self._analysis_result.get("propagation_angle_degrees"),
             "front_side": self._current_front_side(),
             "contour_resample_step_um": self._analysis_result.get("contour_resample_step"),
             "contour_smoothing_window": self._analysis_result.get("contour_smoothing_window"),
@@ -431,6 +639,14 @@ class CrackPathDialog(QtWidgets.QWidget):
             "path_point_count": int(len(self._analysis_result["path_points"])),
             "mean_abs_curvature_inv_um": round(float(np.mean(abs_curvature)), 8),
             "max_abs_curvature_inv_um": round(float(np.max(abs_curvature)), 8),
+            "dominant_orientation_degrees": round(float(self._analysis_result["dominant_orientation_degrees"]), 6),
+            "orientation_strength": round(float(self._analysis_result["orientation_strength"]), 8),
+            "alignment_delta_degrees": (
+                None
+                if self._analysis_result.get("alignment_delta_degrees") is None
+                else round(float(self._analysis_result["alignment_delta_degrees"]), 6)
+            ),
+            "local_window_length_um": round(float(self._analysis_result["local_window_length"]), 6),
             "threshold_sweep_samples": (
                 int(len(self._threshold_sweep_result["thresholds"]))
                 if self._threshold_sweep_result is not None

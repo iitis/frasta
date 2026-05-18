@@ -37,7 +37,7 @@ This creates:
 - `crack_path_realistic_demo.npz`
 
 Each file also gets a companion `.json` manifest containing the recommended
-threshold, propagation axis, front side, and expected crack-path metrics.
+threshold, propagation direction, front side, and expected crack-path metrics.
 
 ### Suggested checks
 
@@ -45,7 +45,7 @@ threshold, propagation axis, front side, and expected crack-path metrics.
 2. Launch `Tools -> Contact map analysis...`.
 3. Select `Surface_A` and `Surface_B`.
 4. Set the threshold from the JSON manifest, typically `9 µm`.
-5. Match the propagation axis and front side from the same JSON file.
+5. Match the propagation direction and front side from the same JSON file.
 6. Compare the GUI values for:
    - `Effective length`
    - `Projected length`

@@ -153,8 +153,9 @@ height maps. Invalid pixels remain excluded from the analysis.
 The current crack-path module supports two baseline front definitions:
 
 - **First-open-pixel**: for each line orthogonal to the nominal propagation
-  axis (`X` or `Y`), select the first open pixel observed from the chosen side
-  (`min` or `max`).
+  direction, select the first open pixel observed from the chosen side
+  (`min` or `max`). The propagation direction can currently be defined by the
+  `X` axis, the `Y` axis, or a user-supplied in-plane angle.
 - **Contour**: trace the open/contact boundary from the binary open-region
   mask. Before metrics are computed, the contour path is reordered along the
   propagation axis, collapsed to one transverse value per propagation
@@ -165,10 +166,22 @@ The resulting polyline is then evaluated using:
 
 - effective path length `L_eff`, computed as the polyline arc length,
 - projected length `L_proj`, computed as the span along the nominal
-  propagation axis,
+  propagation direction,
 - tortuosity `tau = L_eff / L_proj`,
 - local curvature `kappa(s) = d theta / d s`, estimated from the tangent-angle
-  variation along the cumulative arc-length coordinate.
+  variation along the cumulative arc-length coordinate,
+- local tortuosity `tau_local(s)` from a sliding window along the path,
+- local tangent orientation `theta(s)` and its axial histogram.
+
+For orientation analysis, angles are treated as axial rather than directional:
+an orientation of `0°` is equivalent to `180°`. The current implementation
+reports a dominant axial orientation and an optional alignment difference to a
+user-supplied reference angle such as a build or hatch direction.
+
+The propagation direction and the reference angle play different roles. The
+propagation direction affects path ordering and projected-length calculations.
+The reference angle is only used to interpret the resulting orientation
+distribution.
 
 This MVP definition does not yet resolve branching cracks, closed loops,
 multiple disconnected open regions, or alternative front definitions such as

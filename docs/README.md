@@ -12,6 +12,7 @@ This directory contains the main user-facing and developer-facing guides.
 
 - [Advanced Processing Guide](ADVANCED_PROCESSING.md) - when to use filtering, leveling, transforms, and registration helpers
 - [GUI Integration Guide](GUI_INTEGRATION.md) - where the advanced-processing tools appear in the GUI and how they affect scans
+- `crack_path_analysis_pl.tex` - szczegolowy polskojezyczny dokument LaTeX opisujacy aktualny modul crack-path analysis
 
 ## Related material outside this folder
 
