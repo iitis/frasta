@@ -104,6 +104,13 @@ The sidebar groups controls into:
 - **Reference** - colormap, range, and clipping controls for the reference surface,
 - **Adjusted** - matching controls for the adjusted surface, shown only when a second surface is available.
 
+Both the 2D scan tab and the experimental 3D viewer now also expose a manual
+**Color curve** control. This control does not change the numeric min/max
+range. Instead it stretches the low and high ends of the selected colormap and
+compresses the middle colors, which is useful when a metrology-style palette
+should spend more visual distance in dark-blue and red regions without clipping
+or percentile-based remapping.
+
 To keep the sidebar narrow enough for the 3D viewport, the reference and
 adjusted range controls use a compact vertical `Min` / `Max` arrangement
 instead of two wide spin boxes in one row.
@@ -157,6 +164,30 @@ adapter rather than being reimplemented separately in each viewer. The scan
 data model also carries a dedicated `orientation` enum property so future
 import-time or per-scan orientation correction can be introduced from one
 source of truth without changing each individual view path.
+
+The contact-map dialog now opens a linked **Crack-path analysis** window rather
+than embedding all crack-path controls directly in the same widget. This keeps
+the contact-threshold workflow lightweight while still preserving a direct
+relationship between the two analyses.
+
+The linked crack-path window reuses the same aligned scan pair and receives
+threshold updates from the contact-map dialog while both windows remain open.
+It currently supports two extraction methods:
+- `first_open_pixel` - one front point per scanline or row,
+- `contour` - front traced from the open/contact contour.
+
+For the `contour` method, the dialog also exposes:
+- a constant resampling step along the propagation axis,
+- a transverse smoothing-window length used before curvature is computed.
+
+The crack-path window reports:
+- effective path length,
+- projected length,
+- tortuosity,
+- local-curvature plot,
+- a threshold-sweep `tau(s)` plot showing how tortuosity changes across the
+  valid difference-map range for the currently selected method and contour
+  post-processing settings.
 
 ### Toolbar
 

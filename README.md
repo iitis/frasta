@@ -72,6 +72,7 @@ The usual GUI workflow is:
    - Use the mouse wheel over the histogram to zoom its visible value range.
    - Drag the histogram background horizontally to pan the zoomed range.
    - Use the manual `Min` / `Max` fields beside the histogram for precise threshold values.
+   - Use the manual `Color curve` control when you want endpoint colors such as dark blue and red to span a larger part of the visible value range without changing the numeric min/max limits.
    - Use the `Hide below Min` and `Hide above Max` toggles to choose independently whether low and high out-of-range values should be masked or rendered with boundary colors.
    - Choose grayscale or a false-color palette directly from the main toolbar.
    - Fill missing data if necessary.
@@ -85,7 +86,8 @@ The usual GUI workflow is:
 4. Align two opposing fracture surfaces using interactive translation and rotation.
    - The comparison window can prefill manual alignment with a fast ICP-based translation+rotation estimate.
 5. Place cross-sectional profiles to inspect local deviations and contacts.
-6. Export aligned data, profiles, and measurements for further analysis or documentation.
+6. Use `Tools -> Contact map analysis...` to inspect the difference map and binary contact/open classification, then open the linked crack-path window when you want a separate tortuosity and curvature view for the same thresholded scan pair.
+7. Export aligned data, profiles, and measurements for further analysis or documentation.
 
 If you want a guided walkthrough with demo datasets, start with the
 [Quick Start Guide](docs/QUICK_START_GUI.md).
@@ -115,6 +117,9 @@ FRASTA-toolbox includes advanced processing algorithms for surface preparation a
 - **Minimal roughness summaries** - basic amplitude parameters for grids
   (`Sa`, `Sq`, `Sz`) and extracted profiles (`Ra`, `Rq`, `Rz`) available from
   the Python processing API and from lightweight GUI summary dialogs
+- **Crack-path tortuosity (MVP)** - basic crack-opening classification,
+  first-open-pixel front extraction, effective path length, projected length,
+  tortuosity, and local curvature for aligned surface pairs
 
 ## Documentation map
 

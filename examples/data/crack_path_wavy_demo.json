@@ -1,0 +1,22 @@
+{
+  "dataset": "crack_path_wavy_demo",
+  "grid_shape": [
+    96,
+    128
+  ],
+  "dx_um": 4.0,
+  "dy_um": 4.0,
+  "description": "Wavy front. Use propagation axis X and front side Min. Expected tortuosity is reproducibly greater than 1.",
+  "threshold_um": 9.0,
+  "propagation_axis": "x",
+  "front_side": "min",
+  "expected_metrics": {
+    "path_method": "first_open_pixel",
+    "path_point_count": 128,
+    "effective_length_um": 780.42102,
+    "projected_length_um": 508.0,
+    "tortuosity": 1.53626185,
+    "mean_abs_curvature_inv_um": 0.04674279,
+    "max_abs_curvature_inv_um": 0.17381283
+  }
+}

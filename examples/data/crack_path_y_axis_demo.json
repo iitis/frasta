@@ -1,0 +1,22 @@
+{
+  "dataset": "crack_path_y_axis_demo",
+  "grid_shape": [
+    96,
+    128
+  ],
+  "dx_um": 4.0,
+  "dy_um": 4.0,
+  "description": "Front extracted one row at a time. Use propagation axis Y and front side Min to verify the alternate orientation path.",
+  "threshold_um": 9.0,
+  "propagation_axis": "y",
+  "front_side": "min",
+  "expected_metrics": {
+    "path_method": "first_open_pixel",
+    "path_point_count": 96,
+    "effective_length_um": 558.440733,
+    "projected_length_um": 380.0,
+    "tortuosity": 1.46958088,
+    "mean_abs_curvature_inv_um": 0.02473755,
+    "max_abs_curvature_inv_um": 0.1159119
+  }
+}

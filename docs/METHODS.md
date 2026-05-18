@@ -128,6 +128,53 @@ profile angles and angular differences between the surfaces.
 Profile data, selected points, contact maps, and related analysis metadata can
 be exported for later inspection.
 
+## Crack-Path Tortuosity (MVP)
+
+The processing API now includes a first crack-path tortuosity workflow for
+aligned fracture surfaces. It is intentionally simple and deterministic so that
+its behavior is easy to validate on synthetic datasets before more advanced
+front-tracing methods are introduced.
+
+For two aligned surfaces, the current implementation computes the difference map
+
+```text
+D(x, y) = H_ref(x, y) - H_adj(x, y)
+```
+
+and classifies a pixel as open when
+
+```text
+D(x, y) >= s
+```
+
+where `s` is a user-selected separation threshold in the same unit as the
+height maps. Invalid pixels remain excluded from the analysis.
+
+The current crack-path module supports two baseline front definitions:
+
+- **First-open-pixel**: for each line orthogonal to the nominal propagation
+  axis (`X` or `Y`), select the first open pixel observed from the chosen side
+  (`min` or `max`).
+- **Contour**: trace the open/contact boundary from the binary open-region
+  mask. Before metrics are computed, the contour path is reordered along the
+  propagation axis, collapsed to one transverse value per propagation
+  coordinate, resampled to a constant step, and optionally smoothed in the
+  transverse direction.
+
+The resulting polyline is then evaluated using:
+
+- effective path length `L_eff`, computed as the polyline arc length,
+- projected length `L_proj`, computed as the span along the nominal
+  propagation axis,
+- tortuosity `tau = L_eff / L_proj`,
+- local curvature `kappa(s) = d theta / d s`, estimated from the tangent-angle
+  variation along the cumulative arc-length coordinate.
+
+This MVP definition does not yet resolve branching cracks, closed loops,
+multiple disconnected open regions, or alternative front definitions such as
+contour-based tracing or skeletonization. Those are planned extensions rather
+than part of the current baseline method.
+
 ## Minimal Roughness Summaries
 
 The processing API includes a deliberately small set of amplitude-parameter

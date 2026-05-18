@@ -6,7 +6,9 @@ from .colormaps import (
     get_colormap,
     get_lookup_table,
     get_gradient_brush,
+    get_gradient_stops,
     get_brushes_for_values,
+    remap_normalized_colormap_values,
 )
 
 __all__ = [
@@ -15,5 +17,7 @@ __all__ = [
     'get_colormap',
     'get_lookup_table',
     'get_gradient_brush',
+    'get_gradient_stops',
     'get_brushes_for_values',
+    'remap_normalized_colormap_values',
 ]

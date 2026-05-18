@@ -23,6 +23,56 @@ available as standalone Python scripts in this directory.
 
 ---
 
+## Dataset 3 – Crack-path tortuosity demos
+
+Generate the dedicated crack-path datasets:
+```
+python examples/data/generate_crack_path_demo_data.py
+```
+
+This creates:
+- `crack_path_straight_demo.npz`
+- `crack_path_wavy_demo.npz`
+- `crack_path_y_axis_demo.npz`
+- `crack_path_realistic_demo.npz`
+
+Each file also gets a companion `.json` manifest containing the recommended
+threshold, propagation axis, front side, and expected crack-path metrics.
+
+### Suggested checks
+
+1. Open one of the NPZ files from `examples/data/`.
+2. Launch `Tools -> Contact map analysis...`.
+3. Select `Surface_A` and `Surface_B`.
+4. Set the threshold from the JSON manifest, typically `9 µm`.
+5. Match the propagation axis and front side from the same JSON file.
+6. Compare the GUI values for:
+   - `Effective length`
+   - `Projected length`
+   - `Tortuosity`
+   - `Mean |curvature|`
+
+### Expected behavior by dataset
+
+- `crack_path_straight_demo`: straight front, `tortuosity = 1`.
+- `crack_path_wavy_demo`: undulating front, `tortuosity > 1`.
+- `crack_path_y_axis_demo`: same workflow, but with propagation along `Y`.
+- `crack_path_realistic_demo`: larger, less idealized front with gradual
+  opening, local bridges, sparse holes, and stronger method sensitivity than
+  the simpler control cases.
+
+### Recommended first pass for `crack_path_realistic_demo`
+
+1. Start with `first_open_pixel`, threshold `12 µm`, axis `X`, side `Min`.
+2. Inspect whether the current threshold falls on a stable `tau(s)` plateau.
+3. Switch to `contour`, then try:
+   - `Resample = 4 µm`
+   - `Smooth win = 5` or `7`
+4. Compare whether the contour path remains close to the first-open-pixel
+   estimate or becomes strongly threshold-sensitive.
+
+---
+
 ## Dataset 1 – Tilt correction (`fracture_tilt_demo.npz`)
 
 **Scenario.**  Two optical-profilometer scans of conjugate fracture faces.

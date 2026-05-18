@@ -2,6 +2,7 @@
 
 from .about import AboutDialog
 from .contact_map_dialog import ContactMapDialog
+from .crack_path_dialog import CrackPathDialog
 from .overlay_viewer import OverlayViewer
 from .roi_dialog import ROIDialog
 from .scan_info_dialog import ScanInfoDialog
@@ -15,6 +16,7 @@ from .processing_dialog import (
 __all__ = [
     'AboutDialog',
     'ContactMapDialog',
+    'CrackPathDialog',
     'OverlayViewer',
     'ROIDialog',
     'ScanInfoDialog',

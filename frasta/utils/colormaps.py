@@ -57,35 +57,107 @@ def get_colormap(name: str | None):
     return pg.colormap.get(name)
 
 
-def get_lookup_table(name: str, n: int = 256) -> np.ndarray:
-    """Return a lookup table for 2D image display."""
+def remap_normalized_colormap_values(values, curve_strength: float = 0.0) -> np.ndarray:
+    """Remap normalized colormap coordinates with an endpoint-stretch curve.
+
+    The manual curve preserves ``0 -> 0`` and ``1 -> 1`` while stretching the
+    low/high color regions and compressing the middle of the palette as the
+    strength increases. This mirrors the metrology-style visual tuning often
+    used to make endpoint colors span a larger value interval without changing
+    the numeric data range itself.
+
+    The mapping is implemented as a symmetric power response around ``0.5``.
+    Compared with the previous hyperbolic tangent formulation, the power law
+    yields a noticeably stronger endpoint stretch, which better matches the
+    manual metrology-style tuning expected in the viewers.
+
+    Args:
+        values: Normalized coordinates in the ``[0, 1]`` interval.
+        curve_strength: Non-negative response strength. ``0`` keeps linear
+            mapping, larger values progressively stretch endpoint colors.
+
+    Returns:
+        ``numpy.ndarray`` of remapped normalized coordinates.
+    """
+    normalized = np.clip(np.asarray(values, dtype=float), 0.0, 1.0)
+    strength = max(0.0, float(curve_strength))
+    if strength <= 1e-9:
+        return normalized
+
+    gamma = 1.0 / (1.0 + strength)
+    centered = 2.0 * normalized - 1.0
+    remapped = np.sign(centered) * np.power(np.abs(centered), gamma)
+    return np.clip(0.5 + 0.5 * remapped, 0.0, 1.0)
+
+
+def get_lookup_table(name: str, n: int = 256, curve_strength: float = 0.0) -> np.ndarray:
+    """Return a lookup table for 2D image display.
+
+    Args:
+        name: Colormap name.
+        n: Number of LUT entries.
+        curve_strength: Non-negative endpoint-stretch response strength.
+    """
     cmap = get_colormap(name)
     if cmap is None:
         raise ValueError("Colormap name must not be None")
-    return cmap.getLookupTable(0.0, 1.0, n)
+    sample_points = remap_normalized_colormap_values(
+        np.linspace(0.0, 1.0, max(2, int(n)), dtype=float),
+        curve_strength=curve_strength,
+    )
+    return cmap.map(sample_points, mode="byte")
 
 
-def get_gradient_brush(name: str | None):
+def get_gradient_stops(
+    name: str | None,
+    samples: int = 64,
+    curve_strength: float = 0.0,
+) -> list[tuple[float, tuple[int, int, int, int]]]:
+    """Return evenly sampled gradient stops for Qt gradients and exporters.
+
+    Args:
+        name: Colormap name. ``None`` falls back to grayscale.
+        samples: Number of evenly spaced stop positions to generate.
+        curve_strength: Non-negative endpoint-stretch response strength.
+
+    Returns:
+        List of ``(position, rgba)`` tuples with positions in ``[0, 1]``.
+    """
+    resolved_samples = max(2, int(samples))
+    positions = np.linspace(0.0, 1.0, resolved_samples, dtype=float)
+    if name is None or str(name).lower() in ("gray", "grey", "none"):
+        rgba_table = np.zeros((resolved_samples, 4), dtype=np.uint8)
+        gray = np.round(positions * 255.0).astype(np.uint8, copy=False)
+        rgba_table[:, 0] = gray
+        rgba_table[:, 1] = gray
+        rgba_table[:, 2] = gray
+        rgba_table[:, 3] = 255
+    else:
+        rgba_table = get_lookup_table(str(name), resolved_samples, curve_strength=curve_strength)
+    return [
+        (float(position), tuple(int(channel) for channel in rgba))
+        for position, rgba in zip(positions, np.atleast_2d(rgba_table))
+    ]
+
+
+def get_gradient_brush(name: str | None, curve_strength: float = 0.0):
     """Return a horizontal gradient brush matching the selected colormap."""
     if name is None or str(name).lower() in ("gray", "grey", "none"):
         return pg.mkBrush(150, 150, 150, 150)
 
-    cmap = get_colormap(str(name))
-    if cmap is None:
+    stops = get_gradient_stops(name, samples=64, curve_strength=curve_strength)
+    if not stops:
         return pg.mkBrush(150, 150, 150, 150)
 
     gradient = QtGui.QLinearGradient(0.0, 0.0, 1.0, 0.0)
     gradient.setCoordinateMode(QtGui.QGradient.ObjectBoundingMode)
-    positions, colors = cmap.getStops(mode="byte")
-    stops = []
-    for pos, color in zip(positions, colors):
-        rgba = tuple(int(channel) for channel in color)
-        stops.append((float(pos), QtGui.QColor(*rgba)))
-    gradient.setStops(stops)
+    gradient.setStops(
+        [(float(pos), QtGui.QColor(*rgba)) for pos, rgba in stops]
+    )
     return QtGui.QBrush(gradient)
 
 
-def get_brushes_for_values(name: str | None, values, alpha: int = 220):
+def get_brushes_for_values(name: str | None, values, alpha: int = 220, curve_strength: float = 0.0):
     """Return per-value brushes sampled from the selected colormap.
 
     Args:
@@ -93,6 +165,7 @@ def get_brushes_for_values(name: str | None, values, alpha: int = 220):
             a neutral brush repeated for every value.
         values (array-like): Normalized values in the ``[0, 1]`` interval.
         alpha (int): Opacity channel applied to RGB colormaps.
+        curve_strength (float): Non-negative endpoint-stretch response strength.
 
     Returns:
         list: Sequence of ``QBrush`` instances suitable for ``BarGraphItem``.
@@ -108,7 +181,8 @@ def get_brushes_for_values(name: str | None, values, alpha: int = 220):
     if cmap is None:
         return [pg.mkBrush(150, 150, 150, 180) for _ in range(values.size)]
 
-    colors = cmap.map(np.clip(values, 0.0, 1.0), mode="byte")
+    remapped_values = remap_normalized_colormap_values(values, curve_strength=curve_strength)
+    colors = cmap.map(remapped_values, mode="byte")
     brushes = []
     for color in np.atleast_2d(colors):
         if len(color) >= 4:

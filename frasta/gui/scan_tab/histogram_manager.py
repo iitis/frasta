@@ -39,12 +39,14 @@ class HistogramManager:
         self._data_max = None
         self.hide_below_range = True
         self.hide_above_range = True
+        self.colormap_curve_strength = 0.0
     
     def update_histogram(
         self,
         grid: np.ndarray,
         was_data_negated: bool = False,
         colormap_name: str = "Gray",
+        colormap_curve_strength: float = 0.0,
     ):
         """Update histogram display with new data.
         
@@ -52,12 +54,14 @@ class HistogramManager:
             grid (np.ndarray): Grid data to display
             was_data_negated (bool): Whether data was recently inverted
             colormap_name (str): Active display colormap for matching histogram fill
+            colormap_curve_strength (float): Manual endpoint-stretch strength
         """
         logger.debug(f"update_histogram called: grid is None? {grid is None}")
         if grid is None:
             logger.warning("update_histogram: grid is None!")
             return
         self.current_colormap_name = colormap_name
+        self.colormap_curve_strength = max(0.0, float(colormap_curve_strength))
         
         data = grid[~np.isnan(grid)]
         if data.size == 0:
@@ -248,7 +252,11 @@ class HistogramManager:
         active_mask = (centers >= vmin) & (centers <= vmax)
         if span > 0.0 and np.any(active_mask):
             normalized = (centers[active_mask] - vmin) / span
-            colored_brushes = get_brushes_for_values(self.current_colormap_name, normalized)
+            colored_brushes = get_brushes_for_values(
+                self.current_colormap_name,
+                normalized,
+                curve_strength=self.colormap_curve_strength,
+            )
             color_iter = iter(colored_brushes)
             for center, is_active in zip(centers, active_mask):
                 if is_active:

@@ -49,6 +49,23 @@ python examples/data/generate_synthetic_al3d.py
 
 ---
 
+### Crack-path demo datasets
+Deterministic NPZ datasets for the contact-map and crack-path workflow:
+- `data/crack_path_straight_demo.npz`
+- `data/crack_path_wavy_demo.npz`
+- `data/crack_path_y_axis_demo.npz`
+- `data/crack_path_realistic_demo.npz`
+
+Each file has a companion JSON manifest with the recommended threshold,
+propagation axis, front side, and expected tortuosity metrics.
+
+Generate them with:
+```bash
+python examples/data/generate_crack_path_demo_data.py
+```
+
+---
+
 ## Quick Start
 
 ```bash

@@ -247,6 +247,49 @@ aligned, xi, yi, px_x, px_y = apply_registration(
 
 ---
 
+### 4. Crack-path analysis (`crack_path.py`)
+
+The crack-path helpers provide a lightweight baseline workflow for aligned
+surface pairs. The current implementation is meant as a stable MVP rather than
+the final research-grade front-tracing solution.
+
+```python
+from frasta.processing import analyze_crack_path
+
+result = analyze_crack_path(
+    surface_a,
+    surface_b,
+    dx=surface_a.dx,
+    dy=surface_a.dy,
+    separation=2.0,
+    propagation_axis="x",
+    front_side="min",
+)
+
+print(result["effective_length"])
+print(result["projected_length"])
+print(result["tortuosity"])
+```
+
+**Current methods:**
+- compute `D = H_ref - H_adj`,
+- classify open pixels where `D >= separation`,
+- extract the front either as the first open pixel in each column or row, or
+  as the open/contact contour,
+- for the contour method, orient the path along the propagation axis,
+  resample it to a constant step, and optionally smooth the transverse
+  coordinate before curvature is computed,
+- compute path length, projected length, tortuosity, and local curvature,
+- optionally evaluate `tau(s)` over a threshold sweep to inspect method
+  stability.
+
+**Use cases:**
+- rapid synthetic validation of crack-path metrics,
+- first-pass comparison between aligned fracture-surface pairs,
+- baseline API that can later be extended with contour or skeleton methods.
+
+---
+
 ## Typical Workflows
 
 ### Workflow 1: Cleaning raw data

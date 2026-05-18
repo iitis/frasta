@@ -1,0 +1,22 @@
+{
+  "dataset": "crack_path_straight_demo",
+  "grid_shape": [
+    96,
+    128
+  ],
+  "dx_um": 4.0,
+  "dy_um": 4.0,
+  "description": "Straight front. Use propagation axis X and front side Min. Expected tortuosity is exactly 1.",
+  "threshold_um": 9.0,
+  "propagation_axis": "x",
+  "front_side": "min",
+  "expected_metrics": {
+    "path_method": "first_open_pixel",
+    "path_point_count": 128,
+    "effective_length_um": 508.0,
+    "projected_length_um": 508.0,
+    "tortuosity": 1.0,
+    "mean_abs_curvature_inv_um": 0.0,
+    "max_abs_curvature_inv_um": 0.0
+  }
+}

@@ -138,6 +138,39 @@ params_fine = auto_register_surfaces(surf1, aligned, method='icp')
 
 ---
 
+## Crack-Path Tortuosity
+
+```python
+from frasta.processing import analyze_crack_path
+
+result = analyze_crack_path(
+    surf1,
+    surf2,
+    dx=surf1.dx,
+    dy=surf1.dy,
+    separation=2.0,
+    propagation_axis="x",
+    front_side="min",
+)
+
+tau = result["tortuosity"]
+path = result["path_points"]
+curvature = result["curvature"]
+```
+
+Current MVP method:
+- builds `D = H_ref - H_adj`,
+- marks open pixels where `D >= separation`,
+- extracts the path either from the first open pixel per scanline or from the
+  open/contact contour,
+- reports effective length, projected length, tortuosity, and local curvature.
+
+The GUI crack-path window also plots `tau(s)` across the valid threshold range
+so you can see whether the reported tortuosity is stable or highly threshold-
+sensitive for the selected extraction method.
+
+---
+
 ## Parameter Hints
 
 ### Bilateral filter

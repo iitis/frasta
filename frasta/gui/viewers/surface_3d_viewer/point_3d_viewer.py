@@ -28,7 +28,7 @@ from ...colorbar_common import (
 )
 from ...colorbar_renderer import ColorbarRenderConfig, ExportColorbarRenderer
 from ...workers.mesh_geometry_worker import MeshGeometryWorker
-from ....utils import get_colormap
+from ....utils import get_gradient_stops
 
 import logging
 
@@ -193,10 +193,20 @@ class Point3DViewer(QtWidgets.QWidget):
         self.spin_hi_ref = QtWidgets.QDoubleSpinBox()
         self.spin_lo_adj = QtWidgets.QDoubleSpinBox()
         self.spin_hi_adj = QtWidgets.QDoubleSpinBox()
+        self.spin_curve_ref = QtWidgets.QDoubleSpinBox()
+        self.spin_curve_adj = QtWidgets.QDoubleSpinBox()
         for spinbox in (self.spin_lo_ref, self.spin_hi_ref, self.spin_lo_adj, self.spin_hi_adj):
             spinbox.setDecimals(6)
             spinbox.setRange(-1e12, 1e12)
             spinbox.setEnabled(False)
+        for spinbox in (self.spin_curve_ref, self.spin_curve_adj):
+            spinbox.setDecimals(2)
+            spinbox.setRange(0.0, 8.0)
+            spinbox.setSingleStep(0.25)
+            spinbox.setValue(0.0)
+            spinbox.setToolTip(
+                "Stretch low and high colormap regions without changing the numeric range."
+            )
 
         self.spin_point_size = QtWidgets.QDoubleSpinBox()
         self.spin_point_size.setDecimals(1)
@@ -315,6 +325,7 @@ class Point3DViewer(QtWidgets.QWidget):
         reference_range_layout.addRow("Min:", self.spin_lo_ref)
         reference_range_layout.addRow("Max:", self.spin_hi_ref)
         reference_layout.addRow("Range:", reference_range_widget)
+        reference_layout.addRow("Curve:", self.spin_curve_ref)
         reference_layout.addRow("", self.chk_auto_ref)
         reference_layout.addRow("", self.chk_hide_below_ref)
         reference_layout.addRow("", self.chk_hide_above_ref)
@@ -332,6 +343,7 @@ class Point3DViewer(QtWidgets.QWidget):
         adjusted_range_layout.addRow("Min:", self.spin_lo_adj)
         adjusted_range_layout.addRow("Max:", self.spin_hi_adj)
         adjusted_layout.addRow("Range:", adjusted_range_widget)
+        adjusted_layout.addRow("Curve:", self.spin_curve_adj)
         adjusted_layout.addRow("", self.chk_auto_adj)
         adjusted_layout.addRow("", self.chk_link_ranges)
         adjusted_layout.addRow("", self.chk_hide_below_adj)
@@ -364,6 +376,8 @@ class Point3DViewer(QtWidgets.QWidget):
         self.button_background_reset.clicked.connect(self.gl_widget.reset_background_color)
         self.combo_cmap_ref.currentIndexChanged.connect(lambda _: self._refresh_clouds())
         self.combo_cmap_adj.currentIndexChanged.connect(lambda _: self._refresh_clouds())
+        self.spin_curve_ref.valueChanged.connect(lambda _: self._refresh_clouds())
+        self.spin_curve_adj.valueChanged.connect(lambda _: self._refresh_clouds())
         self.chk_auto_ref.toggled.connect(self._auto_ref_toggled)
         self.chk_auto_adj.toggled.connect(self._auto_adj_toggled)
         self.chk_link_ranges.toggled.connect(self._link_toggled)
@@ -439,7 +453,7 @@ class Point3DViewer(QtWidgets.QWidget):
         adj_range = self._get_value_range("adj", self._adj_grid)
         self.gl_widget.set_cloud_style(
             "adj",
-            self._build_lut(self.combo_cmap_adj),
+            self._build_lut("adj", self.combo_cmap_adj),
             adj_range,
             z_offset=self._separation,
             visible=self.checkbox_adj.isChecked(),
@@ -545,7 +559,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self._apply_geometry("ref", stride)
         self.gl_widget.set_cloud_style(
             "ref",
-            self._build_lut(self.combo_cmap_ref),
+            self._build_lut("ref", self.combo_cmap_ref),
             ref_range,
             visible=self.checkbox_ref.isChecked(),
             hide_below_range=self.chk_hide_below_ref.isChecked(),
@@ -562,7 +576,7 @@ class Point3DViewer(QtWidgets.QWidget):
         self._apply_geometry("adj", stride)
         self.gl_widget.set_cloud_style(
             "adj",
-            self._build_lut(self.combo_cmap_adj),
+            self._build_lut("adj", self.combo_cmap_adj),
             adj_range,
             visible=self.checkbox_adj.isChecked(),
             hide_below_range=self.chk_hide_below_adj.isChecked(),
@@ -896,9 +910,19 @@ class Point3DViewer(QtWidgets.QWidget):
         text = combo.currentText()
         return None if text == "None" else text
 
-    def _build_lut(self, combo: QtWidgets.QComboBox) -> np.ndarray:
+    def _get_curve_strength(self, which: str) -> float:
+        """Return the manual endpoint-stretch strength for one surface."""
+        if which == "adj":
+            return max(0.0, float(self.spin_curve_adj.value()))
+        return max(0.0, float(self.spin_curve_ref.value()))
+
+    def _build_lut(self, which: str, combo: QtWidgets.QComboBox) -> np.ndarray:
         """Build a compact LUT for the currently selected colormap."""
-        return build_colormap_lut(self._selected_colormap(combo), size=256)
+        return build_colormap_lut(
+            self._selected_colormap(combo),
+            size=256,
+            curve_strength=self._get_curve_strength(which),
+        )
 
     def _sync_range_widgets(self, which: str, grid: np.ndarray) -> None:
         """Update range spinboxes from the effective data range."""
@@ -2043,7 +2067,10 @@ class Point3DViewer(QtWidgets.QWidget):
                 width=width,
                 height=height,
                 title_text=f"{title} [{unit_label}]",
-                gradient_stops=self._build_colorbar_gradient_stops(cmap_name),
+                gradient_stops=self._build_colorbar_gradient_stops(
+                    cmap_name,
+                    curve_strength=self._get_curve_strength(which),
+                ),
                 color_vmin=color_vmin,
                 color_vmax=color_vmax,
                 scale_vmin=scale_vmin,
@@ -2101,36 +2128,22 @@ class Point3DViewer(QtWidgets.QWidget):
             return np.empty(0, dtype=np.float32)
         return finite_values[(finite_values >= vmin) & (finite_values <= vmax)].astype(np.float32, copy=False)
 
-    def _build_colorbar_gradient_stops(self, cmap_name: str) -> list[tuple[float, QtGui.QColor]]:
+    def _build_colorbar_gradient_stops(
+        self,
+        cmap_name: str,
+        curve_strength: float = 0.0,
+    ) -> list[tuple[float, QtGui.QColor]]:
         """Build gradient stops for the shared colorbar renderer."""
         if cmap_name == "None":
             color = QtGui.QColor.fromRgbF(0.85, 0.85, 0.85, 1.0)
             return [(0.0, color), (1.0, color)]
-        if cmap_name == "RG":
-            return [
-                (0.0, QtGui.QColor(255, 0, 0)),
-                (1.0, QtGui.QColor(0, 255, 0)),
-            ]
-        if cmap_name == "B&W":
-            return [
-                (0.0, QtGui.QColor(0, 0, 0)),
-                (1.0, QtGui.QColor(255, 255, 255)),
-            ]
-
-        cmap = get_colormap(None if cmap_name == "None" else cmap_name)
-        if cmap is None:
-            return [
-                (0.0, QtGui.QColor(0, 0, 0)),
-                (1.0, QtGui.QColor(255, 255, 255)),
-            ]
-
-        positions, colors = cmap.getStops(mode="byte")
         return [
-            (
-                float(position),
-                QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
+            (float(position), QtGui.QColor(*rgba))
+            for position, rgba in get_gradient_stops(
+                None if cmap_name == "None" else cmap_name,
+                samples=64,
+                curve_strength=curve_strength,
             )
-            for position, rgba in zip(positions, colors)
         ]
 
     def _draw_colorbar_histogram(

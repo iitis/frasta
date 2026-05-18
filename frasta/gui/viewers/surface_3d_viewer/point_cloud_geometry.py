@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...orientation import points_to_3d_world
-from ....utils import get_colormap
+from ....utils import get_colormap, remap_normalized_colormap_values
 
 
 def build_point_positions_from_grid(
@@ -435,18 +435,24 @@ def compute_stride_for_mesh_budget(
 def build_colormap_lut(
     colormap: str | None,
     size: int = 256,
+    curve_strength: float = 0.0,
 ) -> np.ndarray:
     """Build a compact RGBA lookup table for GPU color mapping.
 
     Args:
         colormap: Colormap name or ``None`` for a constant neutral color.
         size: Number of LUT samples.
+        curve_strength: Non-negative endpoint-stretch response strength.
 
     Returns:
         RGBA LUT with shape ``(size, 4)`` and dtype ``uint8``.
     """
     size = max(2, int(size))
     sample_points = np.linspace(0.0, 1.0, size, dtype=np.float32)
+    remapped_points = remap_normalized_colormap_values(
+        sample_points,
+        curve_strength=curve_strength,
+    ).astype(np.float32, copy=False)
 
     if colormap is None:
         rgba = np.tile(
@@ -475,7 +481,7 @@ def build_colormap_lut(
         )
     else:
         cmap = get_colormap(colormap)
-        rgba = cmap.map(sample_points, mode="float").astype(np.float32, copy=False)
+        rgba = cmap.map(remapped_points, mode="float").astype(np.float32, copy=False)
 
     rgba = np.clip(rgba, 0.0, 1.0)
     return np.round(rgba * 255.0).astype(np.uint8, copy=False)
@@ -485,6 +491,7 @@ def _build_colors(
     z_values: np.ndarray,
     colormap: str | None,
     value_range: tuple[float, float] | None,
+    curve_strength: float = 0.0,
 ) -> np.ndarray:
     """Map point heights to RGBA colors."""
     if len(z_values) == 0:
@@ -506,19 +513,20 @@ def _build_colors(
         hi = lo + 1e-6
 
     normalized = np.clip((z_values - lo) / (hi - lo), 0.0, 1.0)
+    remapped = remap_normalized_colormap_values(normalized, curve_strength=curve_strength)
     if colormap == "RG":
         return np.stack(
-            [1.0 - normalized, normalized, np.zeros_like(normalized), np.ones_like(normalized)],
+            [1.0 - remapped, remapped, np.zeros_like(remapped), np.ones_like(remapped)],
             axis=1,
         ).astype(np.float32, copy=False)
     if colormap == "B&W":
         return np.stack(
-            [normalized, normalized, normalized, np.ones_like(normalized)],
+            [remapped, remapped, remapped, np.ones_like(remapped)],
             axis=1,
         ).astype(np.float32, copy=False)
 
     cmap = get_colormap(colormap)
-    return cmap.map(normalized, mode="float").astype(np.float32, copy=False)
+    return cmap.map(remapped, mode="float").astype(np.float32, copy=False)
 
 
 def _next_power_of_two(value: int) -> int:

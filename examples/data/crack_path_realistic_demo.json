@@ -1,0 +1,22 @@
+{
+  "dataset": "crack_path_realistic_demo",
+  "grid_shape": [
+    176,
+    256
+  ],
+  "dx_um": 4.0,
+  "dy_um": 4.0,
+  "description": "More realistic irregular front with multi-scale roughness, gradual opening growth, local contact bridges, and sparse measurement holes. Start with first_open_pixel at 12 \u00b5m, then compare against contour with moderate smoothing.",
+  "threshold_um": 12.0,
+  "propagation_axis": "x",
+  "front_side": "min",
+  "expected_metrics": {
+    "path_method": "first_open_pixel",
+    "path_point_count": 256,
+    "effective_length_um": 1695.054463,
+    "projected_length_um": 1020.0,
+    "tortuosity": 1.6618181,
+    "mean_abs_curvature_inv_um": 0.042269,
+    "max_abs_curvature_inv_um": 0.27816824
+  }
+}

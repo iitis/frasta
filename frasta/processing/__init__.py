@@ -50,6 +50,15 @@ from .roughness import (
     surface_roughness_parameters,
     profile_roughness_parameters
 )
+from .crack_path import (
+    crack_opening_map,
+    extract_crack_path,
+    extract_crack_path_contour,
+    crack_path_tortuosity,
+    crack_path_curvature,
+    analyze_crack_path,
+    sweep_crack_path_thresholds,
+)
 
 __all__ = [
     # Alignment
@@ -88,4 +97,12 @@ __all__ = [
     # Roughness summaries
     'surface_roughness_parameters',
     'profile_roughness_parameters',
+    # Crack-path analysis
+    'crack_opening_map',
+    'extract_crack_path',
+    'extract_crack_path_contour',
+    'crack_path_tortuosity',
+    'crack_path_curvature',
+    'analyze_crack_path',
+    'sweep_crack_path_thresholds',
 ]

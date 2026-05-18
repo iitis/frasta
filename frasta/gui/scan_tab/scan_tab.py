@@ -20,7 +20,7 @@ from scipy.interpolate import griddata
 import trimesh
 
 from ...core import Surface
-from ...utils import get_colormap, get_lookup_table
+from ...utils import get_colormap, get_gradient_stops, get_lookup_table
 from ...processing import fill_holes, remove_outliers, nan_aware_gaussian
 from ..orientation import (
     build_image_rect,
@@ -116,6 +116,7 @@ class ScanTab(QtWidgets.QWidget):
         # Display settings
         self.is_colormap = False
         self.current_colormap = None
+        self.colormap_curve_strength = 0.0
         self.hide_below_range = True
         self.hide_above_range = True
 
@@ -157,8 +158,19 @@ class ScanTab(QtWidgets.QWidget):
         self.hide_above_range_checkbox.setChecked(True)
         self.hide_above_range_checkbox.toggled.connect(self._on_out_of_range_visibility_toggled)
 
+        self.colormap_curve_spin = QtWidgets.QDoubleSpinBox(control_widget)
+        self.colormap_curve_spin.setDecimals(2)
+        self.colormap_curve_spin.setRange(0.0, 8.0)
+        self.colormap_curve_spin.setSingleStep(0.25)
+        self.colormap_curve_spin.setKeyboardTracking(False)
+        self.colormap_curve_spin.setToolTip(
+            "Stretch low and high colormap regions without changing the numeric range."
+        )
+        self.colormap_curve_spin.valueChanged.connect(self._on_colormap_curve_changed)
+
         control_layout.addRow("Min:", self.range_min_spin)
         control_layout.addRow("Max:", self.range_max_spin)
+        control_layout.addRow("Color curve:", self.colormap_curve_spin)
         control_layout.addRow(self.hide_below_range_checkbox)
         control_layout.addRow(self.hide_above_range_checkbox)
         return control_widget
@@ -226,6 +238,7 @@ class ScanTab(QtWidgets.QWidget):
         self.histogram_manager.update_histogram(
             self.grid,
             colormap_name=self.get_colormap_name(),
+            colormap_curve_strength=self.colormap_curve_strength,
         )
         self._sync_threshold_controls()
         self.update_image()
@@ -249,6 +262,7 @@ class ScanTab(QtWidgets.QWidget):
             self.grid,
             was_data_negated,
             self.get_colormap_name(),
+            self.colormap_curve_strength,
         )
         self._sync_threshold_controls()
 
@@ -256,6 +270,12 @@ class ScanTab(QtWidgets.QWidget):
         """Handle threshold changes coming from histogram lines."""
         self._sync_threshold_controls(vmin, vmax)
         self.update_image(vmin, vmax)
+
+    def _on_colormap_curve_changed(self, value: float) -> None:
+        """Apply a manual endpoint-stretch curve to the active 2D colormap."""
+        self.colormap_curve_strength = max(0.0, float(value))
+        self.update_histogram()
+        self.update_image()
 
     def _on_manual_threshold_changed(self, _value: float):
         """Handle manual threshold edits from spin boxes."""
@@ -373,7 +393,7 @@ class ScanTab(QtWidgets.QWidget):
         image_item = self.image_view.getImageItem()
         if self.is_colormap:
             cmap_name = self.current_colormap or 'metrology'
-            lut = get_lookup_table(cmap_name, 256)
+            lut = get_lookup_table(cmap_name, 256, curve_strength=self.colormap_curve_strength)
             image_item.setLookupTable(lut)
         else:
             image_item.setLookupTable(None)
@@ -497,6 +517,16 @@ class ScanTab(QtWidgets.QWidget):
         else:
             self.is_colormap = True
             self.current_colormap = str(name).lower()
+        self.update_histogram()
+        self.update_image()
+
+    def set_colormap_curve_strength(self, strength: float) -> None:
+        """Set the manual endpoint-stretch strength for the 2D colormap."""
+        resolved_strength = max(0.0, float(strength))
+        self.colormap_curve_strength = resolved_strength
+        self.colormap_curve_spin.blockSignals(True)
+        self.colormap_curve_spin.setValue(resolved_strength)
+        self.colormap_curve_spin.blockSignals(False)
         self.update_histogram()
         self.update_image()
 
@@ -787,7 +817,11 @@ class ScanTab(QtWidgets.QWidget):
         valid_mask = np.isfinite(image_data)
 
         if self.is_colormap and self.current_colormap is not None:
-            lut = get_lookup_table(self.get_colormap_name(), 256)
+            lut = get_lookup_table(
+                self.get_colormap_name(),
+                256,
+                curve_strength=self.colormap_curve_strength,
+            )
             lut_index = np.zeros(image_data.shape, dtype=np.int32)
             lut_index[valid_mask] = np.round(normalized[valid_mask] * 255.0).astype(np.int32, copy=False)
             sampled = lut[lut_index[valid_mask]]
@@ -876,20 +910,13 @@ class ScanTab(QtWidgets.QWidget):
                 (1.0, QtGui.QColor(255, 255, 255)),
             ]
 
-        cmap = get_colormap(self.get_colormap_name())
-        if cmap is None:
-            return [
-                (0.0, QtGui.QColor(0, 0, 0)),
-                (1.0, QtGui.QColor(255, 255, 255)),
-            ]
-
-        positions, colors = cmap.getStops(mode="byte")
         return [
-            (
-                float(position),
-                QtGui.QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3])),
+            (float(position), QtGui.QColor(*rgba))
+            for position, rgba in get_gradient_stops(
+                self.get_colormap_name(),
+                samples=64,
+                curve_strength=self.colormap_curve_strength,
             )
-            for position, rgba in zip(positions, colors)
         ]
 
     def _build_colorbar_gradient(

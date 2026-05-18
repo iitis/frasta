@@ -214,6 +214,10 @@ class MainWindow(QtWidgets.QMainWindow):
         target_tab.hide_below_range_checkbox.setChecked(source_tab.hide_below_range)
         target_tab.hide_above_range_checkbox.setChecked(source_tab.hide_above_range)
         target_tab.set_colormap(source_tab.get_colormap_name())
+        if hasattr(target_tab, "set_colormap_curve_strength"):
+            target_tab.set_colormap_curve_strength(
+                getattr(source_tab, "colormap_curve_strength", 0.0)
+            )
 
     def export_2d_image(self):
         """Export the active 2D scan view as a PNG image."""
