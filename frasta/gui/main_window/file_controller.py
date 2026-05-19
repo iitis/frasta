@@ -1,7 +1,7 @@
 """File controller for main window.
 
 Handles all file operations including:
-- Opening files (CSV, NPZ, H5, STL)
+- Opening files (CSV, NPZ, H5, STL, AL3D, PLUX, DICOM)
 - Saving files (single and multiple scans)
 - Recent files management
 - Unit conversion dialogs
@@ -15,6 +15,7 @@ from ...core import Surface
 from ...io import (
     load_alicona_al3d,
     load_csv_data,
+    load_dicom_series,
     load_h5_data,
     load_npz_data,
     load_sensofar_plux,
@@ -362,6 +363,40 @@ class FileController:
             dlg.close()
             QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load PLUX file:\n{e}")
             return False
+
+    def load_dicom(self, fname: str) -> bool:
+        """Load one DICOM slice or same-series directory subset into tabs.
+
+        Args:
+            fname (str): Path to one DICOM file from the target series.
+
+        Returns:
+            bool: True if at least one slice or frame was loaded successfully.
+        """
+
+        dlg = QtWidgets.QProgressDialog("Loading DICOM file...", None, 0, 100, self.main_window)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+
+        try:
+            surfaces = load_dicom_series(fname, progress_callback=dlg.setValue)
+            tabs = self.main_window.tabs
+            for surface in surfaces:
+                name = surface.metadata.get("name", "DICOM")
+                tab = ScanTab()
+                tabs.addTab(tab, str(name))
+                tabs.setCurrentWidget(tab)
+                tab.set_surface(surface)
+            dlg.setValue(100)
+            self.add_to_recent_files(fname)
+            return True
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load DICOM file:\n{e}")
+            return False
     
     def create_tab_and_load(self, fname: str):
         """Create a new tab and load file into it.
@@ -394,6 +429,8 @@ class FileController:
             self.load_al3d(fname, tab)
         elif suffix.endswith('.plux'):
             self.load_plux(fname)
+        elif suffix.endswith('.dcm') or suffix.endswith('.dicom'):
+            self.load_dicom(fname)
         else:
             QtWidgets.QMessageBox.warning(self.main_window, "Unknown format", "Unsupported file type.")
             return
@@ -404,7 +441,7 @@ class FileController:
             self.main_window, 
             "Open file", 
             "", 
-            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d *.plux);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d);;Sensofar PLUX (*.plux)"
+            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d *.plux *.dcm *.dicom);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d);;Sensofar PLUX (*.plux);;DICOM (*.dcm *.dicom)"
         )
         if not fname:
             return

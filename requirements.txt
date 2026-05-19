@@ -11,8 +11,11 @@ scikit-image
 scikit-learn
 trimesh
 coverage
+pydicom
+pyinstaller
 pytest
 pytest-cov
 pytest-mock
 opencv-python
+pydicom
 rtree

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import struct
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from frasta.io import (
     get_scan_reader,
     get_surface_parser,
     load_alicona_al3d,
+    load_dicom_series,
     load_sensofar_plux,
     load_scan_file,
     load_surface_file,
@@ -158,6 +160,57 @@ def _build_plux_file(
     return payload.getvalue()
 
 
+def _build_dicom_file(
+    path: Path,
+    pixel_array: np.ndarray,
+    *,
+    series_instance_uid: str,
+    sop_instance_uid: str,
+    instance_number: int,
+    z_position_mm: float,
+    spacing_row_mm: float = 0.2,
+    spacing_col_mm: float = 0.3,
+    intercept: float = -1024.0,
+    slope: float = 2.0,
+) -> None:
+    """Build one minimal grayscale DICOM file for parser tests."""
+
+    pydicom = pytest.importorskip("pydicom")
+
+    file_meta = pydicom.dataset.FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = pydicom.uid.generate_uid()
+    file_meta.MediaStorageSOPInstanceUID = sop_instance_uid
+    file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+    file_meta.ImplementationClassUID = pydicom.uid.generate_uid()
+
+    dataset = pydicom.dataset.FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+    dataset.SOPClassUID = file_meta.MediaStorageSOPClassUID
+    dataset.SOPInstanceUID = sop_instance_uid
+    dataset.SeriesInstanceUID = series_instance_uid
+    dataset.StudyInstanceUID = pydicom.uid.generate_uid()
+    dataset.Modality = "CT"
+    dataset.SeriesDescription = "Synthetic CT"
+    dataset.InstanceNumber = instance_number
+    dataset.ImagePositionPatient = [10.0, 20.0, z_position_mm]
+    dataset.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    dataset.PixelSpacing = [spacing_row_mm, spacing_col_mm]
+    dataset.SliceLocation = z_position_mm
+    dataset.Rows = int(pixel_array.shape[0])
+    dataset.Columns = int(pixel_array.shape[1])
+    dataset.SamplesPerPixel = 1
+    dataset.PhotometricInterpretation = "MONOCHROME2"
+    dataset.PixelRepresentation = 1
+    dataset.BitsStored = 16
+    dataset.BitsAllocated = 16
+    dataset.HighBit = 15
+    dataset.RescaleIntercept = intercept
+    dataset.RescaleSlope = slope
+    dataset.PixelData = np.asarray(pixel_array, dtype=np.int16).tobytes()
+    dataset.is_little_endian = True
+    dataset.is_implicit_VR = False
+    dataset.save_as(str(path), write_like_original=False)
+
+
 class TestSurfaceParsers:
     """Test suite for reusable instrument parsers and scan readers."""
 
@@ -286,6 +339,79 @@ class TestSurfaceParsers:
         assert len(surfaces) == 1
         assert surfaces[0].height[0, 2] == pytest.approx(12.0)
         assert surfaces[0].metadata["name"] == "dispatch"
+
+    def test_load_dicom_series_returns_sorted_surfaces(self, tmp_path):
+        """DICOM reader should normalize one same-series directory subset into surfaces."""
+
+        pytest.importorskip("pydicom")
+        series_uid = "1.2.826.0.1.3680043.2.1125.10"
+        second_slice = tmp_path / "slice_02.dcm"
+        first_slice = tmp_path / "slice_01.dcm"
+        other_series = tmp_path / "other.dcm"
+
+        _build_dicom_file(
+            second_slice,
+            np.array([[10, 20], [30, 40]], dtype=np.int16),
+            series_instance_uid=series_uid,
+            sop_instance_uid="1.2.826.0.1.3680043.2.1125.10.2",
+            instance_number=2,
+            z_position_mm=2.0,
+        )
+        _build_dicom_file(
+            first_slice,
+            np.array([[1, 2], [3, 4]], dtype=np.int16),
+            series_instance_uid=series_uid,
+            sop_instance_uid="1.2.826.0.1.3680043.2.1125.10.1",
+            instance_number=1,
+            z_position_mm=1.0,
+        )
+        _build_dicom_file(
+            other_series,
+            np.array([[99, 98], [97, 96]], dtype=np.int16),
+            series_instance_uid="1.2.826.0.1.3680043.2.1125.11",
+            sop_instance_uid="1.2.826.0.1.3680043.2.1125.11.1",
+            instance_number=1,
+            z_position_mm=5.0,
+        )
+
+        progress = []
+        surfaces = load_dicom_series(str(second_slice), progress_callback=progress.append)
+
+        assert len(surfaces) == 2
+        assert all(isinstance(surface, Surface) for surface in surfaces)
+        assert surfaces[0].height.shape == (2, 2)
+        assert surfaces[0].height[0, 0] == pytest.approx(-1022.0)
+        assert surfaces[1].height[1, 1] == pytest.approx(-944.0)
+        assert surfaces[0].dx == pytest.approx(300.0)
+        assert surfaces[0].dy == pytest.approx(200.0)
+        assert surfaces[0].x0 == pytest.approx(10000.0)
+        assert surfaces[0].y0 == pytest.approx(20000.0)
+        assert surfaces[0].metadata["format"] == "dicom"
+        assert surfaces[0].metadata["series_instance_uid"] == series_uid
+        assert progress[0] == 5
+        assert progress[-1] == 100
+
+    def test_load_scan_file_dispatches_registered_dicom_reader(self, tmp_path):
+        """Registry-based scan loading should dispatch ``.dcm`` files automatically."""
+
+        pytest.importorskip("pydicom")
+        path = tmp_path / "single_slice.dcm"
+        _build_dicom_file(
+            path,
+            np.array([[7, 8, 9]], dtype=np.int16),
+            series_instance_uid="1.2.826.0.1.3680043.2.1125.12",
+            sop_instance_uid="1.2.826.0.1.3680043.2.1125.12.1",
+            instance_number=1,
+            z_position_mm=0.0,
+        )
+
+        reader = get_scan_reader(str(path))
+        surfaces = load_scan_file(str(path))
+
+        assert callable(reader)
+        assert reader is load_dicom_series
+        assert len(surfaces) == 1
+        assert surfaces[0].height[0, 2] == pytest.approx(-1006.0)
 
     def test_load_scan_file_handles_multi_surface_archives(self, temp_npz_file):
         """Unified scan loading should preserve multi-surface archive readers."""

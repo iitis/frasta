@@ -49,6 +49,19 @@ python examples/data/generate_synthetic_al3d.py
 
 ---
 
+### [`data/synthetic_dicom_series/`](data/synthetic_dicom_series)
+Small synthetic DICOM CT-like series for parser and GUI smoke tests.
+The directory currently contains:
+- `slice_01.dcm`
+- `slice_02.dcm`
+
+You can regenerate it with:
+```bash
+python examples/data/generate_synthetic_dicom.py
+```
+
+---
+
 ### Crack-path demo datasets
 Deterministic NPZ datasets for the contact-map and crack-path workflow:
 - `data/crack_path_straight_demo.npz`

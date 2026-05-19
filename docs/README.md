@@ -39,4 +39,4 @@ For contributors:
 1. [Repository README](../README.md)
 2. [Architecture Guide](../ARCHITECTURE.md)
 3. Inspect the neighboring modules in `frasta/` to follow existing implementation patterns.
-4. For device-native imports, start from `frasta/io/parsers/` and keep the parser independent from GUI code.
+4. For device-native imports, start from `frasta/io/parsers/` or the shared `surface_io/parsers/` package and keep the parser independent from GUI code.

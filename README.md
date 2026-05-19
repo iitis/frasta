@@ -51,6 +51,7 @@ FRASTA-toolbox currently operates on structured grid data exported as text-based
 - **CSV, TXT, DAT**: Text-based XYZ data. Each row stores one point as `X Y Z`, `X,Y,Z`, `X;Y;Z`, or tab-separated values. Coordinates are converted to micrometers at import according to the units selected by the user.
 - **AL3D**: Alicona Imaging structured height maps. The reusable parser reads the native `.al3d` depth image directly into a `Surface`, converts spatial sampling and heights from meters to micrometers, preserves invalid pixels as `NaN`, and stores raw header tags in metadata for later use.
 - **PLUX**: Sensofar zipped measurement archives. The reader parses `index.xml`, loads one or more `LAYER_*.raw` height maps directly into `Surface` objects, keeps raw `NaN` values, preserves selected XML metadata, and opens each Z layer as a separate scan when multiple layers are present.
+- **DICOM**: Medical-imaging slices stored as `.dcm` or `.dicom`. The reader decodes the selected file and, when possible, the matching series in the same directory, applies DICOM rescale slope/intercept, converts pixel spacing and in-plane origin from millimeters to micrometers, and opens each slice or frame as a separate `Surface` tab. This support is intended for inspection and preprocessing of regular 2D slices; the main FRASTA workflow still assumes structured height maps rather than volumetric CT semantics.
 - **NPZ**: Compressed NumPy archive used for saving and reloading one or more gridded scans. Each scan stores `height`, `dx`, `dy`, `x0`, `y0`, and a scan name.
 - **HDF5**: Hierarchical storage for one or more gridded scans. Each scan is stored in a `tab_XX` group with datasets for `name`, `height`, `dx`, `dy`, `x0`, and `y0`.
 - **STL**: Mesh import/export support. On import, STL meshes are sampled into a regular height map; on export, valid grid cells are converted to a triangular mesh. STL stores triangles rather than the original measurement grid, so it should be treated as an exchange or visualization format. It may not preserve all information about missing measurement points or local sampling neighborhoods.
@@ -171,7 +172,7 @@ See [examples/README.md](examples/README.md) for details.
 
 FRASTA-toolbox is developed and tested primarily with Python 3.10 or newer. A standard desktop Python installation is sufficient for numerical processing and 2D views. The 3D views require an active desktop session with working OpenGL support.
 
-Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph, NumPy/SciPy-related packages, h5py, scikit-image, scikit-learn, trimesh, PyOpenGL, and OpenCV.
+Core dependencies are listed in `requirements.txt` and include PyQt5, pyqtgraph, NumPy/SciPy-related packages, h5py, scikit-image, scikit-learn, trimesh, PyOpenGL, OpenCV, and pydicom.
 
 ### Operating systems
 
@@ -236,9 +237,9 @@ The platform-specific commands are listed below.
 ## Other useful commands
 
 - Create a distribution package on Windows:
-  `.venv\Scripts\python.exe -m PyInstaller --add-data "icons;icons" main.py`
+  `.venv\Scripts\python.exe -m PyInstaller --add-data "icons;icons" main.py -n frasta-toolbox`
 - Create a distribution package on Linux or macOS:
-  `./.venv/bin/python -m PyInstaller --add-data "icons:icons" main.py`
+  `./.venv/bin/python -m PyInstaller --add-data "icons:icons" main.py -n frasta-toolbox`
 - Run tests:
   `./.venv/bin/python -m pytest -v -s`
 
