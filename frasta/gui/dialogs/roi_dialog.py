@@ -27,6 +27,7 @@ class ROIDialog(QtWidgets.QDialog):
         self.unit_label = self._normalize_unit_label(unit_label)
         self.display_unit_options = self._build_display_unit_options(self.unit_label)
         self._last_units_mode = "native"
+        self._polygon_points_native: tuple[tuple[float, float], ...] = ()
         self._init_ui()
         self._load_config(roi_config)
         self._update_enabled_state()
@@ -102,7 +103,9 @@ class ROIDialog(QtWidgets.QDialog):
         shape_layout = QtWidgets.QFormLayout(shape_group)
         self.shape_combo = QtWidgets.QComboBox(self)
         self.shape_combo.addItem("Circle", "circle")
+        self.shape_combo.addItem("Ring", "ring")
         self.shape_combo.addItem("Rectangle", "rectangle")
+        self.shape_combo.addItem("Polygon", "polygon")
         self.shape_combo.currentIndexChanged.connect(self._update_shape_fields)
         shape_layout.addRow("ROI type:", self.shape_combo)
         layout.addWidget(shape_group)
@@ -112,17 +115,20 @@ class ROIDialog(QtWidgets.QDialog):
         self.center_x_spin = self._create_double_spin()
         self.center_y_spin = self._create_double_spin()
         self.radius_spin = self._create_double_spin(minimum=0.0001)
+        self.inner_radius_spin = self._create_double_spin(minimum=0.0)
         self.width_spin = self._create_double_spin(minimum=0.0001)
         self.height_spin = self._create_double_spin(minimum=0.0001)
 
         self.center_x_label = QtWidgets.QLabel(self)
         self.center_y_label = QtWidgets.QLabel(self)
         self.radius_label = QtWidgets.QLabel(self)
+        self.inner_radius_label = QtWidgets.QLabel(self)
         self.width_label = QtWidgets.QLabel(self)
         self.height_label = QtWidgets.QLabel(self)
         self.geometry_layout.addRow(self.center_x_label, self.center_x_spin)
         self.geometry_layout.addRow(self.center_y_label, self.center_y_spin)
         self.geometry_layout.addRow(self.radius_label, self.radius_spin)
+        self.geometry_layout.addRow(self.inner_radius_label, self.inner_radius_spin)
         self.geometry_layout.addRow(self.width_label, self.width_spin)
         self.geometry_layout.addRow(self.height_label, self.height_spin)
         layout.addWidget(geometry_group)
@@ -132,6 +138,11 @@ class ROIDialog(QtWidgets.QDialog):
         self.scope_label.setStyleSheet("color: gray; font-style: italic;")
         self.mode_combo.currentIndexChanged.connect(self._update_scope_text)
         layout.addWidget(self.scope_label)
+
+        self.shape_help_label = QtWidgets.QLabel(self)
+        self.shape_help_label.setWordWrap(True)
+        self.shape_help_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.shape_help_label)
 
         button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -181,6 +192,9 @@ class ROIDialog(QtWidgets.QDialog):
         if shape_index >= 0:
             self.shape_combo.setCurrentIndex(shape_index)
 
+        self._polygon_points_native = tuple(
+            (float(point[0]), float(point[1])) for point in roi_config.get("points", ())
+        )
         self._set_geometry_fields_from_native(roi_config)
         self._update_scope_text()
 
@@ -188,9 +202,11 @@ class ROIDialog(QtWidgets.QDialog):
         """Populate geometry widgets from native-unit configuration values."""
         center_x, center_y = roi_config.get("center", (0.0, 0.0))
         size_x, size_y = roi_config.get("size", (100.0, 100.0))
+        inner_size = float(roi_config.get("inner_size", size_x * 0.5))
         self.center_x_spin.setValue(self._native_to_display(center_x))
         self.center_y_spin.setValue(self._native_to_display(center_y))
         self.radius_spin.setValue(max(self._native_to_display(size_x / 2.0), self.radius_spin.minimum()))
+        self.inner_radius_spin.setValue(max(self._native_to_display(inner_size / 2.0), self.inner_radius_spin.minimum()))
         self.width_spin.setValue(max(self._native_to_display(size_x), self.width_spin.minimum()))
         self.height_spin.setValue(max(self._native_to_display(size_y), self.height_spin.minimum()))
         self._update_geometry_labels()
@@ -206,11 +222,6 @@ class ROIDialog(QtWidgets.QDialog):
         """Enable or disable geometry widgets according to ROI visibility."""
         enabled = self.enabled_checkbox.isChecked()
         self.shape_combo.setEnabled(enabled)
-        self.center_x_spin.setEnabled(enabled)
-        self.center_y_spin.setEnabled(enabled)
-        self.radius_spin.setEnabled(enabled)
-        self.width_spin.setEnabled(enabled)
-        self.height_spin.setEnabled(enabled)
         self._update_shape_fields()
         self._update_geometry_labels()
 
@@ -218,17 +229,51 @@ class ROIDialog(QtWidgets.QDialog):
         """Show geometry fields relevant to the selected shape."""
         enabled = self.enabled_checkbox.isChecked()
         circle_selected = self.shape_combo.currentData() == "circle"
+        ring_selected = self.shape_combo.currentData() == "ring"
+        polygon_selected = self.shape_combo.currentData() == "polygon"
 
-        self.radius_label.setVisible(circle_selected)
-        self.radius_spin.setVisible(circle_selected)
-        self.width_label.setVisible(not circle_selected)
-        self.width_spin.setVisible(not circle_selected)
-        self.height_label.setVisible(not circle_selected)
-        self.height_spin.setVisible(not circle_selected)
+        if polygon_selected and not self._polygon_points_native:
+            center_x = self._display_to_native(self.center_x_spin.value())
+            center_y = self._display_to_native(self.center_y_spin.value())
+            width = self._display_to_native(self.width_spin.value())
+            height = self._display_to_native(self.height_spin.value())
+            radius_x = max(width / 2.0, 1e-6)
+            radius_y = max(height / 2.0, 1e-6)
+            self._polygon_points_native = (
+                (center_x, center_y - radius_y),
+                (center_x + radius_x * 0.85, center_y - radius_y * 0.5),
+                (center_x + radius_x * 0.85, center_y + radius_y * 0.5),
+                (center_x, center_y + radius_y),
+                (center_x - radius_x * 0.85, center_y + radius_y * 0.5),
+                (center_x - radius_x * 0.85, center_y - radius_y * 0.5),
+            )
 
-        self.radius_spin.setEnabled(enabled and circle_selected)
-        self.width_spin.setEnabled(enabled and not circle_selected)
-        self.height_spin.setEnabled(enabled and not circle_selected)
+        self.radius_label.setVisible(circle_selected or ring_selected)
+        self.radius_spin.setVisible(circle_selected or ring_selected)
+        self.inner_radius_label.setVisible(ring_selected)
+        self.inner_radius_spin.setVisible(ring_selected)
+        self.width_label.setVisible(not circle_selected and not ring_selected and not polygon_selected)
+        self.width_spin.setVisible(not circle_selected and not ring_selected and not polygon_selected)
+        self.height_label.setVisible(not circle_selected and not ring_selected and not polygon_selected)
+        self.height_spin.setVisible(not circle_selected and not ring_selected and not polygon_selected)
+
+        self.center_x_spin.setEnabled(enabled and not polygon_selected)
+        self.center_y_spin.setEnabled(enabled and not polygon_selected)
+        self.radius_spin.setEnabled(enabled and (circle_selected or ring_selected))
+        self.inner_radius_spin.setEnabled(enabled and ring_selected)
+        self.width_spin.setEnabled(enabled and not circle_selected and not ring_selected and not polygon_selected)
+        self.height_spin.setEnabled(enabled and not circle_selected and not ring_selected and not polygon_selected)
+        self.shape_help_label.setVisible(enabled and polygon_selected)
+        if polygon_selected:
+            self.shape_help_label.setText(
+                "Polygon vertices are edited directly in the image view after the ROI is created."
+            )
+        elif ring_selected:
+            self.shape_help_label.setText(
+                "Ring ROI uses the outer circle for interactive move/scale; set the inner radius numerically here."
+            )
+        else:
+            self.shape_help_label.clear()
         self._update_geometry_labels()
 
     def _current_unit_suffix(self) -> str:
@@ -242,6 +287,7 @@ class ROIDialog(QtWidgets.QDialog):
         self.center_x_label.setText(f"Center X ({suffix}):")
         self.center_y_label.setText(f"Center Y ({suffix}):")
         self.radius_label.setText(f"Radius ({suffix}):")
+        self.inner_radius_label.setText(f"Inner Radius ({suffix}):")
         self.width_label.setText(f"Width ({suffix}):")
         self.height_label.setText(f"Height ({suffix}):")
 
@@ -265,14 +311,53 @@ class ROIDialog(QtWidgets.QDialog):
         center_x = self._display_to_native(self.center_x_spin.value(), units_mode=units_mode)
         center_y = self._display_to_native(self.center_y_spin.value(), units_mode=units_mode)
 
+        if shape == "polygon":
+            if not self._polygon_points_native:
+                width = self._display_to_native(self.width_spin.value(), units_mode=units_mode)
+                height = self._display_to_native(self.height_spin.value(), units_mode=units_mode)
+                self._polygon_points_native = (
+                    (center_x, center_y - height / 2.0),
+                    (center_x + width / 2.0, center_y),
+                    (center_x, center_y + height / 2.0),
+                    (center_x - width / 2.0, center_y),
+                )
+            polygon_points = self._polygon_points_native
+            if polygon_points:
+                x_values = [point[0] for point in polygon_points]
+                y_values = [point[1] for point in polygon_points]
+                center = ((min(x_values) + max(x_values)) / 2.0, (min(y_values) + max(y_values)) / 2.0)
+                size = (max(max(x_values) - min(x_values), 1e-6), max(max(y_values) - min(y_values), 1e-6))
+            else:
+                center = (center_x, center_y)
+                size = (1.0, 1.0)
+            return {
+                "mode": self.mode_combo.currentData(),
+                "enabled": enabled,
+                "shape": shape,
+                "center": center,
+                "size": size,
+                "points": polygon_points,
+            }
+
         if shape == "circle":
             radius = self._display_to_native(self.radius_spin.value(), units_mode=units_mode)
             size = (radius * 2.0, radius * 2.0)
+            inner_size = 0.0
+        elif shape == "ring":
+            outer_radius = self._display_to_native(self.radius_spin.value(), units_mode=units_mode)
+            inner_radius = self._display_to_native(self.inner_radius_spin.value(), units_mode=units_mode)
+            inner_radius = min(max(inner_radius, 0.0), outer_radius * 0.999)
+            self.inner_radius_spin.blockSignals(True)
+            self.inner_radius_spin.setValue(self._native_to_display(inner_radius, units_mode=units_mode))
+            self.inner_radius_spin.blockSignals(False)
+            size = (outer_radius * 2.0, outer_radius * 2.0)
+            inner_size = inner_radius * 2.0
         else:
             size = (
                 self._display_to_native(self.width_spin.value(), units_mode=units_mode),
                 self._display_to_native(self.height_spin.value(), units_mode=units_mode),
             )
+            inner_size = 0.0
 
         return {
             "mode": self.mode_combo.currentData(),
@@ -280,4 +365,6 @@ class ROIDialog(QtWidgets.QDialog):
             "shape": shape,
             "center": (center_x, center_y),
             "size": size,
+            "points": tuple(),
+            "inner_size": inner_size,
         }

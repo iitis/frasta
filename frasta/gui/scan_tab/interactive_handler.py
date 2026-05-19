@@ -1,12 +1,10 @@
 """Interactive handler for scan tab mouse events.
 
-Handles mouse clicks for zero point selection, tilt correction, and seed point marking.
+Handles mouse clicks for zero point selection and tilt correction.
 """
 
 import numpy as np
-from PyQt5 import QtWidgets, QtCore
-import pyqtgraph as pg
-from scipy.ndimage import gaussian_filter
+from PyQt5 import QtWidgets
 
 from ...processing import fit_plane_local_median_filter
 
@@ -26,8 +24,6 @@ class InteractiveHandler:
         self.parent_tab = parent_tab
         self.zero_point_mode = False
         self.tilt_mode = False
-        self.seed_points = []
-        
         # Parameters for zero point calculation
         self.zero_window_size = 15
         self.zero_sigma = 2.0
@@ -63,8 +59,8 @@ class InteractiveHandler:
             self._handle_zero_point_click(x, y)
         elif self.tilt_mode:
             self._handle_tilt_click(x, y)
-        elif event.modifiers() & QtCore.Qt.ShiftModifier:
-            self._handle_seed_point_click(x, y, vb)
+        else:
+            return
     
     def _handle_zero_point_click(self, x: int, y: int):
         """Handle click in zero point mode.
@@ -128,19 +124,6 @@ class InteractiveHandler:
                 f"Failed to fit plane: {str(e)}"
             )
     
-    def _handle_seed_point_click(self, x: int, y: int, view_box):
-        """Handle shift+click for seed point marking.
-        
-        Args:
-            x (int): X coordinate of click
-            y (int): Y coordinate of click
-            view_box: PyQtGraph ViewBox to add marker
-        """
-        self.seed_points.append((y, x))
-        x_phys, y_phys = self.parent_tab.indices_to_physical(x, y)
-        scatter = pg.ScatterPlotItem([x_phys], [y_phys], size=10, brush=pg.mkBrush('r'))
-        view_box.addItem(scatter)
-    
     def _get_zero_point_value(self, x: int, y: int) -> float:
         """Calculate robust zero point value from local window.
         
@@ -176,14 +159,3 @@ class InteractiveHandler:
         # If no values remain after rejection - take median
         return median if len(non_outliers) == 0 else np.mean(non_outliers)
     
-    def clear_seed_points(self):
-        """Clear all seed points."""
-        self.seed_points = []
-    
-    def get_seed_points(self) -> list:
-        """Get list of seed points.
-        
-        Returns:
-            list: List of (y, x) seed point coordinates
-        """
-        return self.seed_points

@@ -277,12 +277,17 @@ class TestProcessingController:
         mock_tab.invert_scan.assert_called_once()
     
     def test_fill_holes_calls_tab_method(self, processing_controller, mock_tab):
-        """Test fill_holes delegates to tab."""
+        """Test fill_holes delegates to tab with the active ROI mask."""
         processing_controller.main_window.current_tab = Mock(return_value=mock_tab)
+        roi_mask = np.ones((10, 10), dtype=bool)
+        processing_controller.main_window.roi_controller.create_mask = Mock(return_value=roi_mask)
         
         processing_controller.fill_holes()
         
-        mock_tab.fill_holes.assert_called_once()
+        mock_tab.fill_holes.assert_called_once_with(
+            processing_controller.main_window,
+            mask=roi_mask,
+        )
     
     def test_repair_grid_no_tab(self, processing_controller):
         """Test repair_grid handles missing tab gracefully."""
@@ -925,6 +930,7 @@ class TestROIController:
         """Test ROIController initializes with None ROIs."""
         assert roi_controller.shared_circle_roi is None
         assert roi_controller.shared_rectangle_roi is None
+        assert roi_controller.shared_polygon_roi is None
     
     def test_is_roi_valid_and_visible_with_none(self, roi_controller):
         """Test _is_roi_valid_and_visible handles None ROI."""
@@ -998,6 +1004,35 @@ class TestROIController:
         
         # All or most points should be inside
         assert mask.sum() >= 80  # At least 80% coverage
+
+    def test_create_polygon_mask_basic(self, roi_controller):
+        """Test create_polygon_mask rasterizes a simple triangle."""
+        mask = roi_controller.create_polygon_mask(
+            (10, 10),
+            ((2.0, 2.0), (7.0, 2.0), (4.0, 7.0)),
+        )
+
+        assert mask.shape == (10, 10)
+        assert mask.dtype == bool
+        assert mask[3, 4] == True
+        assert mask[0, 0] == False
+
+    def test_create_ring_mask_basic(self, roi_controller):
+        """Test create_ring_mask excludes the inner circle from the outer circle."""
+        mask = roi_controller.create_ring_mask((11, 11), (5.0, 5.0), 4.0, 2.0)
+
+        assert mask.shape == (11, 11)
+        assert mask.dtype == bool
+        assert mask[5, 5] == False
+        assert mask[1, 5] == True
+        assert mask[0, 0] == False
+
+    def test_create_ring_mask_too_thin_returns_empty_mask(self, roi_controller):
+        """Subpixel-thin ring should be treated as empty instead of a dotted circle."""
+        mask = roi_controller.create_ring_mask((11, 11), (5.0, 5.0), 4.0, 3.4)
+
+        assert mask.shape == (11, 11)
+        assert not np.any(mask)
     
     def test_create_mask_no_roi(self, roi_controller):
         """Test create_mask returns None when no ROI is visible."""
@@ -1037,6 +1072,52 @@ class TestROIController:
         
         assert mask is not None
         assert mask.shape == (10, 10)
+
+    def test_create_mask_with_polygon_state(self, roi_controller):
+        """Test create_mask uses stored polygon ROI geometry."""
+        roi_controller.global_roi_state = {
+            "shape": "polygon",
+            "points": ((2.0, 2.0), (7.0, 2.0), (7.0, 7.0), (2.0, 7.0)),
+            "visible": True,
+        }
+
+        mask = roi_controller.create_mask(10, 10)
+
+        assert mask is not None
+        assert mask.shape == (10, 10)
+        assert mask[4, 4] == True
+        assert mask[0, 0] == False
+
+    def test_create_mask_with_ring_state(self, roi_controller):
+        """Test create_mask uses stored ring ROI geometry."""
+        roi_controller.global_roi_state = {
+            "shape": "ring",
+            "pos": (1.0, 1.0),
+            "size": (8.0, 8.0),
+            "inner_size": 4.0,
+            "visible": True,
+        }
+
+        mask = roi_controller.create_mask(11, 11)
+
+        assert mask is not None
+        assert mask.shape == (11, 11)
+        assert mask[5, 5] == False
+        assert mask[1, 5] == True
+
+    def test_create_mask_returns_none_for_empty_ring(self, roi_controller):
+        """Degenerate ring ROI should not propagate an all-False mask."""
+        roi_controller.global_roi_state = {
+            "shape": "ring",
+            "pos": (1.0, 1.0),
+            "size": (4.0, 4.0),
+            "inner_size": 4.0,
+            "visible": True,
+        }
+
+        mask = roi_controller.create_mask(11, 11)
+
+        assert mask is None
 
     def test_del_outside_mask_keeps_only_roi_in_global_mode(self):
         """Delete outside should preserve only the ROI in shared mode."""

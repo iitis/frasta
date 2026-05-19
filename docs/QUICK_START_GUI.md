@@ -51,6 +51,7 @@ flattened difference map.
   NaN artifacts (simulated reflectance dropouts).
 - Open **Scan Actions → Fill holes** (nearest-neighbor); repeat for
   **Surface\_B\_tilted**.
+- If ROI is active, only holes inside the selected ROI are filled.
 - The patches disappear and the height map becomes continuous.
 
 ### 1.3  Switch to Alignment view
@@ -101,6 +102,7 @@ zone.
 ### 2.2  Fill holes
 
 - **Scan Actions → Fill holes** on both tabs.
+- If ROI is active, only holes inside the selected ROI are filled.
 
 ### 2.3  Inspect the difference map
 

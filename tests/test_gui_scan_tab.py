@@ -2,7 +2,7 @@
 
 This module tests the scan tab components:
 - HistogramManager: Histogram display and threshold controls
-- InteractiveHandler: Mouse interaction modes (zero point, tilt, seed points)
+- InteractiveHandler: Mouse interaction modes (zero point, tilt)
 - TransformOperations: Geometric transformations (flip, rotate, invert)
 """
 
@@ -316,7 +316,6 @@ class TestInteractiveHandler:
         assert interactive_handler.parent_tab == mock_parent_tab
         assert interactive_handler.zero_point_mode is False
         assert interactive_handler.tilt_mode is False
-        assert interactive_handler.seed_points == []
         assert interactive_handler.zero_window_size == 15
         assert interactive_handler.zero_sigma == 2.0
     
@@ -387,18 +386,6 @@ class TestInteractiveHandler:
                 interactive_handler._handle_tilt_click(5, 5)
                 
                 QtWidgets.QMessageBox.warning.assert_called_once()
-    
-    def test_handle_seed_point_click_adds_point(self, interactive_handler, mock_parent_tab):
-        """Test _handle_seed_point_click adds seed point."""
-        mock_view_box = Mock()
-        mock_view_box.addItem = Mock()
-        
-        with patch('frasta.gui.scan_tab.interactive_handler.pg.ScatterPlotItem'):
-            interactive_handler._handle_seed_point_click(5, 5, mock_view_box)
-            
-            assert len(interactive_handler.seed_points) == 1
-            assert interactive_handler.seed_points[0] == (5, 5)
-            mock_view_box.addItem.assert_called_once()
     
     def test_get_zero_point_value_returns_float(self, interactive_handler, mock_parent_tab):
         """Test _get_zero_point_value calculates robust value."""

@@ -222,13 +222,15 @@ Three new buttons added to the toolbar (after "Set tilt", before "View 3D"):
 - **ROI enabled** - show or hide the ROI
 - **Mode** - shared across scans or independent per scan
 - **Units** - the native scan unit plus a nearby smaller or larger unit when meaningful
-- **ROI type** - currently circle or rectangle
-- **Geometry** - center coordinates plus radius or width/height
+- **ROI type** - circle, ring, rectangle, or polygon
+- **Geometry** - center coordinates plus radius for circle, outer and inner radius for ring, width/height for rectangle; polygon vertices are edited directly in the image view after creation
 
 **Behavior**:
 - In **shared** mode, the dialog updates the common ROI used by all scans.
 - In **independent** mode, the dialog updates only the ROI stored for the current tab.
 - The ROI remains interactive in the image view after being created from the dialog.
+- Ring ROI uses the same interactive outer-circle move/scale behavior as the circular ROI and also exposes a dedicated handle on the inner circle for direct thickness adjustment; the dialog still offers numeric control for the same inner radius.
+- Polygon ROI keeps its full vertex list in physical coordinates, so irregular sample outlines can be selected without forcing a circle or rectangle first.
 - The ROI geometry is stored in physical coordinates rather than pixel indices, so the displayed shape remains correct even when `dx` and `dy` differ.
 - ROI delete operations report how many valid points were removed. If no active
   ROI exists on the current tab, the delete is skipped and the status bar

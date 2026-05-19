@@ -15,8 +15,6 @@ from pathlib import Path
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
-from skimage.segmentation import flood
-from scipy.interpolate import griddata
 import trimesh
 
 from ...core import Surface
@@ -407,8 +405,6 @@ class ScanTab(QtWidgets.QWidget):
             levels=(vmin, vmax),
         )
         self._apply_physical_image_rect()
-        self.interactive_handler.clear_seed_points()
-
     @classmethod
     def _compute_display_stride(cls, grid_shape: tuple[int, int]) -> int:
         """Return a 2D preview stride that keeps redraw cost bounded.
@@ -1455,47 +1451,24 @@ class ScanTab(QtWidgets.QWidget):
         self.update_image()
         QtWidgets.QApplication.restoreOverrideCursor()
     
-    def fill_holes(self, parent=None):
+    def fill_holes(self, parent=None, mask: np.ndarray = None):
         """Fill holes in scan data using interpolation.
         
         Args:
             parent (QWidget): Parent widget for error messages
+            mask (np.ndarray, optional): Boolean mask limiting fill to active ROI.
         """
         if self.grid is None:
             QtWidgets.QMessageBox.warning(parent or self, "No data", "Load grid first.")
             return
 
         tst = np.isnan(self.grid)
-        if not np.any(tst):
-            return
-        
-        # Fill regions marked by seed points
-        seed_points = self.interactive_handler.get_seed_points()
-        for (iy, ix) in seed_points:
-            if tst[iy, ix]:
-                filled = flood(tst, seed_point=(iy, ix))
-                tst[filled] = False
+        if mask is not None:
+            tst = tst & mask
 
         if not np.any(tst):
             return
-
-        logger.debug(f"grid.shape: {self.grid.shape}, xi len: {len(self.xi)}, yi len: {len(self.yi)}")
-
-        grid_x, grid_y = np.meshgrid(self.xi, self.yi)
-
-        logger.debug(f"grid_x.shape: {grid_x.shape}, grid_y.shape: {grid_y.shape}, tst.shape: {tst.shape}")
-
-        interp_points = np.column_stack((grid_x[tst], grid_y[tst]))
-
-        valid = ~np.isnan(self.grid)
-        interp_values = griddata(
-            (grid_x[valid], grid_y[valid]),
-            self.grid[valid],
-            interp_points,
-            method='nearest'
-        )
-
-        self.grid[tst] = interp_values
+        self.grid = fill_holes(self.grid, mask=mask)
         self.update_image()
     
     def _create_repair_dialog(self, sigma: int = 25, threshold: int = 100):

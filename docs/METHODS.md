@@ -40,6 +40,8 @@ local neighborhoods that could not be measured reliably.
 Missing values can be filled with nearest-neighbor interpolation. The current
 hole-filling routine identifies `NaN` cells, optionally restricts the operation
 to a user-specified mask, and interpolates from surrounding valid grid points.
+In the GUI, `Fill holes` respects the active ROI and fills only holes inside
+that region when ROI is enabled.
 
 This step is intended for small holes and measurement gaps. Interpolating large
 regions or converting unstructured point clouds to a grid may smooth local

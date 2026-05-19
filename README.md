@@ -65,7 +65,7 @@ The usual GUI workflow is:
 2. Apply basic preprocessing:
    - Define a region of interest (ROI) from `Edit -> ROI settings...`.
    - Choose whether the ROI should stay shared across scans or become independent per scan.
-   - Adjust ROI type, position, and size numerically in physical units, with the dialog offering the native unit and nearby smaller or larger units when they are meaningful.
+   - Adjust ROI type, position, and size numerically in physical units, with the dialog offering the native unit and nearby smaller or larger units when they are meaningful. Polygon ROI can also be selected there and then edited interactively in the scan view by dragging its vertices. Ring ROI is available as an annular selector with an editable inner radius, both from the dialog and directly with a dedicated inner handle.
    - Use `Edit -> Undo ROI delete` to restore the most recent ROI-based delete operation when you remove the wrong region.
    - Use `Tools -> Scan info...` whenever you need a quick summary of spacing, extents, valid-data coverage, and stored metadata for the active scan.
    - Adjust the value range using histogram thresholding.

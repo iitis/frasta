@@ -125,8 +125,13 @@ class ProcessingController:
     
     def fill_holes(self):
         """Fill NaN holes in current scan."""
-        if tab := self.main_window.current_tab():
-            tab.fill_holes(self.main_window)
+        tab = self.main_window.current_tab()
+        if tab is None or tab.grid is None:
+            return
+        tab.fill_holes(
+            self.main_window,
+            mask=self._active_roi_mask(tab.grid.shape),
+        )
     
     def repair_grid(self):
         """Remove holes and outliers in current scan."""
