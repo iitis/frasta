@@ -16,7 +16,9 @@ from ...io import (
     load_alicona_al3d,
     load_csv_data,
     load_dicom_series,
+    load_digital_surf_sur,
     load_h5_data,
+    load_keyence_zag,
     load_npz_data,
     load_sensofar_plux,
     load_stl_data,
@@ -29,6 +31,19 @@ from ..workers import GridWorker
 
 import logging
 logger = logging.getLogger(__name__)
+
+_OPEN_FILE_FILTER = (
+    "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d *.plux *.dcm *.dicom *.sur *.spro *.ssur *.zag);;"
+    "CSV/DAT/TXT (*.csv *.dat *.txt);;"
+    "NPZ (*.npz);;"
+    "HDF5 (*.h5);;"
+    "STL (*.stl);;"
+    "Alicona AL3D (*.al3d);;"
+    "Sensofar PLUX (*.plux);;"
+    "DICOM (*.dcm *.dicom);;"
+    "Digital Surf SUR (*.sur *.spro *.ssur);;"
+    "Keyence ZAG (*.zag)"
+)
 
 
 class FileController:
@@ -397,6 +412,69 @@ class FileController:
             dlg.close()
             QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load DICOM file:\n{e}")
             return False
+
+    def load_sur(self, fname: str, tab: ScanTab) -> None:
+        """Load one Digital Surf surface file into a tab.
+
+        Args:
+            fname (str): Path to the SUR-family file.
+            tab (ScanTab): Tab widget to receive the loaded surface.
+        """
+
+        dlg = QtWidgets.QProgressDialog("Loading Digital Surf file...", None, 0, 100, self.main_window)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+
+        try:
+            surface = load_digital_surf_sur(fname, progress_callback=dlg.setValue)
+            tab.set_surface(surface)
+            dlg.setValue(100)
+            self.add_to_recent_files(fname)
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load SUR file:\n{e}")
+            tabs = self.main_window.tabs
+            idx = tabs.indexOf(tab)
+            if idx >= 0:
+                tabs.removeTab(idx)
+            tab.deleteLater()
+
+    def load_zag(self, fname: str) -> bool:
+        """Load one Keyence ZAG archive and open each measurement in a tab.
+
+        Args:
+            fname (str): Path to the ZAG file.
+
+        Returns:
+            bool: True if at least one measurement was loaded successfully.
+        """
+
+        dlg = QtWidgets.QProgressDialog("Loading Keyence ZAG file...", None, 0, 100, self.main_window)
+        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setCancelButton(None)
+        dlg.setValue(0)
+        dlg.show()
+
+        try:
+            surfaces = load_keyence_zag(fname)
+            tabs = self.main_window.tabs
+            for surface in surfaces:
+                name = surface.metadata.get("name", "ZAG")
+                tab = ScanTab()
+                tabs.addTab(tab, str(name))
+                tabs.setCurrentWidget(tab)
+                tab.set_surface(surface)
+            dlg.setValue(100)
+            self.add_to_recent_files(fname)
+            return True
+        except Exception as e:
+            dlg.close()
+            QtWidgets.QMessageBox.critical(self.main_window, "Error", f"Failed to load ZAG file:\n{e}")
+            return False
     
     def create_tab_and_load(self, fname: str):
         """Create a new tab and load file into it.
@@ -431,6 +509,13 @@ class FileController:
             self.load_plux(fname)
         elif suffix.endswith('.dcm') or suffix.endswith('.dicom'):
             self.load_dicom(fname)
+        elif suffix.endswith('.sur') or suffix.endswith('.spro') or suffix.endswith('.ssur'):
+            tab = ScanTab()
+            tabs.addTab(tab, fname.split('/')[-1])
+            tabs.setCurrentWidget(tab)
+            self.load_sur(fname, tab)
+        elif suffix.endswith('.zag'):
+            self.load_zag(fname)
         else:
             QtWidgets.QMessageBox.warning(self.main_window, "Unknown format", "Unsupported file type.")
             return
@@ -441,7 +526,7 @@ class FileController:
             self.main_window, 
             "Open file", 
             "", 
-            "All supported (*.csv *.dat *.txt *.npz *.h5 *.stl *.al3d *.plux *.dcm *.dicom);;CSV/DAT/TXT (*.csv *.dat *.txt);;NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;Alicona AL3D (*.al3d);;Sensofar PLUX (*.plux);;DICOM (*.dcm *.dicom)"
+            _OPEN_FILE_FILTER,
         )
         if not fname:
             return

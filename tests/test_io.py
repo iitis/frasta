@@ -4,8 +4,8 @@ import pytest
 import numpy as np
 import h5py
 from frasta.io import (
-    load_csv_data, load_npz_data, load_h5_data,
-    save_npz, save_h5, suggest_units
+    load_csv_data, load_digital_surf_sur, load_h5_data, load_keyence_zag,
+    load_keyence_zag_surface, load_npz_data, save_h5, save_npz, suggest_units
 )
 from frasta.core import Surface
 
@@ -171,3 +171,11 @@ class TestExporters:
         assert len(result) == 2
         assert result[0].metadata.get('name') == 'scan1'
         assert result[1].metadata.get('name') == 'scan2'
+
+
+def test_frasta_io_reexports_new_surface_parsers():
+    """Compatibility module should re-export newly added shared parsers."""
+
+    assert callable(load_digital_surf_sur)
+    assert callable(load_keyence_zag)
+    assert callable(load_keyence_zag_surface)

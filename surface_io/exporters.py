@@ -2,9 +2,7 @@
 
 import logging
 
-import h5py
 import numpy as np
-import trimesh
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +25,11 @@ def save_npz(fname, scans):
 def save_h5(fname, scans):
     """Save scans to FRASTA-style HDF5."""
 
+    try:
+        import h5py
+    except ImportError as exc:
+        raise ImportError("h5py is required for HDF5 scan export.") from exc
+
     with h5py.File(fname, "w") as file:
         file.attrs["frasta_info"] = 1
         file.attrs["frasta_cnt"] = len(scans)
@@ -43,6 +46,11 @@ def save_h5(fname, scans):
 
 def save_stl(fname, surface, binary=True, max_points=50000000):
     """Save one surface as STL mesh."""
+
+    try:
+        import trimesh
+    except ImportError as exc:
+        raise ImportError("trimesh is required for STL scan export.") from exc
 
     xi = surface.xi
     yi = surface.yi

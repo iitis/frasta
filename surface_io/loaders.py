@@ -2,10 +2,7 @@
 
 import logging
 
-import h5py
 import numpy as np
-import pandas as pd
-import trimesh
 
 from .surface import Surface
 
@@ -14,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 def suggest_units(fname):
     """Suggest coordinate units based on data sample heuristics."""
+
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("pandas is required for CSV unit suggestion.") from exc
 
     try:
         sample = pd.read_csv(
@@ -43,6 +45,11 @@ def suggest_units(fname):
 
 def load_csv_data(fname, units_xy="um", units_z="um", progress_callback=None):
     """Load and grid CSV scan data into one ``Surface``."""
+
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("pandas is required for CSV scan loading.") from exc
 
     chunk_size = 100_000
     with open(fname, encoding="utf-8") as handle:
@@ -185,6 +192,11 @@ def load_npz_data(fname):
 def load_h5_data(fname):
     """Load one or more surfaces from FRASTA-style HDF5."""
 
+    try:
+        import h5py
+    except ImportError as exc:
+        raise ImportError("h5py is required for HDF5 scan loading.") from exc
+
     results = []
     with h5py.File(fname, "r") as file:
         if "frasta_info" not in file.attrs:
@@ -244,6 +256,11 @@ def load_h5_data(fname):
 
 def load_stl_data(fname, resolution=None, progress_callback=None):
     """Load one STL mesh and sample it into a regular height map."""
+
+    try:
+        import trimesh
+    except ImportError as exc:
+        raise ImportError("trimesh is required for STL scan loading.") from exc
 
     if progress_callback:
         progress_callback(10)

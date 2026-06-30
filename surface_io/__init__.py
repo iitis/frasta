@@ -14,6 +14,9 @@ from .parsers import (
     get_surface_parser,
     load_alicona_al3d,
     load_dicom_series,
+    load_digital_surf_sur,
+    load_keyence_zag,
+    load_keyence_zag_surface,
     load_sensofar_plux,
     load_scan_file,
     load_surface_file,
@@ -50,6 +53,13 @@ def _load_stl_as_scan_list(fname, **kwargs):
     return [load_stl_data(fname, **kwargs)]
 
 
+@register_scan_reader(".sur", ".spro", ".ssur")
+def _load_sur_as_scan_list(fname, **kwargs):
+    """Adapt SUR loading to the unified multi-scan reader contract."""
+
+    return [load_digital_surf_sur(fname, **kwargs)]
+
+
 __all__ = [
     "Surface",
     "SurfaceOrientation",
@@ -58,6 +68,9 @@ __all__ = [
     "load_alicona_al3d",
     "load_csv_data",
     "load_dicom_series",
+    "load_digital_surf_sur",
+    "load_keyence_zag",
+    "load_keyence_zag_surface",
     "load_h5_data",
     "load_npz_data",
     "load_sensofar_plux",

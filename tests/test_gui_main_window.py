@@ -184,6 +184,32 @@ class TestFileController:
         
         assert file_controller.recent_files == test_files
 
+    def test_open_file_uses_filter_with_sur_and_zag(self, file_controller):
+        """Open dialog filter should include newly supported SUR and ZAG formats."""
+
+        with patch('frasta.gui.main_window.file_controller.QtWidgets.QFileDialog.getOpenFileName', return_value=("", "")) as mock_dialog:
+            file_controller.open_file()
+
+        used_filter = mock_dialog.call_args.args[3]
+        assert "*.sur" in used_filter
+        assert "*.spro" in used_filter
+        assert "*.ssur" in used_filter
+        assert "*.zag" in used_filter
+
+    def test_create_tab_and_load_routes_sur_and_zag(self, file_controller):
+        """Suffix dispatch should route SUR-family files and ZAG archives to dedicated loaders."""
+
+        file_controller.load_sur = Mock()
+        file_controller.load_zag = Mock()
+        fake_tab = Mock()
+
+        with patch('frasta.gui.main_window.file_controller.ScanTab', return_value=fake_tab):
+            file_controller.create_tab_and_load("C:/tmp/sample.sur")
+            file_controller.create_tab_and_load("C:/tmp/sample.zag")
+
+        file_controller.load_sur.assert_called_once_with("C:/tmp/sample.sur", fake_tab)
+        file_controller.load_zag.assert_called_once_with("C:/tmp/sample.zag")
+
 
 # ============================================================================
 # ProcessingController Tests
