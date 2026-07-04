@@ -909,6 +909,119 @@ class TestOverlayViewer:
         finally:
             viewer.close()
 
+    def test_difference_map_respects_physical_sampling_for_matching_surfaces(self, qapp):
+        """Difference rendering should vanish for the same surface sampled on two rasters."""
+        x_ref = np.arange(100, dtype=float) * 2.0
+        y_ref = np.arange(80, dtype=float) * 3.0
+        ref_grid = x_ref[None, :] + np.zeros((80, 1), dtype=float)
+
+        x_mov = np.arange(50, dtype=float) * 4.0
+        y_mov = np.arange(40, dtype=float) * 6.0
+        mov_grid = x_mov[None, :] + np.zeros((40, 1), dtype=float)
+
+        scan1 = Surface(ref_grid, 2.0, 3.0)
+        scan2 = Surface(mov_grid, 4.0, 6.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            buffer = np.empty_like(viewer.scan1, dtype=np.float64)
+            diff = viewer._render_difference(
+                viewer.scan1,
+                viewer.scan2,
+                viewer._reference_base_transform,
+                viewer._moving_base_transform,
+                0.0,
+                0.0,
+                0.0,
+                buffer,
+            )
+            finite = diff[np.isfinite(diff)]
+            assert finite.size > 0
+            assert np.max(np.abs(finite)) == pytest.approx(0.0)
+        finally:
+            viewer.close()
+
+    def test_display_difference_respects_downsampled_physical_sampling(self, qapp):
+        """Display-resolution difference rendering should stay aligned after preview decimation."""
+        x_ref = np.arange(160, dtype=float) * 2.0
+        ref_grid = x_ref[None, :] + np.zeros((120, 1), dtype=float)
+        x_mov = np.arange(80, dtype=float) * 4.0
+        mov_grid = x_mov[None, :] + np.zeros((60, 1), dtype=float)
+
+        scan1 = Surface(ref_grid, 2.0, 3.0)
+        scan2 = Surface(mov_grid, 4.0, 6.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            buffer = np.empty_like(viewer._display_scan1, dtype=np.float64)
+            diff = viewer._render_difference(
+                viewer._display_scan1,
+                viewer._display_scan2,
+                viewer._display_reference_base_transform,
+                viewer._display_moving_base_transform,
+                0.0,
+                0.0,
+                0.0,
+                buffer,
+            )
+            finite = diff[np.isfinite(diff)]
+            assert finite.size > 0
+            assert np.max(np.abs(finite)) == pytest.approx(0.0)
+        finally:
+            viewer.close()
+
+    def test_overlay_viewer_ignores_per_scan_origin_offsets_for_comparison(self, qapp):
+        """Independent scan origins should not create an automatic overlay offset."""
+        grid = np.arange(12, dtype=float).reshape(3, 4)
+        scan1 = Surface(grid, 2.0, 3.0, x0=0.0, y0=0.0)
+        scan2 = Surface(grid, 2.0, 3.0, x0=100.0, y0=-50.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            transform = viewer._moving_base_transform
+            assert transform.m31() == pytest.approx(viewer._reference_base_transform.m31())
+            assert transform.m32() == pytest.approx(viewer._reference_base_transform.m32())
+        finally:
+            viewer.close()
+
+    def test_overlay_view_range_stays_locked_to_reference_extent(self, qapp):
+        """Overlay and difference views should use the same physical reference frame."""
+        scan1 = Surface(np.zeros((30, 40), dtype=float), 2.0, 3.0)
+        scan2 = Surface(np.zeros((30, 40), dtype=float), 2.0, 3.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            viewer.slider_tx.setValue(25)
+            viewer.slider_ty.setValue(-18)
+            viewer.slider_angle.setValue(130)
+
+            reference_rect = viewer._map_image_rect(viewer.scan1, viewer._reference_base_transform)
+            overlay_rect = viewer.viewbox.viewRect()
+            difference_rect = viewer.diff_view.getView().viewRect()
+
+            assert overlay_rect.left() == pytest.approx(reference_rect.left())
+            assert overlay_rect.top() == pytest.approx(reference_rect.top())
+            assert overlay_rect.width() == pytest.approx(reference_rect.width())
+            assert overlay_rect.height() == pytest.approx(reference_rect.height())
+            assert difference_rect.left() == pytest.approx(reference_rect.left())
+            assert difference_rect.top() == pytest.approx(reference_rect.top())
+            assert difference_rect.width() == pytest.approx(reference_rect.width())
+            assert difference_rect.height() == pytest.approx(reference_rect.height())
+        finally:
+            viewer.close()
+
 
 # ============================================================================
 # ROIController Tests

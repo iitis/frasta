@@ -5,7 +5,8 @@ import numpy as np
 import h5py
 from frasta.io import (
     load_csv_data, load_digital_surf_sur, load_h5_data, load_keyence_zag,
-    load_keyence_zag_surface, load_npz_data, save_h5, save_npz, suggest_units
+    load_keyence_zag_surface, load_npz_data, save_h5, save_npz, save_pts,
+    save_xyz_csv, suggest_units
 )
 from frasta.core import Surface
 
@@ -171,6 +172,47 @@ class TestExporters:
         assert len(result) == 2
         assert result[0].metadata.get('name') == 'scan1'
         assert result[1].metadata.get('name') == 'scan2'
+
+    def test_save_xyz_csv_exports_valid_points(self, tmp_path):
+        """CSV XYZ export should write one line per finite grid sample."""
+        filepath = tmp_path / "points.csv"
+        surface = Surface(
+            height=np.array([[1.0, np.nan], [3.0, 4.0]], dtype=float),
+            dx=2.0,
+            dy=5.0,
+            x0=10.0,
+            y0=20.0,
+        )
+
+        save_xyz_csv(str(filepath), surface)
+
+        rows = filepath.read_text(encoding="utf-8").strip().splitlines()
+        assert rows[0] == "x,y,z"
+        assert rows[1:] == [
+            "10,20,1",
+            "10,25,3",
+            "12,25,4",
+        ]
+
+    def test_save_pts_exports_valid_points(self, tmp_path):
+        """PTS export should write whitespace-delimited finite point rows."""
+        filepath = tmp_path / "points.pts"
+        surface = Surface(
+            height=np.array([[1.0, np.nan], [3.0, 4.0]], dtype=float),
+            dx=2.0,
+            dy=5.0,
+            x0=10.0,
+            y0=20.0,
+        )
+
+        save_pts(str(filepath), surface)
+
+        rows = filepath.read_text(encoding="utf-8").strip().splitlines()
+        assert rows == [
+            "10 20 1",
+            "10 25 3",
+            "12 25 4",
+        ]
 
 
 def test_frasta_io_reexports_new_surface_parsers():

@@ -8,7 +8,7 @@ from .loaders import (
     load_stl_data,
     suggest_units,
 )
-from .exporters import save_h5, save_npz, save_stl
+from .exporters import save_h5, save_npz, save_pts, save_stl, save_xyz_csv
 from .parsers import (
     get_scan_reader,
     get_surface_parser,
@@ -81,6 +81,8 @@ __all__ = [
     "register_surface_parser",
     "save_h5",
     "save_npz",
+    "save_pts",
     "save_stl",
+    "save_xyz_csv",
     "suggest_units",
 ]

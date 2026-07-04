@@ -45,21 +45,26 @@ def rotate_grid(grid, angle_degrees, xi, yi, dx, dy, order=3):
         ...     grid, 45, xi, yi, dx, dy)
     """
     ny, nx = grid.shape
-    center_x = nx / 2
-    center_y = ny / 2
+    center_x = nx / 2.0
+    center_y = ny / 2.0
     
     # Convert angle to radians
     theta = np.radians(angle_degrees)
     
-    # Create rotation matrix (inverse for affine_transform)
-    cos_theta = np.cos(-theta)
-    sin_theta = np.sin(-theta)
-    
-    # Affine transformation matrix
-    matrix = np.array([
-        [cos_theta, -sin_theta],
-        [sin_theta, cos_theta]
-    ])
+    # Build the inverse rotation directly in index space while respecting
+    # anisotropic sample spacing. ``affine_transform`` maps output indices back
+    # to input indices, so we use the inverse rigid transform here.
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    scale_col_to_row = float(dx) / float(dy)
+    scale_row_to_col = float(dy) / float(dx)
+    matrix = np.array(
+        [
+            [cos_theta, sin_theta * scale_col_to_row],
+            [-sin_theta * scale_row_to_col, cos_theta],
+        ],
+        dtype=float,
+    )
     
     # Offset to rotate around center
     offset = np.array([center_y, center_x]) - matrix @ np.array([center_y, center_x])

@@ -165,6 +165,46 @@ class TestRotateGrid:
         
         assert nan_after >= nan_before
 
+    def test_rotate_respects_anisotropic_pixel_spacing(self):
+        """Rotation should operate in physical space when dx and dy differ."""
+        ny, nx = 41, 51
+        dx = 4.0
+        dy = 1.5
+        xi = np.arange(nx, dtype=float) * dx
+        yi = np.arange(ny, dtype=float) * dy
+        grid = np.broadcast_to(xi[None, :], (ny, nx)).copy()
+
+        angle = 30.0
+        rotated, _, _, dx_new, dy_new = rotate_grid(grid, angle, xi, yi, dx, dy, order=1)
+
+        center_x = nx / 2.0
+        center_y = ny / 2.0
+        theta = np.radians(angle)
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        matrix = np.array(
+            [
+                [cos_theta, sin_theta * (dx / dy)],
+                [-sin_theta * (dy / dx), cos_theta],
+            ],
+            dtype=float,
+        )
+        rows, cols = np.indices(grid.shape, dtype=float)
+        coords_in = matrix @ np.stack(
+            [
+                (rows - center_y).ravel(),
+                (cols - center_x).ravel(),
+            ],
+            axis=0,
+        )
+        expected = (coords_in[1] + center_x).reshape(grid.shape) * dx
+
+        mask = np.isfinite(rotated)
+        assert np.any(mask)
+        assert np.allclose(rotated[mask], expected[mask], atol=1e-4, rtol=1e-4)
+        assert dx_new == dx
+        assert dy_new == dy
+
 
 # ============================================================================
 # Tests for rescale_grid

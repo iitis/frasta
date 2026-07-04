@@ -21,7 +21,9 @@ from surface_io import (
     register_surface_parser,
     save_h5,
     save_npz,
+    save_pts,
     save_stl,
+    save_xyz_csv,
     suggest_units,
 )
 
@@ -46,6 +48,8 @@ __all__ = [
     "register_surface_parser",
     "save_h5",
     "save_npz",
+    "save_pts",
     "save_stl",
+    "save_xyz_csv",
     "suggest_units",
 ]

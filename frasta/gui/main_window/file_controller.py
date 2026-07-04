@@ -24,7 +24,9 @@ from ...io import (
     load_stl_data,
     save_h5,
     save_npz,
+    save_pts,
     save_stl,
+    save_xyz_csv,
     suggest_units,
 )
 from ..workers import GridWorker
@@ -556,7 +558,10 @@ class FileController:
             return
 
         fname, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
-            self.main_window, "Save Scan", "", "NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl)"
+            self.main_window,
+            "Save Scan",
+            "",
+            "NPZ (*.npz);;HDF5 (*.h5);;STL (*.stl);;CSV XYZ (*.csv);;PTS (*.pts)",
         )
         if not fname:
             return
@@ -567,6 +572,10 @@ class FileController:
             fname += ".h5"
         elif selected_filter.startswith("STL") and not fname.endswith(".stl"):
             fname += ".stl"
+        elif selected_filter.startswith("CSV XYZ") and not fname.endswith(".csv"):
+            fname += ".csv"
+        elif selected_filter.startswith("PTS") and not fname.endswith(".pts"):
+            fname += ".pts"
 
         try:
             # Prepare scans data: list of (name, Surface)
@@ -588,6 +597,22 @@ class FileController:
                     )
                 name, surface = scans[0]
                 save_stl(fname, surface, binary=True)
+            elif fname.endswith(".csv"):
+                if len(scans) > 1:
+                    QtWidgets.QMessageBox.warning(
+                        self.main_window, "Multiple scans",
+                        "CSV XYZ export can only save a single scan.\nOnly the first scan will be saved."
+                    )
+                name, surface = scans[0]
+                save_xyz_csv(fname, surface)
+            elif fname.endswith(".pts"):
+                if len(scans) > 1:
+                    QtWidgets.QMessageBox.warning(
+                        self.main_window, "Multiple scans",
+                        "PTS export can only save a single scan.\nOnly the first scan will be saved."
+                    )
+                name, surface = scans[0]
+                save_pts(fname, surface)
 
             QtWidgets.QMessageBox.information(self.main_window, "Saved", f"Scan saved to: {fname}")
 

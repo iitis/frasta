@@ -17,7 +17,7 @@ from frasta.gui.scan_tab.interactive_handler import InteractiveHandler
 from frasta.gui.scan_tab.scan_tab import ScanTab
 from frasta.gui.scan_tab.transform_operations import TransformOperations
 from frasta.gui.widgets import HistogramViewBox
-from frasta.core import SurfaceOrientation
+from frasta.core import Surface, SurfaceOrientation
 from frasta.gui.colorbar_common import (
     build_colorbar_tick_layout,
     build_tick_label_rect,
@@ -478,6 +478,26 @@ class TestTransformOperations:
         
         # NaN count should be preserved
         assert np.isnan(result).sum() == 2
+
+    def test_scan_tab_rotate_90_swaps_pixel_spacing(self, qapp):
+        """ScanTab 90-degree rotation should swap the physical axis spacing."""
+        tab = ScanTab()
+        surface = Surface(
+            height=np.arange(12, dtype=float).reshape(3, 4),
+            dx=2.0,
+            dy=5.0,
+            x0=10.0,
+            y0=20.0,
+        )
+        tab.set_surface(surface)
+
+        tab.scan_rot90()
+
+        assert tab.grid.shape == (4, 3)
+        assert tab.dx == pytest.approx(5.0)
+        assert tab.dy == pytest.approx(2.0)
+        assert np.allclose(tab.xi, np.array([10.0, 15.0, 20.0]))
+        assert np.allclose(tab.yi, np.array([20.0, 22.0, 24.0, 26.0]))
     
     def test_invert_z_basic(self):
         """Test invert_z negates values."""

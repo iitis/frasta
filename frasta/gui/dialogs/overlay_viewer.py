@@ -5,7 +5,11 @@ manual alignment through translation and rotation controls, and displaying
 the difference map between aligned scans.
 """
 
+import json
 import math
+import traceback
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -13,7 +17,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from ...core import Surface
 from ...utils import get_colormap, get_brushes_for_values
-from ..orientation import build_image_rect, grid_to_image_data
+from ..orientation import grid_to_image_data
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.
@@ -114,35 +118,42 @@ class OverlayViewer(QtWidgets.QWidget):
             self.scan2[::self._preview_stride, ::self._preview_stride],
             dtype=np.float32,
         )
-        self._display_diff_buffer = np.empty_like(self._display_scan2, dtype=np.float32)
-        self._preview_diff_buffer = np.empty_like(self._preview_scan2, dtype=np.float32)
+        self._display_diff_buffer = np.empty_like(self._display_scan1, dtype=np.float32)
+        self._preview_diff_buffer = np.empty_like(self._preview_scan1, dtype=np.float32)
+        self._full_diff_buffer = np.empty_like(self.scan1, dtype=np.float32)
         self._configure_diff_update_timers()
+        self._reference_center_full = self._compute_valid_image_center(self.scan1)
+        self._moving_center_full = self._compute_valid_image_center(self.scan2)
+        self._reference_center_display = self._compute_valid_image_center(self._display_scan1)
+        self._moving_center_display = self._compute_valid_image_center(self._display_scan2)
+        self._reference_center_preview = self._compute_valid_image_center(self._preview_scan1)
+        self._moving_center_preview = self._compute_valid_image_center(self._preview_scan2)
         self._reference_base_transform = self._build_base_image_transform(
             self.scan1_data,
-            self.scan1.shape,
+            self.scan1,
         )
         self._moving_base_transform = self._build_base_image_transform(
             self.scan2_data,
-            self.scan2.shape,
+            self.scan2,
         )
         self._display_reference_base_transform = self._build_base_image_transform(
             self.scan1_data,
-            self._display_scan1.shape,
+            self._display_scan1,
             stride=self._display_stride,
         )
         self._display_moving_base_transform = self._build_base_image_transform(
             self.scan2_data,
-            self._display_scan2.shape,
+            self._display_scan2,
             stride=self._display_stride,
         )
         self._preview_reference_base_transform = self._build_base_image_transform(
             self.scan1_data,
-            self._preview_scan1.shape,
+            self._preview_scan1,
             stride=self._preview_stride,
         )
         self._preview_moving_base_transform = self._build_base_image_transform(
             self.scan2_data,
-            self._preview_scan2.shape,
+            self._preview_scan2,
             stride=self._preview_stride,
         )
 
@@ -157,7 +168,7 @@ class OverlayViewer(QtWidgets.QWidget):
 
         self.viewbox.addItem(self.img1)
         self.viewbox.addItem(self.img2)
-        self.viewbox.autoRange()
+        self._sync_overlay_view_to_reference()
 
         def safe_minmax(arr):
             arr = arr[np.isfinite(arr)]  # discard NaN, +inf, -inf
@@ -211,6 +222,28 @@ class OverlayViewer(QtWidgets.QWidget):
         self.viewbox = self.view.addViewBox()
         self.viewbox.setAspectLocked(True)
         self.viewbox.invertY(True)
+        self._pivot_vline = pg.InfiniteLine(
+            angle=90,
+            movable=False,
+            pen=pg.mkPen(255, 200, 0, width=2),
+        )
+        self._pivot_hline = pg.InfiniteLine(
+            angle=0,
+            movable=False,
+            pen=pg.mkPen(255, 200, 0, width=2),
+        )
+        self._pivot_marker = pg.ScatterPlotItem(
+            size=16,
+            pen=pg.mkPen(255, 200, 0, width=2),
+            brush=pg.mkBrush(255, 200, 0, 180),
+            symbol="o",
+        )
+        self._pivot_vline.setZValue(1000)
+        self._pivot_hline.setZValue(1000)
+        self._pivot_marker.setZValue(1001)
+        self.viewbox.addItem(self._pivot_vline)
+        self.viewbox.addItem(self._pivot_hline)
+        self.viewbox.addItem(self._pivot_marker)
 
         # Difference image
         self.diff_view = pg.ImageView(view=pg.PlotItem())
@@ -220,6 +253,8 @@ class OverlayViewer(QtWidgets.QWidget):
         self.diff_view.setMinimumWidth(0)
         self.diff_view.setColorMap(self._diff_cmap)
         self.diff_view.getImageItem().setLookupTable(self._diff_lut)
+        self.diff_view.getView().setAspectLocked(True)
+        self.diff_view.getView().invertY(True)
 
         # Horizontal splitter: overlay view + difference view
         self.preview_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self)
@@ -282,6 +317,10 @@ class OverlayViewer(QtWidgets.QWidget):
         self.auto_icp_btn = QtWidgets.QPushButton("Auto align (ICP, Experimental)")
         self.auto_icp_btn.clicked.connect(self.apply_auto_icp)
         action_buttons_layout.addWidget(self.auto_icp_btn)
+
+        self.debug_dump_btn = QtWidgets.QPushButton("Save debug bundle")
+        self.debug_dump_btn.clicked.connect(self.save_debug_bundle)
+        action_buttons_layout.addWidget(self.debug_dump_btn)
 
         # self.save_button = QtWidgets.QPushButton("Save aligned grids to .h5")
         # self.save_button.clicked.connect(self.saveAlignedScans)
@@ -538,6 +577,216 @@ class OverlayViewer(QtWidgets.QWidget):
 
         self.close()
 
+    @staticmethod
+    def _qrectf_to_dict(rect: QtCore.QRectF) -> dict[str, float]:
+        """Convert a QRectF into a JSON-serializable dictionary."""
+        return {
+            "left": float(rect.left()),
+            "top": float(rect.top()),
+            "width": float(rect.width()),
+            "height": float(rect.height()),
+            "right": float(rect.right()),
+            "bottom": float(rect.bottom()),
+        }
+
+    @staticmethod
+    def _qtransform_to_dict(transform: QtGui.QTransform) -> dict[str, float]:
+        """Convert a QTransform into a JSON-serializable dictionary."""
+        return {
+            "m11": float(transform.m11()),
+            "m12": float(transform.m12()),
+            "m13": float(transform.m13()),
+            "m21": float(transform.m21()),
+            "m22": float(transform.m22()),
+            "m23": float(transform.m23()),
+            "m31": float(transform.m31()),
+            "m32": float(transform.m32()),
+            "m33": float(transform.m33()),
+        }
+
+    @staticmethod
+    def _surface_debug_dict(surface: Surface, image_data: np.ndarray) -> dict[str, object]:
+        """Describe one surface and its current image-space raster."""
+        return {
+            "grid_shape": list(surface.height.shape),
+            "image_shape": list(image_data.shape),
+            "dx": float(surface.dx),
+            "dy": float(surface.dy),
+            "x0": float(surface.x0),
+            "y0": float(surface.y0),
+            "orientation": str(getattr(surface, "orientation", "default")),
+            "unit": str(getattr(surface, "unit", "um")),
+            "finite_count": int(np.isfinite(image_data).sum()),
+        }
+
+    def _current_moving_transform(self) -> QtGui.QTransform:
+        """Build the transform currently applied to the moving overlay."""
+        return self._build_image_transform(
+            float(self.slider_tx.value()),
+            float(self.slider_ty.value()),
+            float(self.slider_angle.value()) / 10.0,
+            self._moving_base_transform,
+            scene_rotation_center=self._reference_scene_rotation_center(
+                self.scan1,
+                self._reference_base_transform,
+            ),
+        )
+
+    @staticmethod
+    def _viewbox_flag(view_like, key: str, default: bool = False) -> bool:
+        """Read one boolean state flag from a ViewBox or PlotItem-backed view."""
+        if hasattr(view_like, "state") and isinstance(getattr(view_like, "state"), dict):
+            return bool(view_like.state.get(key, default))
+        if hasattr(view_like, "getViewBox"):
+            view_box = view_like.getViewBox()
+            if hasattr(view_box, "state") and isinstance(getattr(view_box, "state"), dict):
+                return bool(view_box.state.get(key, default))
+        return bool(default)
+
+    def _collect_debug_state(self) -> dict[str, object]:
+        """Collect the current overlay geometry and transform state."""
+        moving_transform = self._current_moving_transform()
+        reference_rect = self._map_image_rect(self.scan1, self._reference_base_transform)
+        moving_rect = self._map_image_rect(self.scan2, moving_transform)
+        diff_rect = self.diff_view.getView().viewRect()
+        overlay_rect = self.viewbox.viewRect()
+        diff_image_item = self.diff_view.getImageItem()
+        diff_image_transform = diff_image_item.transform()
+        diff_scene_rect = diff_image_item.sceneBoundingRect()
+
+        return {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "sliders": {
+                "tx": float(self.slider_tx.value()),
+                "ty": float(self.slider_ty.value()),
+                "angle_deg": float(self.slider_angle.value()) / 10.0,
+            },
+            "reference_surface": self._surface_debug_dict(self.scan1_data, self.scan1),
+            "moving_surface": self._surface_debug_dict(self.scan2_data, self.scan2),
+            "centers": {
+                "reference_full": [float(v) for v in self._reference_center_full],
+                "moving_full": [float(v) for v in self._moving_center_full],
+                "reference_display": [float(v) for v in self._reference_center_display],
+                "moving_display": [float(v) for v in self._moving_center_display],
+                "reference_preview": [float(v) for v in self._reference_center_preview],
+                "moving_preview": [float(v) for v in self._moving_center_preview],
+            },
+            "transforms": {
+                "reference_base": self._qtransform_to_dict(self._reference_base_transform),
+                "moving_base": self._qtransform_to_dict(self._moving_base_transform),
+                "moving_current": self._qtransform_to_dict(moving_transform),
+                "display_reference_base": self._qtransform_to_dict(self._display_reference_base_transform),
+                "display_moving_base": self._qtransform_to_dict(self._display_moving_base_transform),
+                "preview_reference_base": self._qtransform_to_dict(self._preview_reference_base_transform),
+                "preview_moving_base": self._qtransform_to_dict(self._preview_moving_base_transform),
+            },
+            "rects": {
+                "reference_image_rect": self._qrectf_to_dict(reference_rect),
+                "moving_image_rect": self._qrectf_to_dict(moving_rect),
+                "overlay_view_rect": self._qrectf_to_dict(overlay_rect),
+                "difference_view_rect": self._qrectf_to_dict(diff_rect),
+                "difference_item_scene_rect": self._qrectf_to_dict(diff_scene_rect),
+            },
+            "view_state": {
+                "overlay_y_inverted": self._viewbox_flag(self.viewbox, "yInverted", False),
+                "difference_y_inverted": self._viewbox_flag(self.diff_view.getView(), "yInverted", False),
+                "overlay_aspect_locked": self._viewbox_flag(self.viewbox, "aspectLocked", False),
+                "difference_aspect_locked": self._viewbox_flag(self.diff_view.getView(), "aspectLocked", False),
+                "display_stride": int(self._display_stride),
+                "preview_stride": int(self._preview_stride),
+            },
+            "graphics_items": {
+                "overlay_reference_transform": self._qtransform_to_dict(self.img1.transform()),
+                "overlay_moving_transform": self._qtransform_to_dict(self.img2.transform()),
+                "difference_item_transform": self._qtransform_to_dict(diff_image_transform),
+                "difference_item_pos": [
+                    float(diff_image_item.pos().x()),
+                    float(diff_image_item.pos().y()),
+                ],
+            },
+        }
+
+    @staticmethod
+    def _save_widget_snapshot(widget: QtWidgets.QWidget, target: Path) -> None:
+        """Save one widget snapshot as PNG."""
+        pixmap = widget.grab()
+        pixmap.save(str(target), "PNG")
+
+    def save_debug_bundle(self) -> None:
+        """Save the current overlay state, rasters, and screenshots for debugging."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_dir = Path.cwd() / f"overlay_debug_{timestamp}"
+        target_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select folder for overlay debug bundle",
+            str(default_dir.parent),
+        )
+        if not target_dir:
+            return
+
+        bundle_dir = Path(target_dir) / f"overlay_debug_{timestamp}"
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (bundle_dir / "progress.txt").write_text("bundle_dir_created\n", encoding="utf-8")
+            debug_state = self._collect_debug_state()
+            (bundle_dir / "state.json").write_text(
+                json.dumps(debug_state, indent=2),
+                encoding="utf-8",
+            )
+            (bundle_dir / "progress.txt").write_text("state_json_saved\n", encoding="utf-8")
+
+            display_transformed_scan2 = np.empty_like(self._display_scan1, dtype=np.float32)
+            self._render_difference(
+                self._display_scan1,
+                self._display_scan2,
+                self._display_reference_base_transform,
+                self._display_moving_base_transform,
+                float(self.slider_tx.value()),
+                float(self.slider_ty.value()),
+                float(self.slider_angle.value()) / 10.0,
+                display_transformed_scan2,
+            )
+
+            np.savez_compressed(
+                bundle_dir / "arrays.npz",
+                scan1=self.scan1,
+                scan2=self.scan2,
+                display_scan1=self._display_scan1,
+                display_scan2=self._display_scan2,
+                display_transformed_scan2=display_transformed_scan2,
+                display_reference_mask=np.isfinite(self._display_scan1),
+                display_transformed_mask=np.isfinite(display_transformed_scan2),
+                preview_scan1=self._preview_scan1,
+                preview_scan2=self._preview_scan2,
+                diff_image=(
+                    self._last_diff_image
+                    if self._last_diff_image is not None
+                    else np.empty((0, 0), dtype=np.float32)
+                ),
+            )
+            (bundle_dir / "progress.txt").write_text("arrays_saved\n", encoding="utf-8")
+
+            self._save_widget_snapshot(self.view, bundle_dir / "overlay_view.png")
+            self._save_widget_snapshot(self.diff_view, bundle_dir / "difference_view.png")
+            (bundle_dir / "progress.txt").write_text("snapshots_saved\n", encoding="utf-8")
+        except Exception as exc:
+            (bundle_dir / "error.txt").write_text(
+                traceback.format_exc(),
+                encoding="utf-8",
+            )
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Debug bundle failed",
+                f"Failed to save overlay debug bundle:\n{exc}\n\nDetails saved to:\n{bundle_dir / 'error.txt'}",
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Debug bundle saved",
+            f"Saved overlay debug bundle to:\n{bundle_dir}",
+        )
+
 
     # def accept_result(self):
     #     # pobierz aktualne dopasowane siatki, np. po transformacji
@@ -589,43 +838,89 @@ class OverlayViewer(QtWidgets.QWidget):
         ty: float,
         angle: float,
         base_transform: QtGui.QTransform,
-        image_shape: tuple[int, int],
+        rotation_center: tuple[float, float] | None = None,
+        scene_rotation_center: QtCore.QPointF | None = None,
     ) -> QtGui.QTransform:
-        """Create a transform that rotates around the moving-image center."""
-        local_width = float(image_shape[0])
-        local_height = float(image_shape[1])
-        center_scene = base_transform.map(QtCore.QPointF(local_width / 2.0, local_height / 2.0))
-        transform = QtGui.QTransform()
-        transform.translate(tx + center_scene.x(), ty + center_scene.y())
-        transform.rotate(angle)
-        transform.translate(-center_scene.x(), -center_scene.y())
-        return transform * base_transform
+        """Create a scene transform from one base image transform and manual pose."""
+        if scene_rotation_center is not None:
+            pivot_x = float(scene_rotation_center.x())
+            pivot_y = float(scene_rotation_center.y())
+        elif rotation_center is not None:
+            center_scene = base_transform.map(
+                QtCore.QPointF(float(rotation_center[0]), float(rotation_center[1]))
+            )
+            pivot_x = float(center_scene.x())
+            pivot_y = float(center_scene.y())
+        else:
+            pivot_x = 0.0
+            pivot_y = 0.0
+
+        angle_rad = math.radians(float(angle))
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        translation_matrix = np.array(
+            [
+                [1.0, 0.0, float(tx)],
+                [0.0, 1.0, float(ty)],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        rotate_about_pivot = np.array(
+            [
+                [cos_a, -sin_a, pivot_x - cos_a * pivot_x + sin_a * pivot_y],
+                [sin_a, cos_a, pivot_y - sin_a * pivot_x - cos_a * pivot_y],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        transform_matrix = (
+            translation_matrix
+            @ rotate_about_pivot
+            @ self._qtransform_to_matrix(base_transform)
+        )
+        return self._matrix_to_qtransform(transform_matrix)
+
+    @staticmethod
+    def _compute_valid_image_center(image_data: np.ndarray) -> tuple[float, float]:
+        """Return the centroid of the finite-data footprint in image coordinates."""
+        valid_mask = np.isfinite(image_data)
+        if np.any(valid_mask):
+            valid_x, valid_y = np.where(valid_mask)
+            # Use the sample-footprint centroid instead of the bounding-box center.
+            # Irregular scan outlines otherwise feel like they rotate around an edge.
+            center_x = float(np.mean(valid_x.astype(np.float64) + 0.5))
+            center_y = float(np.mean(valid_y.astype(np.float64) + 0.5))
+            return center_x, center_y
+        return image_data.shape[0] / 2.0, image_data.shape[1] / 2.0
 
     @staticmethod
     def _build_base_image_transform(
         surface: Surface,
-        image_shape: tuple[int, int],
+        image_data: np.ndarray,
         *,
         stride: int = 1,
+        normalize_origin: bool = True,
     ) -> QtGui.QTransform:
-        """Map one image grid into physical scene coordinates."""
-        del stride
-        rect = build_image_rect(
-            surface.height.shape,
-            dx=float(surface.dx),
-            dy=float(surface.dy),
-            x0=float(surface.x0),
-            y0=float(surface.y0),
-            orientation=getattr(surface, "orientation", "default"),
-        )
-        local_width = float(image_shape[0])
-        local_height = float(image_shape[1])
+        """Map one image grid into centered local physical coordinates."""
+        effective_dx = float(surface.dx) * max(1, int(stride))
+        effective_dy = float(surface.dy) * max(1, int(stride))
+        local_width = float(image_data.shape[0])
+        local_height = float(image_data.shape[1])
         transform = QtGui.QTransform()
-        transform.translate(rect.left(), rect.top())
-        transform.scale(
-            rect.width() / max(local_width, 1.0),
-            rect.height() / max(local_height, 1.0),
-        )
+        if normalize_origin:
+            center_x, center_y = OverlayViewer._compute_valid_image_center(image_data)
+            transform.translate(
+                -(center_x * effective_dx),
+                -(center_y * effective_dy),
+            )
+        else:
+            transform.translate(
+                float(surface.x0) - (effective_dx / 2.0),
+                float(surface.y0) - (effective_dy / 2.0),
+            )
+        transform.scale(effective_dx, effective_dy)
         return transform
 
     @staticmethod
@@ -641,14 +936,85 @@ class OverlayViewer(QtWidgets.QWidget):
         )
 
     @staticmethod
+    def _matrix_to_qtransform(matrix: np.ndarray) -> QtGui.QTransform:
+        """Convert one homogeneous 3x3 matrix into a Qt transform."""
+        return QtGui.QTransform(
+            float(matrix[0, 0]),
+            float(matrix[1, 0]),
+            float(matrix[2, 0]),
+            float(matrix[0, 1]),
+            float(matrix[1, 1]),
+            float(matrix[2, 1]),
+            float(matrix[0, 2]),
+            float(matrix[1, 2]),
+            float(matrix[2, 2]),
+        )
+
+    @staticmethod
     def _qtransform_to_affine(transform: QtGui.QTransform) -> np.ndarray:
         """Convert a Qt transform into the inverse affine matrix for resampling."""
         matrix_3x3 = OverlayViewer._qtransform_to_matrix(transform)
         return np.linalg.inv(matrix_3x3)[0:2, 0:3]
 
+    @staticmethod
+    def _map_image_rect(
+        image_data: np.ndarray,
+        image_transform: QtGui.QTransform,
+    ) -> QtCore.QRectF:
+        """Return the scene rectangle covered by a transformed image."""
+        return image_transform.mapRect(
+            QtCore.QRectF(
+                0.0,
+                0.0,
+                float(image_data.shape[0]),
+                float(image_data.shape[1]),
+            )
+        )
+
+    def _sync_overlay_view_to_reference(self) -> None:
+        """Keep the overlay view framed to the reference scan extent."""
+        self.viewbox.setRange(
+            self._map_image_rect(self.scan1, self._reference_base_transform),
+            padding=0.0,
+        )
+        self._update_rotation_pivot_marker()
+
+    def _reference_scene_rotation_center(
+        self,
+        reference_scan: np.ndarray,
+        reference_base_transform: QtGui.QTransform,
+    ) -> QtCore.QPointF:
+        """Return the reference-view center used as the manual rotation pivot."""
+        if reference_scan is self._preview_scan1:
+            reference_center = self._reference_center_preview
+        elif reference_scan is self._display_scan1:
+            reference_center = self._reference_center_display
+        else:
+            reference_center = self._reference_center_full
+        return reference_base_transform.map(
+            QtCore.QPointF(float(reference_center[0]), float(reference_center[1]))
+        )
+
+    def _update_rotation_pivot_marker(self) -> None:
+        """Update the visible pivot marker used by manual rotation."""
+        pivot = self._reference_scene_rotation_center(
+            self.scan1,
+            self._reference_base_transform,
+        )
+        self._pivot_vline.setPos(float(pivot.x()))
+        self._pivot_hline.setPos(float(pivot.y()))
+        self._pivot_marker.setData([float(pivot.x())], [float(pivot.y())])
+
     def _schedule_difference_updates(self) -> None:
-        """Queue a lightweight preview followed by a deferred full-resolution redraw."""
+        """Queue a lightweight preview and defer full redraw until interaction settles."""
         self._preview_timer.start()
+        if (
+            self.slider_tx.isSliderDown()
+            or self.slider_ty.isSliderDown()
+            or self.slider_angle.isSliderDown()
+        ):
+            self._full_refresh_timer.stop()
+            return
         self._full_refresh_timer.start()
 
     def _render_difference(
@@ -663,28 +1029,46 @@ class OverlayViewer(QtWidgets.QWidget):
         output_buffer: np.ndarray,
     ) -> np.ndarray:
         """Transform the moving scan into the reference frame and return the signed difference."""
-        from scipy.ndimage import affine_transform
+        from scipy.ndimage import map_coordinates
 
+        rotation_pivot = self._reference_scene_rotation_center(
+            reference_scan,
+            reference_base_transform,
+        )
         moving_transform = self._build_image_transform(
             tx,
             ty,
             angle,
             moving_base_transform,
-            moving_scan.shape,
+            scene_rotation_center=rotation_pivot,
         )
         transform_xy = (
             np.linalg.inv(self._qtransform_to_matrix(moving_transform))
             @ self._qtransform_to_matrix(reference_base_transform)
         )
-        affine_transform(
+
+        ref_axis0, ref_axis1 = np.meshgrid(
+            np.arange(reference_scan.shape[0], dtype=np.float64) + 0.5,
+            np.arange(reference_scan.shape[1], dtype=np.float64) + 0.5,
+            indexing='ij',
+        )
+        reference_points = np.stack(
+            (
+                ref_axis0.ravel(),
+                ref_axis1.ravel(),
+                np.ones(ref_axis0.size, dtype=np.float64),
+            ),
+            axis=0,
+        )
+        moving_points = transform_xy @ reference_points
+        sampled = map_coordinates(
             moving_scan,
-            matrix=transform_xy[:2, :2],
-            offset=transform_xy[:2, 2],
+            [moving_points[0] - 0.5, moving_points[1] - 0.5],
             order=1,
             mode='constant',
             cval=np.nan,
-            output=output_buffer,
-        )
+        ).reshape(reference_scan.shape)
+        np.copyto(output_buffer, sampled, casting='unsafe')
 
         return reference_scan - output_buffer
 
@@ -846,6 +1230,7 @@ class OverlayViewer(QtWidgets.QWidget):
         scan_diff: np.ndarray,
         max_abs: float,
         *,
+        image_transform: QtGui.QTransform,
         update_histogram: bool,
         auto_downsample: bool,
     ) -> None:
@@ -866,6 +1251,11 @@ class OverlayViewer(QtWidgets.QWidget):
             levels=levels_to_apply,
             autoHistogramRange=False,
         )
+        diff_image_item = self.diff_view.getImageItem()
+        diff_image_item.setTransform(image_transform)
+        diff_view_box = self.diff_view.getView()
+        diff_rect = self._map_image_rect(scan_diff, image_transform)
+        diff_view_box.setRange(diff_rect, padding=0.0)
         self._last_auto_diff_levels = target_levels
         if self._diff_use_auto_levels:
             self._sync_diff_controls_from_levels(target_levels)
@@ -891,6 +1281,7 @@ class OverlayViewer(QtWidgets.QWidget):
         self._display_difference(
             scan_diff,
             max_abs,
+            image_transform=self._preview_reference_base_transform,
             update_histogram=False,
             auto_downsample=False,
         )
@@ -903,19 +1294,20 @@ class OverlayViewer(QtWidgets.QWidget):
         ty = self.slider_ty.value()
         angle = float(self.slider_angle.value()) / 10.0
         scan_diff = self._render_difference(
-            self._display_scan1,
-            self._display_scan2,
-            self._display_reference_base_transform,
-            self._display_moving_base_transform,
+            self.scan1,
+            self.scan2,
+            self._reference_base_transform,
+            self._moving_base_transform,
             float(tx),
             float(ty),
             angle,
-            self._display_diff_buffer,
+            self._full_diff_buffer,
         )
         max_abs = max(abs(level) for level in self._compute_auto_levels(scan_diff))
         self._display_difference(
             scan_diff,
             max_abs,
+            image_transform=self._reference_base_transform,
             update_histogram=True,
             auto_downsample=True,
         )
@@ -1044,9 +1436,13 @@ class OverlayViewer(QtWidgets.QWidget):
             ty,
             angle,
             self._moving_base_transform,
-            self.original_scan2.shape,
+            scene_rotation_center=self._reference_scene_rotation_center(
+                self.scan1,
+                self._reference_base_transform,
+            ),
         )
         self.img2.setTransform(transform)
+        self._sync_overlay_view_to_reference()
         self._schedule_difference_updates()
         return
 

@@ -7,6 +7,19 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _surface_to_xyz_points(surface) -> np.ndarray:
+    """Convert one gridded surface into ``(N, 3)`` point samples."""
+
+    xi = np.asarray(surface.xi, dtype=np.float64)
+    yi = np.asarray(surface.yi, dtype=np.float64)
+    grid = np.asarray(surface.height, dtype=np.float64)
+    xx, yy = np.meshgrid(xi, yi)
+    valid_mask = np.isfinite(grid)
+    if not np.any(valid_mask):
+        raise ValueError("Grid contains no valid data points")
+    return np.column_stack((xx[valid_mask], yy[valid_mask], grid[valid_mask]))
+
+
 def save_npz(fname, scans):
     """Save scans to FRASTA-style NPZ."""
 
@@ -115,3 +128,31 @@ def save_stl(fname, surface, binary=True, max_points=50000000):
     mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces))
     mesh.export(fname, file_type="stl" if binary else "stl_ascii")
     logger.info("Saved mesh with %s vertices and %s faces to %s", len(vertices), len(faces), fname)
+
+
+def save_xyz_csv(fname, surface, delimiter=","):
+    """Save one surface as text ``x,y,z`` points."""
+
+    points = _surface_to_xyz_points(surface)
+    np.savetxt(
+        fname,
+        points,
+        delimiter=delimiter,
+        header="x,y,z" if delimiter == "," else "x y z",
+        comments="",
+        fmt="%.9g",
+    )
+    logger.info("Saved %s XYZ points to %s", len(points), fname)
+
+
+def save_pts(fname, surface):
+    """Save one surface as whitespace-delimited ``.pts`` point rows."""
+
+    points = _surface_to_xyz_points(surface)
+    np.savetxt(
+        fname,
+        points,
+        delimiter=" ",
+        fmt="%.9g",
+    )
+    logger.info("Saved %s PTS points to %s", len(points), fname)

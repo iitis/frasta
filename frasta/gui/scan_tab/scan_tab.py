@@ -1394,6 +1394,14 @@ class ScanTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(parent or self, "No data", "Load grid first.")
             return
         self.grid = TransformOperations.rotate_90(self.grid, parent)
+        old_dx = self.dx if self.dx not in (None, 0) else 1.0
+        old_dy = self.dy if self.dy not in (None, 0) else 1.0
+        old_x0 = self.xi[0] if self.xi is not None and len(self.xi) else 0.0
+        old_y0 = self.yi[0] if self.yi is not None and len(self.yi) else 0.0
+        new_ny, new_nx = self.grid.shape
+        self.dx, self.dy = old_dy, old_dx
+        self.xi = old_x0 + np.arange(new_nx, dtype=float) * self.dx
+        self.yi = old_y0 + np.arange(new_ny, dtype=float) * self.dy
         self.update_image()
     
     def invert_scan(self, parent=None):
