@@ -842,6 +842,30 @@ class TestOverlayViewer:
         finally:
             viewer.close()
 
+    def test_overlay_viewer_maps_images_to_physical_extents(self, qapp):
+        """Overlay viewer should scale each image by its native physical spacing."""
+        scan1 = Surface(np.zeros((3, 4), dtype=float), 2.0, 5.0, x0=10.0, y0=20.0)
+        scan2 = Surface(np.zeros((3, 4), dtype=float), 4.0, 10.0, x0=10.0, y0=20.0)
+        parent = QtWidgets.QWidget()
+        parent.roi_controller = Mock()
+        parent.roi_controller.create_mask = Mock(return_value=None)
+
+        viewer = OverlayViewer(scan1, scan2, parent=parent)
+        try:
+            bounds = []
+            for image in (viewer.img1, viewer.img2):
+                rect = image.boundingRect()
+                top_left = image.transform().map(QtCore.QPointF(0.0, 0.0))
+                bottom_right = image.transform().map(QtCore.QPointF(rect.width(), rect.height()))
+                bounds.append((bottom_right.x() - top_left.x(), bottom_right.y() - top_left.y()))
+
+            assert bounds[0][0] == pytest.approx(8.0)
+            assert bounds[0][1] == pytest.approx(15.0)
+            assert bounds[1][0] == pytest.approx(16.0)
+            assert bounds[1][1] == pytest.approx(30.0)
+        finally:
+            viewer.close()
+
     def test_auto_icp_updates_manual_sliders(self, qapp):
         """Automatic ICP proposal should write estimated values into sliders."""
         scan1 = Surface(np.zeros((8, 8), dtype=float), 1.0, 1.0)

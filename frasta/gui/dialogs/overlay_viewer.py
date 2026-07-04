@@ -13,7 +13,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from ...core import Surface
 from ...utils import get_colormap, get_brushes_for_values
-from ..orientation import grid_to_image_data
+from ..orientation import build_image_rect, grid_to_image_data
 
 class OverlayViewer(QtWidgets.QWidget):
     """Interactive widget for overlaying and aligning two scan datasets.
@@ -117,6 +117,34 @@ class OverlayViewer(QtWidgets.QWidget):
         self._display_diff_buffer = np.empty_like(self._display_scan2, dtype=np.float32)
         self._preview_diff_buffer = np.empty_like(self._preview_scan2, dtype=np.float32)
         self._configure_diff_update_timers()
+        self._reference_base_transform = self._build_base_image_transform(
+            self.scan1_data,
+            self.scan1.shape,
+        )
+        self._moving_base_transform = self._build_base_image_transform(
+            self.scan2_data,
+            self.scan2.shape,
+        )
+        self._display_reference_base_transform = self._build_base_image_transform(
+            self.scan1_data,
+            self._display_scan1.shape,
+            stride=self._display_stride,
+        )
+        self._display_moving_base_transform = self._build_base_image_transform(
+            self.scan2_data,
+            self._display_scan2.shape,
+            stride=self._display_stride,
+        )
+        self._preview_reference_base_transform = self._build_base_image_transform(
+            self.scan1_data,
+            self._preview_scan1.shape,
+            stride=self._preview_stride,
+        )
+        self._preview_moving_base_transform = self._build_base_image_transform(
+            self.scan2_data,
+            self._preview_scan2.shape,
+            stride=self._preview_stride,
+        )
 
         self.create_gui()
 
@@ -124,6 +152,8 @@ class OverlayViewer(QtWidgets.QWidget):
         self.img1 = pg.ImageItem(self.scan1)
         self.img2 = pg.ImageItem(self.scan2)
         self.img2.setOpacity(0.5)
+        self.img1.setTransform(self._reference_base_transform)
+        self.img2.setTransform(self._moving_base_transform)
 
         self.viewbox.addItem(self.img1)
         self.viewbox.addItem(self.img2)
@@ -468,30 +498,23 @@ class OverlayViewer(QtWidgets.QWidget):
 
 
     def accept_result(self):
-        from scipy.ndimage import affine_transform
-
-        qt_transform = self.img2.transform()
-        m = np.array([
-            [qt_transform.m11(), qt_transform.m21(), qt_transform.m31()],
-            [qt_transform.m12(), qt_transform.m22(), qt_transform.m32()],
-            [0,                 0,                 1]
-        ])
-        affine_matrix = np.linalg.inv(m)[0:2, 0:3]
-
-        scan2_trans = affine_transform(
+        tx = float(self.slider_tx.value())
+        ty = float(self.slider_ty.value())
+        angle = float(self.slider_angle.value()) / 10.0
+        scan2_trans = np.empty_like(self.scan1, dtype=np.float64)
+        self._render_difference(
+            self.scan1,
             self.scan2,
-            matrix=affine_matrix[:, :2],
-            offset=affine_matrix[:, 2],
-            order=1,
-            mode='constant',
-            cval=np.nan
+            self._reference_base_transform,
+            self._moving_base_transform,
+            tx,
+            ty,
+            angle,
+            output_buffer=scan2_trans,
         )
 
-        h = min(self.scan1.shape[0], scan2_trans.shape[0])
-        w = min(self.scan1.shape[1], scan2_trans.shape[1])
-
         data1 = Surface(
-            height=self.scan1[:h, :w].T,
+            height=self.scan1.T,
             dx=self.scan1_data.dx,
             dy=self.scan1_data.dy,
             x0=self.scan1_data.x0,
@@ -501,7 +524,7 @@ class OverlayViewer(QtWidgets.QWidget):
         )
 
         data2 = Surface(
-            height=scan2_trans[:h, :w].T,
+            height=scan2_trans.T,
             dx=self.scan1_data.dx,
             dy=self.scan1_data.dy,
             x0=self.scan1_data.x0,
@@ -565,21 +588,50 @@ class OverlayViewer(QtWidgets.QWidget):
         tx: float,
         ty: float,
         angle: float,
+        base_transform: QtGui.QTransform,
         image_shape: tuple[int, int],
     ) -> QtGui.QTransform:
         """Create a transform that rotates around the moving-image center."""
-        h, w = image_shape
-        cx, cy = w / 2.0, h / 2.0
+        local_width = float(image_shape[0])
+        local_height = float(image_shape[1])
+        center_scene = base_transform.map(QtCore.QPointF(local_width / 2.0, local_height / 2.0))
         transform = QtGui.QTransform()
-        transform.translate(tx + cx, ty + cy)
+        transform.translate(tx + center_scene.x(), ty + center_scene.y())
         transform.rotate(angle)
-        transform.translate(-cx, -cy)
+        transform.translate(-center_scene.x(), -center_scene.y())
+        return transform * base_transform
+
+    @staticmethod
+    def _build_base_image_transform(
+        surface: Surface,
+        image_shape: tuple[int, int],
+        *,
+        stride: int = 1,
+    ) -> QtGui.QTransform:
+        """Map one image grid into physical scene coordinates."""
+        del stride
+        rect = build_image_rect(
+            surface.height.shape,
+            dx=float(surface.dx),
+            dy=float(surface.dy),
+            x0=float(surface.x0),
+            y0=float(surface.y0),
+            orientation=getattr(surface, "orientation", "default"),
+        )
+        local_width = float(image_shape[0])
+        local_height = float(image_shape[1])
+        transform = QtGui.QTransform()
+        transform.translate(rect.left(), rect.top())
+        transform.scale(
+            rect.width() / max(local_width, 1.0),
+            rect.height() / max(local_height, 1.0),
+        )
         return transform
 
     @staticmethod
-    def _qtransform_to_affine(transform: QtGui.QTransform) -> np.ndarray:
-        """Convert a Qt transform into the inverse affine matrix for resampling."""
-        matrix_3x3 = np.array(
+    def _qtransform_to_matrix(transform: QtGui.QTransform) -> np.ndarray:
+        """Convert one Qt transform into a homogeneous 3x3 matrix."""
+        return np.array(
             [
                 [transform.m11(), transform.m21(), transform.m31()],
                 [transform.m12(), transform.m22(), transform.m32()],
@@ -587,6 +639,11 @@ class OverlayViewer(QtWidgets.QWidget):
             ],
             dtype=float,
         )
+
+    @staticmethod
+    def _qtransform_to_affine(transform: QtGui.QTransform) -> np.ndarray:
+        """Convert a Qt transform into the inverse affine matrix for resampling."""
+        matrix_3x3 = OverlayViewer._qtransform_to_matrix(transform)
         return np.linalg.inv(matrix_3x3)[0:2, 0:3]
 
     def _schedule_difference_updates(self) -> None:
@@ -598,6 +655,8 @@ class OverlayViewer(QtWidgets.QWidget):
         self,
         reference_scan: np.ndarray,
         moving_scan: np.ndarray,
+        reference_base_transform: QtGui.QTransform,
+        moving_base_transform: QtGui.QTransform,
         tx: float,
         ty: float,
         angle: float,
@@ -606,21 +665,28 @@ class OverlayViewer(QtWidgets.QWidget):
         """Transform the moving scan into the reference frame and return the signed difference."""
         from scipy.ndimage import affine_transform
 
-        qt_transform = self._build_image_transform(tx, ty, angle, moving_scan.shape)
-        affine_matrix = self._qtransform_to_affine(qt_transform)
+        moving_transform = self._build_image_transform(
+            tx,
+            ty,
+            angle,
+            moving_base_transform,
+            moving_scan.shape,
+        )
+        transform_xy = (
+            np.linalg.inv(self._qtransform_to_matrix(moving_transform))
+            @ self._qtransform_to_matrix(reference_base_transform)
+        )
         affine_transform(
             moving_scan,
-            matrix=affine_matrix[:, :2],
-            offset=affine_matrix[:, 2],
+            matrix=transform_xy[:2, :2],
+            offset=transform_xy[:2, 2],
             order=1,
             mode='constant',
             cval=np.nan,
             output=output_buffer,
         )
 
-        h = min(reference_scan.shape[0], output_buffer.shape[0])
-        w = min(reference_scan.shape[1], output_buffer.shape[1])
-        return reference_scan[:h, :w] - output_buffer[:h, :w]
+        return reference_scan - output_buffer
 
     @staticmethod
     def _compute_auto_levels(scan_diff: np.ndarray) -> tuple[float, float]:
@@ -808,12 +874,14 @@ class OverlayViewer(QtWidgets.QWidget):
 
     def _update_difference_preview(self) -> None:
         """Refresh a smaller live-preview difference map while sliders are moving."""
-        tx = self.slider_tx.value() / float(self._preview_stride)
-        ty = self.slider_ty.value() / float(self._preview_stride)
+        tx = float(self.slider_tx.value())
+        ty = float(self.slider_ty.value())
         angle = float(self.slider_angle.value()) / 10.0
         scan_diff = self._render_difference(
             self._preview_scan1,
             self._preview_scan2,
+            self._preview_reference_base_transform,
+            self._preview_moving_base_transform,
             tx,
             ty,
             angle,
@@ -837,8 +905,10 @@ class OverlayViewer(QtWidgets.QWidget):
         scan_diff = self._render_difference(
             self._display_scan1,
             self._display_scan2,
-            tx / float(self._display_stride),
-            ty / float(self._display_stride),
+            self._display_reference_base_transform,
+            self._display_moving_base_transform,
+            float(tx),
+            float(ty),
             angle,
             self._display_diff_buffer,
         )
@@ -969,7 +1039,13 @@ class OverlayViewer(QtWidgets.QWidget):
         self.label_ty.setText(f"Y: {ty}")
         self.label_angle.setText(f"Angle: {angle}°")
 
-        transform = self._build_image_transform(tx, ty, angle, self.original_scan2.shape)
+        transform = self._build_image_transform(
+            tx,
+            ty,
+            angle,
+            self._moving_base_transform,
+            self.original_scan2.shape,
+        )
         self.img2.setTransform(transform)
         self._schedule_difference_updates()
         return
@@ -1061,8 +1137,16 @@ class OverlayViewer(QtWidgets.QWidget):
 
             dy, dx = params.get("translation", (0.0, 0.0))
             rotation = params.get("rotation", 0.0)
-            self._set_slider_value_with_range(self.slider_tx, int(np.round(dx)))
-            self._set_slider_value_with_range(self.slider_ty, int(np.round(dy)))
+            reference_scale_x = abs(self._preview_reference_base_transform.m11())
+            reference_scale_y = abs(self._preview_reference_base_transform.m22())
+            self._set_slider_value_with_range(
+                self.slider_tx,
+                int(np.round(dx * reference_scale_x)),
+            )
+            self._set_slider_value_with_range(
+                self.slider_ty,
+                int(np.round(dy * reference_scale_y)),
+            )
             self._set_slider_value_with_range(self.slider_angle, int(np.round(rotation * 10.0)))
 
             msg = (
