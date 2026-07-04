@@ -1527,26 +1527,28 @@ class OverlayViewer(QtWidgets.QWidget):
                 method=method,
                 max_iterations=25,
                 refine=False,
+                reference_dx=self.scan1_data.dx,
+                reference_dy=self.scan1_data.dy,
+                target_dx=self.scan2_data.dx,
+                target_dy=self.scan2_data.dy,
             )
             QtWidgets.QApplication.restoreOverrideCursor()
             cursor_active = False
 
             dy, dx = params.get("translation", (0.0, 0.0))
             rotation = params.get("rotation", 0.0)
-            reference_scale_x = abs(self._preview_reference_base_transform.m11())
-            reference_scale_y = abs(self._preview_reference_base_transform.m22())
             self._set_slider_value_with_range(
                 self.slider_tx,
-                int(np.round(dx * reference_scale_x)),
+                int(np.round(dx)),
             )
             self._set_slider_value_with_range(
                 self.slider_ty,
-                int(np.round(dy * reference_scale_y)),
+                int(np.round(dy)),
             )
             self._set_slider_value_with_range(self.slider_angle, int(np.round(rotation * 10.0)))
 
             msg = (
-                f"Suggested translation: ({dx:.2f}, {dy:.2f}) px\n"
+                f"Suggested translation: (x={dx:.2f}, y={dy:.2f}) {self.scan1_data.unit}\n"
                 f"Suggested rotation: {rotation:.2f}°\n"
                 f"RMSE: {params.get('rmse', np.nan):.2f}"
             )

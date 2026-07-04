@@ -484,6 +484,10 @@ class RegistrationController:
                 method=method,
                 refine=refine,
                 stable_region=stable_region,
+                reference_dx=ref_tab.dx or 1.0,
+                reference_dy=ref_tab.dy or 1.0,
+                target_dx=mov_tab.dx or 1.0,
+                target_dy=mov_tab.dy or 1.0,
             )
             
             # Auto-fallback: if cross-correlation gives poor RMSE, try ICP
@@ -501,6 +505,10 @@ class RegistrationController:
                     method='icp',
                     refine=refine,
                     stable_region=stable_region,
+                    reference_dx=ref_tab.dx or 1.0,
+                    reference_dy=ref_tab.dy or 1.0,
+                    target_dx=mov_tab.dx or 1.0,
+                    target_dy=mov_tab.dy or 1.0,
                 )
                 logger.info(f"ICP result: RMSE={params['rmse']:.1f} nm, translation={params['translation']}")
             
@@ -580,8 +588,9 @@ class RegistrationController:
             msg = f"Registration completed!\n\n"
             msg += f"Method: {method.upper()}\n"
             if 'translation' in params:
-                tx, ty = params['translation']
-                msg += f"Translation: ({tx:.1f}, {ty:.1f}) pixels\n"
+                shift_y, shift_x = params['translation']
+                unit = getattr(mov_tab.get_surface(), "unit", "um")
+                msg += f"Translation: (x={shift_x:.1f}, y={shift_y:.1f}) {unit}\n"
             if 'rotation' in params:
                 msg += f"Rotation: {params['rotation']:.2f}°\n"
             if 'rmse' in params:

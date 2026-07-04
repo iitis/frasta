@@ -193,7 +193,18 @@ def crop_to_valid_region(grid, xi, yi, dx, dy, margin=0):
     return cropped, new_xi, new_yi, dx, dy
 
 
-def auto_register_surfaces(reference, target, method='icp', max_iterations=100, refine=True, stable_region=False):
+def auto_register_surfaces(
+    reference,
+    target,
+    method='icp',
+    max_iterations=100,
+    refine=True,
+    stable_region=False,
+    reference_dx=1.0,
+    reference_dy=1.0,
+    target_dx=1.0,
+    target_dy=1.0,
+):
     """Automatically registers (aligns) target surface to reference surface.
     
     Finds the optimal translation and rotation to align two surfaces using
@@ -214,7 +225,7 @@ def auto_register_surfaces(reference, target, method='icp', max_iterations=100, 
             
     Returns:
         dict: Registration parameters containing:
-            - 'translation': (dy, dx) translation in pixels
+            - 'translation': (dy, dx) translation in physical units
             - 'rotation': rotation angle in degrees (for ICP)
             - 'rmse': root mean square error after alignment
             - 'inliers': number of matching points
@@ -224,8 +235,36 @@ def auto_register_surfaces(reference, target, method='icp', max_iterations=100, 
         >>> params = auto_register_surfaces(surface1, surface2, method='icp')
         >>> print(f"Translation: {params['translation']}, Rotation: {params['rotation']}°")
     """
+    same_spacing = (
+        np.isclose(float(reference_dx), float(target_dx))
+        and np.isclose(float(reference_dy), float(target_dy))
+    )
     if method == 'correlation':
-        params = _register_correlation(reference, target)
+        if same_spacing:
+            params = _register_correlation(
+                reference,
+                target,
+                reference_dx=reference_dx,
+                reference_dy=reference_dy,
+                target_dx=target_dx,
+                target_dy=target_dy,
+            )
+        else:
+            logger.warning(
+                "Cross-correlation requested for anisotropic or mismatched spacing; "
+                "falling back to ICP in physical space."
+            )
+            params = _register_icp(
+                reference,
+                target,
+                max_iterations,
+                refine=refine,
+                stable_region=stable_region,
+                reference_dx=reference_dx,
+                reference_dy=reference_dy,
+                target_dx=target_dx,
+                target_dy=target_dy,
+            )
     elif method == 'icp':
         return _register_icp(
             reference,
@@ -233,6 +272,10 @@ def auto_register_surfaces(reference, target, method='icp', max_iterations=100, 
             max_iterations,
             refine=refine,
             stable_region=stable_region,
+            reference_dx=reference_dx,
+            reference_dy=reference_dy,
+            target_dx=target_dx,
+            target_dy=target_dy,
         )
     else:
         raise ValueError(f"Unknown registration method: {method}")
@@ -274,7 +317,15 @@ def _detrend_surface_plane(grid: np.ndarray) -> np.ndarray:
     return np.where(valid, grid - plane, 0.0)
 
 
-def _register_correlation(reference, target):
+def _register_correlation(
+    reference,
+    target,
+    *,
+    reference_dx=1.0,
+    reference_dy=1.0,
+    target_dx=1.0,
+    target_dy=1.0,
+):
     """Register using cross-correlation (translation only)."""
     from scipy.signal import correlate
     
@@ -350,8 +401,8 @@ def _register_correlation(reference, target):
             if abs(offset_x) < 1.0:
                 peak_x += offset_x
 
-    dy = peak_y - center[0]
-    dx = peak_x - center[1]
+    dy = (peak_y - center[0]) * float(reference_dy)
+    dx = (peak_x - center[1]) * float(reference_dx)
     
     logger.info(f"Cross-correlation found shift: dy={dy}, dx={dx}")
     
@@ -367,24 +418,32 @@ def _register_correlation(reference, target):
     target_filled = np.where(tgt_nan_mask, tgt_fill, target)
     
     # Apply shift with constant boundary
-    shifted = ndimage_shift(target_filled, (dy, dx), order=3, mode='constant', cval=tgt_fill)
+    shift_rows = dy / float(target_dy)
+    shift_cols = dx / float(target_dx)
+    shifted = ndimage_shift(target_filled, (shift_rows, shift_cols), order=3, mode='constant', cval=tgt_fill)
     
     # Restore NaN mask
-    tgt_nan_mask_shifted = ndimage_shift(tgt_nan_mask.astype(float), (dy, dx), order=0, mode='constant', cval=1.0) > 0.5
+    tgt_nan_mask_shifted = ndimage_shift(
+        tgt_nan_mask.astype(float),
+        (shift_rows, shift_cols),
+        order=0,
+        mode='constant',
+        cval=1.0,
+    ) > 0.5
     shifted[tgt_nan_mask_shifted] = np.nan
     
     # Mark shifted regions that came from outside as NaN
     # Create a mask of valid regions after shift
     valid_mask = np.ones_like(target, dtype=bool)
-    edge_rows = int(np.ceil(abs(dy)))
-    edge_cols = int(np.ceil(abs(dx)))
-    if dy > 0 and edge_rows > 0:
+    edge_rows = int(np.ceil(abs(shift_rows)))
+    edge_cols = int(np.ceil(abs(shift_cols)))
+    if shift_rows > 0 and edge_rows > 0:
         valid_mask[:edge_rows, :] = False
-    elif dy < 0 and edge_rows > 0:
+    elif shift_rows < 0 and edge_rows > 0:
         valid_mask[-edge_rows:, :] = False
-    if dx > 0 and edge_cols > 0:
+    if shift_cols > 0 and edge_cols > 0:
         valid_mask[:, :edge_cols] = False
-    elif dx < 0 and edge_cols > 0:
+    elif shift_cols < 0 and edge_cols > 0:
         valid_mask[:, -edge_cols:] = False
     
     shifted[~valid_mask] = np.nan
@@ -457,6 +516,9 @@ def _registration_rmse_for_grid(
     target: np.ndarray,
     translation: tuple[float, float],
     rotation: float,
+    *,
+    dx: float = 1.0,
+    dy: float = 1.0,
 ) -> tuple[float, int]:
     """Calculate overlap RMSE after applying a candidate registration."""
     if int(np.sum(np.isfinite(reference))) == 0 or int(np.sum(np.isfinite(target))) == 0:
@@ -468,8 +530,8 @@ def _registration_rmse_for_grid(
         target,
         xi,
         yi,
-        1.0,
-        1.0,
+        dx,
+        dy,
         translation,
         rotation=rotation,
     )
@@ -499,6 +561,9 @@ def _optimize_registration_on_grid(
     translation: tuple[float, float],
     rotation: float,
     max_iterations: int,
+    *,
+    dx: float = 1.0,
+    dy: float = 1.0,
 ) -> tuple[tuple[float, float], float]:
     """Refine rigid registration by minimizing height RMSE on the provided grids."""
     if int(np.sum(np.isfinite(reference))) < 10 or int(np.sum(np.isfinite(target))) < 10:
@@ -515,6 +580,8 @@ def _optimize_registration_on_grid(
             target,
             candidate_translation,
             candidate_rotation,
+            dx=dx,
+            dy=dy,
         )
         if candidate_overlap == 0 or not np.isfinite(candidate_rmse):
             return 1e12
@@ -538,9 +605,18 @@ def _compose_registration_parameters(
     delta_translation: tuple[float, float],
     delta_rotation: float,
     grid_shape: tuple[int, int],
+    *,
+    dx: float = 1.0,
+    dy: float = 1.0,
 ) -> tuple[tuple[float, float], float]:
     """Compose two apply_registration-style rigid transforms for one grid shape."""
-    center = np.array([grid_shape[0] / 2.0, grid_shape[1] / 2.0], dtype=float)
+    center = np.array(
+        [
+            (grid_shape[0] / 2.0) * float(dy),
+            (grid_shape[1] / 2.0) * float(dx),
+        ],
+        dtype=float,
+    )
 
     def to_origin_transform(
         translation: tuple[float, float],
@@ -619,13 +695,36 @@ def _build_stable_overlap_masks(
     return reference_mask, target_mask_transformed
 
 
-def _register_icp(reference, target, max_iterations=100, refine=True, stable_region=False):
+def _register_icp(
+    reference,
+    target,
+    max_iterations=100,
+    refine=True,
+    stable_region=False,
+    *,
+    reference_dx=1.0,
+    reference_dy=1.0,
+    target_dx=1.0,
+    target_dy=1.0,
+):
     """Register using ICP with iterative 2D rigid fitting."""
     ref_valid = ~np.isnan(reference)
     tgt_valid = ~np.isnan(target)
 
-    ref_points = np.column_stack(np.where(ref_valid)).astype(float)
-    tgt_points = np.column_stack(np.where(tgt_valid)).astype(float)
+    ref_rows, ref_cols = np.where(ref_valid)
+    tgt_rows, tgt_cols = np.where(tgt_valid)
+    ref_points = np.column_stack(
+        (
+            ref_rows.astype(float) * float(reference_dy),
+            ref_cols.astype(float) * float(reference_dx),
+        )
+    )
+    tgt_points = np.column_stack(
+        (
+            tgt_rows.astype(float) * float(target_dy),
+            tgt_cols.astype(float) * float(target_dx),
+        )
+    )
     if len(ref_points) < 10 or len(tgt_points) < 10:
         logger.warning("Not enough valid points for ICP registration")
         return {
@@ -733,46 +832,65 @@ def _register_icp(reference, target, max_iterations=100, refine=True, stable_reg
         previous_rmse = correspondence_rmse
 
     rotation_deg = float(np.degrees(np.arctan2(rotation_total[1, 0], rotation_total[0, 0])))
-    center = np.array([target.shape[0] / 2.0, target.shape[1] / 2.0], dtype=float)
+    center = np.array(
+        [
+            (target.shape[0] / 2.0) * float(target_dy),
+            (target.shape[1] / 2.0) * float(target_dx),
+        ],
+        dtype=float,
+    )
     translation_apply = translation_total - center + center @ rotation_total.T
     translation = (float(translation_apply[0]), float(translation_apply[1]))
 
+    same_spacing = (
+        np.isclose(float(reference_dx), float(target_dx))
+        and np.isclose(float(reference_dy), float(target_dy))
+    )
+
     # Always do a small, cheap refinement on downsampled grids. This keeps the
     # fast ICP variant useful instead of stopping at the raw point-cloud fit.
-    coarse_reference = _downsample_grid_for_registration(reference, max_dim=140)
-    coarse_target = _downsample_grid_for_registration(target, max_dim=140)
-    coarse_stride_y = max(1.0, reference.shape[0] / max(1, coarse_reference.shape[0]))
-    coarse_stride_x = max(1.0, reference.shape[1] / max(1, coarse_reference.shape[1]))
-    coarse_translation = (
-        translation[0] / coarse_stride_y,
-        translation[1] / coarse_stride_x,
-    )
-    coarse_translation, coarse_rotation = _optimize_registration_on_grid(
-        coarse_reference,
-        coarse_target,
-        coarse_translation,
-        rotation_deg,
-        max_iterations=max(8, min(18, max_iterations // 2)),
-    )
-    translation = (
-        float(coarse_translation[0] * coarse_stride_y),
-        float(coarse_translation[1] * coarse_stride_x),
-    )
-    rotation_deg = float(coarse_rotation)
+    rmse = correspondence_rmse
+    overlap_points = inliers
+    if same_spacing:
+        coarse_reference = _downsample_grid_for_registration(reference, max_dim=140)
+        coarse_target = _downsample_grid_for_registration(target, max_dim=140)
+        coarse_stride_y = max(1.0, reference.shape[0] / max(1, coarse_reference.shape[0]))
+        coarse_stride_x = max(1.0, reference.shape[1] / max(1, coarse_reference.shape[1]))
+        coarse_translation = translation
+        coarse_translation, coarse_rotation = _optimize_registration_on_grid(
+            coarse_reference,
+            coarse_target,
+            coarse_translation,
+            rotation_deg,
+            max_iterations=max(8, min(18, max_iterations // 2)),
+            dx=float(reference_dx) * coarse_stride_x,
+            dy=float(reference_dy) * coarse_stride_y,
+        )
+        translation = (float(coarse_translation[0]), float(coarse_translation[1]))
+        rotation_deg = float(coarse_rotation)
 
-    if refine:
-        translation, rotation_deg = _optimize_registration_on_grid(
+        if refine:
+            translation, rotation_deg = _optimize_registration_on_grid(
+                reference,
+                target,
+                translation,
+                rotation_deg,
+                max_iterations=max(20, max_iterations),
+                dx=float(reference_dx),
+                dy=float(reference_dy),
+            )
+
+        grid_rmse, overlap_points = _registration_rmse_for_grid(
             reference,
             target,
             translation,
             rotation_deg,
-            max_iterations=max(20, max_iterations),
+            dx=float(reference_dx),
+            dy=float(reference_dy),
         )
-
-    grid_rmse, overlap_points = _registration_rmse_for_grid(reference, target, translation, rotation_deg)
-    rmse = grid_rmse if overlap_points > 0 else correspondence_rmse
-    if overlap_points > 0:
-        inliers = overlap_points
+        rmse = grid_rmse if overlap_points > 0 else correspondence_rmse
+        if overlap_points > 0:
+            inliers = overlap_points
 
     if stable_region and np.isfinite(rmse):
         height, width = target.shape
@@ -782,8 +900,8 @@ def _register_icp(reference, target, max_iterations=100, refine=True, stable_reg
             target,
             xi,
             yi,
-            1.0,
-            1.0,
+            float(target_dx),
+            float(target_dy),
             translation,
             rotation=rotation_deg,
         )
@@ -797,6 +915,10 @@ def _register_icp(reference, target, max_iterations=100, refine=True, stable_reg
                 max_iterations=max(20, max_iterations // 2),
                 refine=refine,
                 stable_region=False,
+                reference_dx=reference_dx,
+                reference_dy=reference_dy,
+                target_dx=target_dx,
+                target_dy=target_dy,
             )
             translation, rotation_deg = _compose_registration_parameters(
                 translation,
@@ -804,12 +926,16 @@ def _register_icp(reference, target, max_iterations=100, refine=True, stable_reg
                 stable_params['translation'],
                 stable_params['rotation'],
                 target.shape,
+                dx=float(target_dx),
+                dy=float(target_dy),
             )
             grid_rmse, overlap_points = _registration_rmse_for_grid(
                 reference,
                 target,
                 translation,
                 rotation_deg,
+                dx=float(reference_dx),
+                dy=float(reference_dy),
             )
             rmse = grid_rmse if overlap_points > 0 else stable_params['rmse']
             inliers = overlap_points if overlap_points > 0 else stable_params['inliers']
@@ -838,60 +964,54 @@ def apply_registration(grid, xi, yi, dx, dy, translation, rotation=0.0):
         yi (np.ndarray): 1D array of y-coordinates.
         dx (float): Pixel size in x-direction.
         dy (float): Pixel size in y-direction.
-        translation (tuple): (dy, dx) translation in pixels.
+        translation (tuple): (dy, dx) translation in physical units.
         rotation (float, optional): Rotation angle in degrees. Defaults to 0.0.
             
     Returns:
         tuple: (transformed_grid, xi, yi, dx, dy)
     """
     
-    # Apply rotation first if needed
-    if abs(rotation) > 0.01:
-        grid, xi, yi, dx, dy = rotate_grid(grid, rotation, xi, yi, dx, dy)
-    
-    # Apply translation using proper shift (not circular roll).
-    # Use separate names to avoid shadowing the pixel-size parameters dx/dy.
     shift_dy, shift_dx = translation
-    
-    if abs(shift_dy) > 0.5 or abs(shift_dx) > 0.5:
-        # Strategy: Can't use mode='nearest' with NaN - it propagates NaN everywhere!
-        # Instead:
-        # 1. Save NaN mask
-        # 2. Fill NaN with mean value (for interpolation)
-        # 3. Shift with mode='constant', cval=mean
-        # 4. Restore NaN mask and add edge mask
-        
-        nan_mask_before = np.isnan(grid)
-        
-        # Fill NaN with mean of valid data for interpolation
-        valid_data = grid[~nan_mask_before]
-        if valid_data.size > 0:
-            fill_value = np.mean(valid_data)
-        else:
-            fill_value = 0.0
-            logger.warning(f"apply_registration: grid is all NaN before shift!")
-        
-        grid_filled = np.where(nan_mask_before, fill_value, grid)
-        
-        # Shift with constant boundary (using fill value)
-        grid = ndimage_shift(grid_filled, (shift_dy, shift_dx), order=3, mode='constant', cval=fill_value)
-        
-        # Restore original NaN mask (shifted)
-        # Use order=1 (linear) instead of order=0 to properly interpolate mask values
-        nan_mask_shifted = ndimage_shift(nan_mask_before.astype(float), (shift_dy, shift_dx), order=1, mode='constant', cval=1.0) > 0.5
-        grid[nan_mask_shifted] = np.nan
-        
-        # Mark regions that were shifted from outside the original bounds as NaN
-        valid_mask = np.ones_like(grid, dtype=bool)
-        if shift_dy > 0:
-            valid_mask[:int(np.ceil(shift_dy)), :] = False
-        elif shift_dy < 0:
-            valid_mask[int(np.floor(shift_dy)):, :] = False
-        if shift_dx > 0:
-            valid_mask[:, :int(np.ceil(shift_dx))] = False
-        elif shift_dx < 0:
-            valid_mask[:, int(np.floor(shift_dx)):] = False
-        
-        grid[~valid_mask] = np.nan
-    
-    return grid, xi, yi, dx, dy
+    if abs(rotation) <= 0.01 and abs(shift_dy) < (0.5 * dy) and abs(shift_dx) < (0.5 * dx):
+        return grid, xi, yi, dx, dy
+
+    theta = np.radians(rotation)
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+
+    yi0 = float(yi[0]) if len(yi) else 0.0
+    xi0 = float(xi[0]) if len(xi) else 0.0
+    center_y = 0.5 * (float(yi[0]) + float(yi[-1])) if len(yi) else 0.0
+    center_x = 0.5 * (float(xi[0]) + float(xi[-1])) if len(xi) else 0.0
+
+    row_indices, col_indices = np.indices(grid.shape, dtype=np.float64)
+    y_out = yi0 + row_indices * float(dy)
+    x_out = xi0 + col_indices * float(dx)
+    rel_y = y_out - center_y - float(shift_dy)
+    rel_x = x_out - center_x - float(shift_dx)
+    y_in = center_y + (cos_theta * rel_y + sin_theta * rel_x)
+    x_in = center_x + (-sin_theta * rel_y + cos_theta * rel_x)
+    row_in = (y_in - yi0) / float(dy)
+    col_in = (x_in - xi0) / float(dx)
+
+    valid_data = grid[np.isfinite(grid)]
+    fill_value = float(np.mean(valid_data)) if valid_data.size > 0 else 0.0
+    if valid_data.size == 0:
+        logger.warning("apply_registration: grid is all NaN before transform!")
+    grid_filled = np.where(np.isfinite(grid), grid, fill_value)
+    transformed = map_coordinates(
+        grid_filled,
+        [row_in, col_in],
+        order=3,
+        mode='constant',
+        cval=fill_value,
+    )
+    valid_weights = map_coordinates(
+        np.isfinite(grid).astype(np.float32),
+        [row_in, col_in],
+        order=1,
+        mode='constant',
+        cval=0.0,
+    )
+    transformed[valid_weights < 0.999] = np.nan
+    return transformed, xi, yi, dx, dy

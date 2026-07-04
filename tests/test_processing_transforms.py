@@ -550,6 +550,27 @@ class TestRegisterCorrelation:
 
         assert np.isfinite(params['rmse'])
 
+    def test_translation_is_reported_in_physical_units_for_anisotropic_spacing(self):
+        """Correlation registration should return physical translation when dx != dy."""
+        ny, nx = 72, 84
+        dx = 4.0
+        dy = 1.5
+        y_idx, x_idx = np.mgrid[0:ny, 0:nx]
+        grid = 10.0 + 0.3 * x_idx + 0.7 * y_idx + 2.0 * np.sin(x_idx * 0.2)
+        shifted = np.roll(np.roll(grid, 4, axis=0), -3, axis=1)
+
+        params = _register_correlation(
+            grid,
+            shifted,
+            reference_dx=dx,
+            reference_dy=dy,
+            target_dx=dx,
+            target_dy=dy,
+        )
+
+        assert abs(params['translation'][0] + 4 * dy) < 2 * dy
+        assert abs(params['translation'][1] - (-3 * dx)) < 2 * dx
+
 
 class TestRegisterICP:
     """Tests for _register_icp function."""
@@ -706,6 +727,28 @@ class TestApplyRegistration:
         # Some edge regions should be NaN
         assert np.isnan(transformed[0:5, :]).all()  # Top shifted out
         assert np.isnan(transformed[:, 0:3]).all()  # Left shifted out
+
+    def test_apply_translation_uses_physical_units(self):
+        """Physical translations should be converted using dx and dy."""
+        ny, nx = 40, 50
+        dx = 4.0
+        dy = 1.5
+        xi = np.arange(nx, dtype=float) * dx
+        yi = np.arange(ny, dtype=float) * dy
+        grid = np.arange(ny * nx, dtype=float).reshape(ny, nx)
+
+        transformed, _, _, _, _ = apply_registration(
+            grid,
+            xi,
+            yi,
+            dx,
+            dy,
+            translation=(3 * dy, 2 * dx),
+            rotation=0.0,
+        )
+
+        assert np.isnan(transformed[:3, :]).all()
+        assert np.isnan(transformed[:, :2]).all()
     
     def test_apply_negative_translation(self, simple_grid):
         """Test applying negative translation."""
