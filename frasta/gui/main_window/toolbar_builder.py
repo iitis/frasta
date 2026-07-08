@@ -26,6 +26,8 @@ class ToolbarBuilder:
     def create_toolbar(self):
         """Create toolbar with commonly used actions."""
         toolbar = self.main_window.addToolBar("Tools")
+        toolbar.setObjectName("main_toolbar")
+        
         actions = self.menu_builder.actions
         
         # File operations
